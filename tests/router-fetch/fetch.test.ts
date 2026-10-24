@@ -60,7 +60,7 @@ describe('fetchLoaders', () => {
       // retry: 0 keeps this deterministic and fast - the default client
       // (createHttpClient()'s own retry: 2 for GET) behaves the same, just
       // after its own backoff delays, which real consumers get for free.
-      loaders: fetchLoaders({ http: createHttpClient({ retry: 0 }) }),
+      loaders: fetchLoaders({ http: createHttpClient({ retry: false }) }),
       onError: () => {},
     });
     await router.isReady();
@@ -122,7 +122,7 @@ describe('fetchLoaders - cache', () => {
       history: createMemoryHistory(),
       routes: CACHE_ROWS,
       components: COMPONENTS,
-      loaders: fetchLoaders({ cache, http: createHttpClient({ retry: 0 }) }),
+      loaders: fetchLoaders({ cache, http: createHttpClient({ retry: false }) }),
     });
   }
 
@@ -218,7 +218,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
       // ttl 0 -> the entry is past-fresh immediately, staleTtl keeps it servable.
       loaders: fetchLoaders({
         cache: { ttl: 0, staleTtl: 60_000 },
-        http: createHttpClient({ retry: 0 }),
+        http: createHttpClient({ retry: false }),
       }),
     });
     await router.isReady();
@@ -255,7 +255,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
       components: COMPONENTS,
       loaders: fetchLoaders({
         cache: { ttl: 0, staleTtl: 60_000 },
-        http: createHttpClient({ retry: 0 }),
+        http: createHttpClient({ retry: false }),
       }),
     });
     await router.isReady();

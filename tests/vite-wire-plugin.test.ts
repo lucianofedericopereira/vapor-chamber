@@ -68,10 +68,11 @@ const MAIN = `import { useCommand, getCommandBus } from 'vapor-chamber';
 
 const bus = getCommandBus();
 bus.register('ping', () => 'pong');
-const { dispatch, loading } = useCommand();
+const { dispatch, pending } = useCommand();
+const pinging = pending('ping', null);
 document.getElementById('go').addEventListener('click', () => {
   dispatch('ping', null);
-  document.title = String(loading.value);
+  document.title = String(pinging.value);
 });
 `;
 

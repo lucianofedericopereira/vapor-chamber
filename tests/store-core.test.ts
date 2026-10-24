@@ -2,14 +2,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { effect as alienEffect, signal as alienSignal } from 'alien-signals';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureAlienSignals } from '../src/alien-signals';
 import { createCommandBus } from '../src/command-bus';
-import { createFastLane } from '../src/fast-lane';
-import { history } from '../src/plugins-core';
-import { createChannel } from '../src/plugins-io';
-import { configureSignal } from '../src/signal';
+import { configureSignal, type CreateSignal } from '../src/signal';
 import { defineChamberStore } from '../src/store/core';
+import { shareTabs } from '../src/store-share';
+import { history } from '../src/plugins-core';
+import { listen, perTab, quiet } from './tabs-quiet';
 
 type Cart = { items: string[]; count: number };
 const reducers = {
@@ -18,13 +18,13 @@ const reducers = {
 const state = (): Cart => ({ items: [], count: 0 });
 
 // Back to the plain `{ value }` cell after a test that configured alien-signals.
-afterEach(() => configureSignal((v) => ({ value: v })));
+afterEach(() => { configureSignal(((v: unknown) => ({ value: v })) as CreateSignal); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
 
 describe('the Vue-less store', () => {
   it('actions are commands; $reset, undo and $onField work as in the Vue store', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const heard: string[] = [];
     bus.on('*', (cmd) => heard.push(cmd.action));
     const useCart = defineChamberStore('cart', { state, reducers, undo: true });
@@ -53,33 +53,42 @@ describe('the Vue-less store', () => {
   });
 
   it('shares across tabs', async () => {
+    vi.stubGlobal('window', {}); // a page: shareTabs opens only where there are tabs
     const tab = () => {
-      const lane = createFastLane();
-      const ch = createChannel({ channel: 'core-share', lane, events: ['cart$state'] });
-      const cart = defineChamberStore('cart', { state, reducers, share: lane })(createCommandBus());
-      return { cart, close: () => { cart.$dispose(); ch.dispose(); } };
+      const cart = defineChamberStore('cart', { state, reducers, share: shareTabs('core-share') })(createCommandBus());
+      return { cart, close: () => cart.$dispose() };
     };
+    const wire = listen('core-share');
     const a = tab();
     const b = tab();
     a.cart.add('milk');
-    await new Promise((r) => setTimeout(r, 20));
+    await quiet(wire.heard);
+    wire.close();
     expect(b.cart.state.value).toEqual({ items: ['milk'], count: 1 });
     a.close();
     b.close();
   });
 
-  it('field events and sharing watch the same state together', async () => {
-    const lane = createFastLane();
-    const sent: unknown[] = [];
-    lane.on('cart$state', (m: { ask?: true }) => { if (!m.ask) sent.push(m); }); // the writes, not the open's ask
-    const cart = defineChamberStore('cart', { state, reducers, share: lane })(createCommandBus());
+  it('field events fire, and with another tab open each write goes out as its command', async () => {
+    vi.stubGlobal('window', {}); // a page: shareTabs opens only where there are tabs
+    const { heard, close } = listen('core-fields');
+    const wire = { close };
+    const peer = defineChamberStore('cart', { state, reducers, share: shareTabs('core-fields') })(createCommandBus());
+    const cart = defineChamberStore('cart', { state, reducers, share: shareTabs('core-fields') })(createCommandBus());
+    await quiet(heard);
     const counts: number[] = [];
     cart.$onField('count', (n) => counts.push(n));
     cart.add('milk');
     cart.add('milk'); // same items twice: count still moves
+    await quiet(heard);
     expect(counts).toEqual([1, 2]);
-    expect(sent).toHaveLength(2);
+    // Each write crosses as its command: from the tab that wrote it, and again
+    // from the tab holding the lock, which runs every tab's command and posts it on.
+    expect(perTab(heard.filter((m) => m.kind === 'cmd'))).toEqual([2, 2]);
+    expect(peer.state.value.count).toBe(2);
+    wire.close();
     cart.$dispose();
+    peer.$dispose();
   });
 
   it('with alien-signals configured, an effect reading the state reruns on a write', () => {

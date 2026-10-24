@@ -48,14 +48,35 @@ describe('http cache - request headers are part of the key', () => {
     expect(fetches()).toBe(1);
   });
 
-  it('invalidation by URL drops every header variant', async () => {
+  it('keys the same headers alike in any order or case (one request on the wire)', async () => {
+    const fetches = stubEcho();
+    const http = createHttpClient({ baseURL: 'https://api.test' });
+    await http.get('/me', { cache: true, headers: { Authorization: 'Bearer alice', 'Accept-Language': 'en' } });
+    await http.get('/me', { cache: true, headers: { 'accept-language': 'en', authorization: 'Bearer alice' } });
+    expect(fetches()).toBe(1);
+    // Control: another value is another request.
+    await http.get('/me', { cache: true, headers: { authorization: 'Bearer alice', 'accept-language': 'it' } });
+    expect(fetches()).toBe(2);
+  });
+
+  it('shares one read in flight for the same headers in another order or case', async () => {
+    const fetches = stubEcho();
+    const http = createHttpClient({ baseURL: 'https://api.test' });
+    await Promise.all([
+      http.get('/me', { headers: { Authorization: 'Bearer alice', 'Accept-Language': 'en' } }),
+      http.get('/me', { headers: { 'accept-language': 'en', AUTHORIZATION: 'Bearer alice' } }),
+    ]);
+    expect(fetches()).toBe(1);
+  });
+
+  it('a write to the URL drops every header variant', async () => {
     const fetches = stubEcho();
     const http = createHttpClient({ baseURL: 'https://api.test' });
     await http.get('/me', { cache: true, headers: { Authorization: 'Bearer alice' } });
     await http.get('/me', { cache: true, headers: { Authorization: 'Bearer bob' } });
-    http.invalidateCache(/\/me$/);
+    await http.post('/me', {});
     await http.get('/me', { cache: true, headers: { Authorization: 'Bearer alice' } });
     await http.get('/me', { cache: true, headers: { Authorization: 'Bearer bob' } });
-    expect(fetches()).toBe(4);
+    expect(fetches()).toBe(5);
   });
 });

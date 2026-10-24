@@ -22,7 +22,9 @@
     .panel h2 { margin-top: 0; font-size: 1rem; }
     .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
     button { padding: .5rem 1rem; cursor: pointer; border: 1px solid #888; border-radius: 6px; background: #fff; }
+    /* The classes bindCommands manages around every press. */
     button[aria-disabled="true"] { opacity: .5; cursor: wait; }
+    button.vc-error { border-color: #c00; color: #c00; }
     code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
     .muted { color: #6b6b6b; font-size: .85rem; }
     /* Reserve the line so a failure does not shove the panel down under the
@@ -38,26 +40,27 @@
 <h1>Blade + CDN</h1>
 <p class="muted">
   Zero build: no npm, no Vite, one <code>&lt;script src&gt;</code>. The bundle
-  dispatches to <code>POST /api/vc</code>; the cart lives on the server.
+  dispatches to <code>POST /api/vc</code>. The cart lives on the server.
 </p>
 
 <p class="note">
   <strong>The cart count comes from the backend, not from this page.</strong>
   <code>Add to cart</code> and <code>Clear</code> both round-trip, and the
-  listener renders whatever the server says the cart now is. The number is
-  also written to <code>localStorage</code>, so a reload shows the last known
-  count before the first dispatch answers.
+  count shows whatever the server says the cart now is. The number is also
+  saved in <code>localStorage</code>, so a reload shows the last known count
+  before the first dispatch answers.
 </p>
 
 <!-- Blade template: resources/views/cart.blade.php -->
 <div id="app" class="panel">
   <h2>Cart</h2>
   <div class="row">
-    <button type="button" id="add-btn">Add to cart</button>
-    <button type="button" id="clear-btn">Clear</button>
-    <span id="cart-count">0 items</span>
+    <button type="button" data-vc-command="cartAdd" data-vc-target='{"id":1}' data-vc-payload='{"qty":1}'>Add to cart</button>
+    <button type="button" data-vc-command="cartClear">Clear</button>
+    <button type="button" data-vc-command="cartRemove">Remove (the server has no such command)</button>
+    <span id="cart-count"><span data-vc-text="cart.count">0</span> items</span>
   </div>
-  <p id="error-msg" role="status"></p>
+  <p id="error-msg"></p>
 </div>
 
 <!-- No npm, no build - one script tag. Three ways to serve that tag:
@@ -76,72 +79,38 @@
        open http://localhost:3000/examples/pattern-1-blade-cdn.html -->
 <script src="/dist/vapor-chamber.iife.min.js"></script>
 <script>
-  const { bus, dispatch } = VaporChamber.createApp({
-    transport: VaporChamber.http({
+  const { bus } = VaporChamber.createApp({
+    transport: VaporChamber.httpTransport({
       endpoint: '/api/vc',
       csrf: true,             // the meta tag, else the XSRF-TOKEN cookie, else a hidden input
     }),
   })
 
-  // Persist cart count across page reloads. persist() is used here only for
-  // its load()/save() storage helpers - we save explicitly below. The HTTP
-  // transport answers matching commands itself: no handler runs, and no plugin
-  // installed after it sees them. A plugin in createApp's `plugins` is
-  // installed before it and does see each dispatch.
-  const cartPersist = VaporChamber.persist({
-    key: 'vc:cart',
-    getState: () => ({ count: parseInt(document.getElementById('cart-count').textContent) }),
+  // The cart is a store behind the transport: the transport is the work for
+  // its actions, which have no local change (`null`), and whatever the server
+  // answers is the store's state (`answer`). `persist` saves that state and
+  // reads it back on the next page load. The saved copy is a cache of the
+  // server's answer, never a second source of truth.
+  VaporChamber.defineChamberStore('cart', {
+    state: () => ({ count: 0 }),
+    reducers: { add: null, clear: null },
+    answer: (_state, value) => ({ count: value.count }),
+    persist: VaporChamber.saveTo({ key: 'vc:cart' }),
+  })(bus)
+
+  // The buttons and the count are markup. bindCommands dispatches each
+  // data-vc-command, marks the button aria-disabled while it is in flight
+  // (never disabled, which would send keyboard focus to <body>), ignores a
+  // press meanwhile, and announces a failure. bindDisplay writes the count.
+  VaporChamber.bindCommands(document.body, { bus })
+  VaporChamber.bindDisplay(document.body, { bus })
+
+  // A failure also shows in the line below the buttons. It always occupies its
+  // row, so an error appearing or clearing never shoves the panel under the
+  // cursor. The announcing is bindCommands', so this line is not a live region.
+  bus.on('cart*', (_cmd, result) => {
+    document.getElementById('error-msg').textContent = result.ok ? '' : result.error.message
   })
-
-  // Restore on page load
-  const saved = cartPersist.load()
-  if (saved) {
-    document.getElementById('cart-count').textContent = saved.count + ' items'
-  }
-
-  // Local side effects go in a LISTENER, not a handler: the HTTP transport
-  // forwards every matching command to the server (a registered handler would
-  // never run). on() listeners fire after the dispatch settles, with the
-  // server's state in result.value.
-  // One listener for both commands: whatever the server says the cart is,
-  // that is what the page shows - and only then is it persisted. The local
-  // copy is a cache of the server's answer, never a second source of truth.
-  bus.on('cartAdd', (cmd, result) => render(result))
-  bus.on('cartClear', (cmd, result) => render(result))
-
-  function render(result) {
-    if (!result.ok) return
-    document.getElementById('cart-count').textContent = result.value.count + ' items'
-    cartPersist.save()
-  }
-
-  // Wire up buttons. Note both go through the SAME dispatch path - a button
-  // is just a call site; the transport decides where the command runs.
-  // `aria-disabled`, not `disabled`: disabling the focused button sends a
-  // keyboard user's focus to <body>. A press while one is in flight is ignored.
-  const send = async (btn, action, target, payload) => {
-    if (btn.getAttribute('aria-disabled') === 'true') return
-    btn.setAttribute('aria-disabled', 'true')
-    const result = await dispatch(action, target, payload)
-    btn.removeAttribute('aria-disabled')
-    // The line always occupies its row (see #error-msg in the stylesheet), so
-    // an error appearing or clearing never shoves the panel under the cursor.
-    // Toggling `display` would undo that. It is a live region (role="status"),
-    // so a screen reader hears the failure. Same shape as sprinkled-blade's
-    // #status.
-    const err = document.getElementById('error-msg')
-    err.textContent = result.ok ? '' : (result.error?.message ?? 'Unknown error')
-  }
-
-  const addBtn = document.getElementById('add-btn')
-  addBtn.addEventListener('click', () => send(addBtn, 'cartAdd', { id: 1 }, { qty: 1 }))
-
-  // Clear resets the SERVER cart; the listener above then overwrites the
-  // persisted copy with the server's zero. Without this, a restored count
-  // from localStorage has no way back down - the page would keep showing a
-  // number the backend no longer agrees with.
-  const clearBtn = document.getElementById('clear-btn')
-  clearBtn.addEventListener('click', () => send(clearBtn, 'cartClear', {}, null))
 </script>
 
 <!--

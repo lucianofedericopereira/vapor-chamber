@@ -1,85 +1,50 @@
 /**
- * Feature example: useCommandGroup - namespace isolation
- * =======================================================
- * Prevents action name collisions across teams and feature modules.
- * Each group operates on the same shared bus but with a namespace prefix.
+ * Feature example: useCommandGroup - teams share one bus without name collisions
+ * ===============================================================================
+ * A group puts its namespace in front of every action it registers, dispatches
+ * or listens to. The cart team and the orders team each write `remove`; the bus
+ * holds `cartRemove` and `ordersRemove`. A group hears only its own commands,
+ * and `dispose()` takes all of them off the bus.
  */
 
 // One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and it
 // wires Vue, so the composables' cleanup and reactivity hold in a production
 // build (the root would not).
-import { createCommandBus, setCommandBus, useCommandGroup } from 'vapor-chamber/vue'
+import { createCommandBus, setCommandBus, useCommandGroup, type BusError } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)
 
-// ─── Cart feature ─────────────────────────────────────────────────────────────
-
-// Outside a component, for brevity: in an app this runs in setup(). Here nothing
-// disposes it automatically (the DEV heads-up says so); call dispose() when done.
+// Outside a component, for brevity: in an app each group is made in setup()
+// and leaves with the component. Here nothing disposes it automatically (the
+// DEV heads-up says so), so the end of the file calls dispose().
 const cart = useCommandGroup('cart')
-
-// Register namespaced handlers
-cart.register('add', (cmd) => {
-  console.log('cartAdd', cmd.target)
-  // returns updated state
-  return { ...cmd.target }
-})
-
-cart.register('remove', (cmd) => {
-  console.log('cartRemove', cmd.target)
-})
-
-cart.register('clear', () => {
-  console.log('cart cleared')
-})
-
-// ─── Orders feature ───────────────────────────────────────────────────────────
-
 const orders = useCommandGroup('orders')
 
-orders.register('cancel', (cmd) => {
-  console.log('order cancelled', cmd.target.id)
-})
+cart.register('add', (cmd) => `added ${cmd.target.name} x${cmd.payload?.qty ?? 1}`)
+cart.register('remove', (cmd) => `cart removed ${cmd.target.name}`)
+orders.register('cancel', (cmd) => `order ${cmd.target.id} cancelled`)
+orders.register('remove', (cmd) => `order ${cmd.target.id} deleted`)
 
-orders.register('refund', (cmd) => {
-  console.log('order refunded', cmd.target.id, 'amount:', cmd.payload?.amount)
-})
+// `on('*')` listens to `cart*`: it hears the cart's commands and no other.
+// Subscribed first, since a listener hears what is dispatched after it.
+cart.on('*', (cmd, result) => console.log('[audit]', cmd.action, result.ok ? 'ok' : 'failed'))
 
-// ─── Telemetry feature ────────────────────────────────────────────────────────
+const code = (r: { ok: boolean; error?: unknown }) => (r.ok ? 'ok' : (r.error as BusError).code)
 
-const telemetry = useCommandGroup('telemetry')
+console.log('--- No prefix inside the group ---')
+console.log(cart.dispatch('add', { name: 'T-Shirt' }, { qty: 2 }).value) // cartAdd
+console.log(orders.dispatch('cancel', { id: 42 }).value)                 // ordersCancel
 
-telemetry.register('event', (cmd) => {
-  // forward to whatever metrics / telemetry sink you use
-  console.log('[telemetry]', cmd.target.name, cmd.target.params)
-})
+console.log('--- The same short name in two groups ---')
+console.log(cart.dispatch('remove', { name: 'T-Shirt' }).value)  // cartRemove
+console.log(orders.dispatch('remove', { id: 42 }).value)         // ordersRemove
 
-// ─── Subscribe to a namespace with on() ───────────────────────────────────────
+console.log('--- Isolated: orders has no add ---')
+console.log('ordersAdd ->', code(orders.dispatch('add', { id: 99 })))
 
-cart.on('*', (cmd, result) => {
-  console.log('[audit] cart command:', cmd.action, result.ok ? '✓' : '✗')
-})
-// Listens to 'cart*' - only cart commands. Subscribed before the dispatches
-// below: a listener hears what is dispatched after it subscribes.
-
-// ─── Dispatch - no prefix needed inside the group ─────────────────────────────
-
-cart.dispatch('add', { id: 1, name: 'T-Shirt' }, { qty: 2 })
-// -> dispatches 'cartAdd' on the shared bus
-
-orders.dispatch('cancel', { id: 42 })
-// -> dispatches 'ordersCancel'
-
-telemetry.dispatch('event', { name: 'page_view', params: { page: '/shop' } })
-// -> dispatches 'telemetryEvent'
-
-// Cross-namespace dispatch does NOT trigger handlers (isolated):
-orders.dispatch('add', { id: 99 })
-// -> dispatches 'ordersAdd' - no handler, so it fails as core:missing:handler
-
-// ─── Cleanup on component unmount ─────────────────────────────────────────────
-// useCommandGroup registers cleanup via onScopeDispose automatically.
-// Explicit dispose is available if needed:
-// cart.dispose()
-// orders.dispose()
+console.log('--- dispose() takes the group off the bus ---')
+cart.dispose()
+console.log('cartAdd ->', code(cart.dispatch('add', { name: 'T-Shirt' })))
+console.log('ordersCancel ->', code(orders.dispatch('cancel', { id: 43 })))
+orders.dispose()

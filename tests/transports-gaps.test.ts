@@ -2,7 +2,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Command, CommandResult } from '../src/index';
 import { createAsyncCommandBus } from '../src/index';
-import { createHttpBridge, createBatchingHttpBridge, createWsBridge } from '../src/transports';
+import type { Transport } from '../src/command-bus';
+import { httpTransport, wsTransport } from '../src/transports';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -10,39 +11,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Invoke a transport plugin without a bus (bus.dispatch pre-empts aborts). */
-function callPlugin(plugin: any, cmd: Partial<Command>): Promise<CommandResult> {
+/** Call a transport's send without a bus (bus.dispatch pre-empts aborts). */
+function callSend(transport: Transport, cmd: Partial<Command>): Promise<CommandResult> {
   const full = { action: 'x', target: {}, payload: undefined, meta: {}, ...cmd } as Command;
-  return Promise.resolve(plugin(full, () => ({ ok: true, value: 'next' }) as CommandResult));
+  return Promise.resolve(transport.send(full, async () => ({ ok: true, value: 'local' }) as CommandResult));
 }
-
-// ---------------------------------------------------------------------------
-// createHttpBridge - error re-wrap detail
-// ---------------------------------------------------------------------------
-
-
 
 // ---------------------------------------------------------------------------
 // csrf forwarding + signal merging ('inertia' removed, log s35.124)
 // ---------------------------------------------------------------------------
 
 describe('csrf forwarding and signal merging', () => {
-  it('passes csrf through to the client on both bridges', async () => {
-    for (const [make, data] of [[createHttpBridge, { state: 1 }], [createBatchingHttpBridge, { results: [] }]] as const) {
+  it('passes csrf through to the client, with and without batch', async () => {
+    for (const [batch, data] of [[undefined, { state: 1 }], [{}, { results: [] }]] as const) {
       const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data }) } as any;
-      const bus = createAsyncCommandBus();
-      bus.use((make as typeof createHttpBridge)({ endpoint: '/api/vc', csrf: true, httpClient }));
+      const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', csrf: true, httpClient, batch }) });
       await bus.dispatch('save', {});
       expect(httpClient.post.mock.calls[0]![2].csrf).toBe(true);
     }
   });
 
-  it('merges scopeController with the bridge signal', async () => {
+  it('merges scopeController with the transport signal', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true } }) } as any;
     const user = new AbortController();
     const scope = new AbortController();
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', signal: user.signal, scopeController: scope, httpClient }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', signal: user.signal, scopeController: scope, httpClient }) });
 
     await bus.dispatch('save', {});
     const sent: AbortSignal = httpClient.post.mock.calls[0]![2].signal;
@@ -52,12 +45,11 @@ describe('csrf forwarding and signal merging', () => {
     expect(sent.aborted).toBe(true);
   });
 
-  it('merges the per-dispatch signal with the bridge signal', async () => {
+  it('merges the per-dispatch signal with the transport signal', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true } }) } as any;
     const bridgeAc = new AbortController();
     const callAc = new AbortController();
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', signal: bridgeAc.signal, httpClient }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', signal: bridgeAc.signal, httpClient }) });
 
     await bus.dispatch('save', {}, undefined, { signal: callAc.signal });
     const sent: AbortSignal = httpClient.post.mock.calls[0]![2].signal;
@@ -66,12 +58,11 @@ describe('csrf forwarding and signal merging', () => {
     expect(sent.aborted).toBe(true);
   });
 
-  it('merges scopeController with the bridge signal on the batching bridge', async () => {
+  it('merges scopeController with the transport signal, with batch', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { results: [] } }) } as any;
     const user = new AbortController();
     const scope = new AbortController();
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', signal: user.signal, scopeController: scope, httpClient }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', signal: user.signal, scopeController: scope, httpClient, batch: {} }) });
 
     await bus.dispatch('save', {});
     const sent: AbortSignal = httpClient.post.mock.calls[0]![2].signal;
@@ -82,10 +73,10 @@ describe('csrf forwarding and signal merging', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createBatchingHttpBridge
+// httpTransport with batch
 // ---------------------------------------------------------------------------
 
-describe('createBatchingHttpBridge', () => {
+describe('httpTransport with batch', () => {
   it('forwards a stamped idempotency key per batched command', async () => {
     const httpClient = {
       post: vi.fn().mockImplementation((_url, body: any) => Promise.resolve({
@@ -96,13 +87,9 @@ describe('createBatchingHttpBridge', () => {
       })),
     } as any;
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) });
     // Stamp meta ahead of the transport, the way `idempotent` does.
-    bus.use((cmd, next) => {
-      if (cmd.meta && cmd.action === 'pay') cmd.meta.idempotencyKey = 'key-1';
-      return next();
-    }, { priority: 100 });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+    bus.use({ started: (cmd) => { if (cmd.meta && cmd.action === 'pay') cmd.meta.idempotencyKey = 'key-1'; } });
 
     const [pay, look] = await Promise.all([bus.dispatch('pay', {}), bus.dispatch('look', {})]);
     expect(pay.ok).toBe(true);
@@ -110,14 +97,13 @@ describe('createBatchingHttpBridge', () => {
 
     const commands = httpClient.post.mock.calls[0]![1].commands;
     expect(commands).toHaveLength(2);
-    expect(commands.find((c: any) => c.command === 'pay').meta.idempotencyKey).toBe('key-1');
-    expect(commands.find((c: any) => c.command === 'look').meta).toBeUndefined();
+    expect(commands.find((c: any) => c.command === 'pay').headers).toEqual({ 'Idempotency-Key': '"key-1"' });
+    expect(commands.find((c: any) => c.command === 'look').headers).toBeUndefined();
   });
 
   it('fails every entry when the response carries no results array', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: {} }) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) });
 
     const result = await bus.dispatch('save', {});
     expect(result.ok).toBe(false);
@@ -130,33 +116,30 @@ describe('createBatchingHttpBridge', () => {
     const ac = new AbortController();
     ac.abort();
 
-    const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient });
-    const result = await callPlugin(plugin, { action: 'save', signal: ac.signal });
+    const transport = httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} });
+    const result = await callSend(transport, { action: 'save', signal: ac.signal });
 
     expect(result).toFailWith('core:aborted:dispatch');
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 
-  it('declares its actions: the bus never runs it on another', async () => {
+  it('covers its pattern only: the bus never sends another action', async () => {
     const httpClient = { post: vi.fn() } as any;
-    const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'], httpClient });
-    expect(plugin.actions).toEqual(['cart*']);
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ transport: { 'cart*': httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) } });
     bus.register('unrelated', async () => 'local');
-    bus.use(plugin);
     expect((await bus.dispatch('unrelated', 0)).value).toBe('local');
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// createWsBridge
+// wsTransport
 // ---------------------------------------------------------------------------
 
-describe('createWsBridge guards', () => {
+describe('wsTransport guards', () => {
   it('connect() is a no-op when WebSocket is undefined', () => {
     vi.stubGlobal('WebSocket', undefined);
-    const ws = createWsBridge({ url: 'ws://localhost' });
+    const ws = wsTransport({ url: 'ws://localhost' });
     expect(() => ws.connect()).not.toThrow();
     expect(ws.isConnected()).toBe(false);
     expect(ws.connected.value).toBe(false);
@@ -168,8 +151,8 @@ describe('createWsBridge guards', () => {
     const ac = new AbortController();
     ac.abort();
 
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    const result = await callPlugin(ws, { action: 'save', signal: ac.signal });
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const result = await callSend(ws, { action: 'save', signal: ac.signal });
 
     expect(result).toFailWith('core:aborted:dispatch');
     expect(ctor).not.toHaveBeenCalled();

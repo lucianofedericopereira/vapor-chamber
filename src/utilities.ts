@@ -6,9 +6,12 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
-import { _withCausation, disposeAll, matchesPattern, _errResult } from './command-bus';
+import { _withCausation, disposeAll, _errResult } from './command-bus';
+import { _report } from './report';
+import { matchesPattern } from './pattern';
 import { isThenable } from './settled';
 import { countOption } from './bounds';
+import { _unrecorded } from './ledger';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +20,7 @@ import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from 
 
 export type ChamberHandlers = Record<string, Handler>;
 export type ChamberOptions = {
-  /** Per-action registration options (undo, throttle). */
+  /** Per-action registration options (undo, optimistic, exclusive). */
   options?: Record<string, RegisterOptions>;
 };
 
@@ -202,7 +205,7 @@ export type ReactionOptions = {
    *   bus, so an indirect cycle stops too.
    *
    * Opt in only alongside a `when` guard that can actually terminate it: each
-   * hop up to the bound still runs handlers, plugins and (with a bridge
+   * hop up to the bound still runs handlers, plugins and (with a transport
    * installed) HTTP requests.
    */
   allowSelfMatch?: boolean;
@@ -225,7 +228,8 @@ const hopsByBus = new WeakMap<BaseBus, Map<string, number>>();
 
 /**
  * createReaction - declarative cross-chamber dispatch rules.
- * Explicit edges between domain modules.
+ * Explicit edges between domain modules. Not run on an undo, a redo or a
+ * mirrored command (origin 'sync'): history replays the follow-up it recorded.
  *
  * @example
  * createReaction('cartAdd', 'inventoryCheck', {
@@ -248,8 +252,8 @@ export function createReaction(
     // natural composition, not a contrived one - and it re-triggers itself on
     // every dispatch until a bound stops it (see ReactionOptions.allowSelfMatch).
     if (selfMatching && !allowSelfMatch) {
-      console.error(
-        `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" matches its own target: ` +
+      _report('error', 'reaction:invalid:pattern',
+        `Reaction "${sourcePattern}" -> "${targetAction}" matches its own target: ` +
           'every dispatch would re-trigger the reaction, up to the dispatch depth bound. ' +
           'Narrow the pattern, or pass { allowSelfMatch: true } with a `when` guard that terminates it. ' +
           'Not installed.',
@@ -280,13 +284,15 @@ export function createReaction(
     const CHAIN_MAX = 256;
 
     return bus.on(sourcePattern, (cmd: Command, result: CommandResult) => {
-      if (when && !when(cmd, result)) return;
+      // Not on an undo, a redo or a mirror: history replays the follow-up it
+      // recorded (tests/reaction-undo-redo.test.ts).
+      if (_unrecorded(cmd.meta?.origin) || (when && !when(cmd, result))) return;
 
       const parent = cmd.meta?.causationId;
       const hops = (parent !== undefined ? (chainHops.get(parent) ?? 0) : 0) + 1;
       if (hops > maxHops) {
-        console.error(
-          `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" exceeded maxHops (${maxHops}) - ` +
+        _report('error', 'reaction:exceeded:hops',
+          `Reaction "${sourcePattern}" -> "${targetAction}" exceeded maxHops (${maxHops}) - ` +
             'refusing to continue. This is a reaction cycle; break it with a `when` guard or raise maxHops.',
         );
         return;
@@ -316,7 +322,7 @@ export function createReaction(
       try {
         _withCausation(id, () => bus.dispatch(targetAction, target, payload));
       } catch (e) {
-        console.error(`[vapor-chamber] Reaction ${sourcePattern} -> ${targetAction} error:`, e);
+        _report('error', 'reaction:failed:dispatch', `Reaction "${sourcePattern}" -> "${targetAction}" threw`, e, { action: targetAction });
       }
     });
   }

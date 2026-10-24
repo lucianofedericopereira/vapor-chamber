@@ -6,8 +6,8 @@
  * see `vapor-chamber-core.iife.js` and `vapor-chamber-elements.iife.js`.
  *
  * Includes: command bus, transports, the core and I/O plugins (logger,
- * validator, history, debounce, throttle, authGuard, optimistic, persist,
- * createChannel), Vapor custom elements,
+ * validator, history, authGuard, createChannel), pace, bindCommands, bindDisplay,
+ * the store (`defineChamberStore`, the core store, with its `persist`), Vapor custom elements,
  * Vapor sync + async (Suspense-aware) composables.
  *
  * Usage:
@@ -15,34 +15,26 @@
  *
  * <script>
  * const { bus } = VaporChamber.createApp({
- *   transport: VaporChamber.http({ endpoint: '/api/vc' })
+ *   transport: VaporChamber.httpTransport({ endpoint: '/api/vc' })
  * })
  * </script>
  */
 
-import {
-  createCommandBus,
-  createAsyncCommandBus,
-  type CommandBusOptions,
-  type AsyncCommandBusOptions,
-} from './command-bus';
+import { createCommandBus, createAsyncCommandBus, type BaseBus } from './command-bus';
 import {
   logger,
   validator,
   history,
-  debounce,
-  throttle,
   authGuard,
-  optimistic,
-  persist,
   createChannel,
 } from './plugins';
-import {
-  createHttpBridge,
-  createWsBridge,
-  createSseBridge,
-  type HttpBridgeOptions,
-} from './transports';
+import { pace } from './pace';
+import { bindCommands } from './command-binding';
+import { bindDisplay } from './page-bindings';
+import { defineChamberStore, saveTo, shareTabs } from './store/core';
+import { httpTransport, wsTransport, createSseBridge } from './transports';
+import { createApp, connect, type CreateAppOptions } from './iife-app';
+import { createBuffer } from './buffer';
 import {
   defineVaporCustomElement,
   defineVaporComponent,
@@ -53,135 +45,63 @@ import {
   getVaporInteropPlugin,
 } from './chamber-vapor';
 import { useSharedCommandState, useCommand, configureVue } from './chamber';
-import type { AsyncPlugin } from './command-bus';
-
-// ---------------------------------------------------------------------------
-// createApp - convenience entry point for CDN usage
-// ---------------------------------------------------------------------------
-
-export type CreateAppOptions = {
-  /**
-   * An async transport plugin (e.g. createHttpBridge) to install on the bus.
-   * It sends every command its `actions` match (all of them by default), a
-   * local handler or not. The rest fall through to the bus.
-   */
-  transport?: AsyncPlugin;
-  /**
-   * Plugins to install on the bus (sync or async).
-   */
-  plugins?: AsyncPlugin[];
-  /**
-   * Dead-letter mode. Default: 'error'
-   */
-  onMissing?: CommandBusOptions['onMissing'];
-  /** The bus's retry, on by default. `{ actionPolicies: { cartAdd: 'idempotent' } }` declares a policy, `false` turns it off. */
-  retry?: AsyncCommandBusOptions['retry'];
-};
-
-/**
- * createApp - creates a configured command bus, installs transport + plugins.
- *
- * @example
- * const { bus, dispatch } = VaporChamber.createApp({
- *   transport: VaporChamber.http({ endpoint: '/api/vc' })
- * })
- * dispatch('cartAdd', { id: 1 }, { quantity: 2 })
- */
-function createApp(options: CreateAppOptions = {}): {
-  bus: ReturnType<typeof createAsyncCommandBus>;
-  dispatch: ReturnType<typeof createAsyncCommandBus>['dispatch'];
-} {
-  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error', retry: options.retry });
-
-  if (options.plugins) {
-    for (const plugin of options.plugins) bus.use(plugin as AsyncPlugin);
-  }
-  if (options.transport) {
-    bus.use(options.transport);
-  }
-
-  return { bus, dispatch: bus.dispatch };
-}
+import { commandState } from './command-state';
+import { Accepted } from './accepted';
+import { defineWidget, emitDOMEvent } from './widget';
+import { DEV } from './dev';
+import { _report } from './report';
 
 // ---------------------------------------------------------------------------
 // mount - mount a command-bus-driven island to a DOM element
 // ---------------------------------------------------------------------------
 
-export type MountOptions = CreateAppOptions & {
-  /**
-   * Initial state object. Not reactive on its own - use with your own
-   * signal library or Vue's ref() for reactivity.
-   */
-  state?: Record<string, any>;
+/** A store definition, what `defineChamberStore(id, options)` returns: mount reads only `$dispose` of its store. */
+type StoreDefinition = (bus: BaseBus) => { $dispose: () => void };
+
+export type MountOptions<D extends Record<string, StoreDefinition> = Record<string, StoreDefinition>> = CreateAppOptions & {
+  /** The island's stores, `{ name: defineChamberStore(id, options) }`, each created on the island's bus. */
+  stores?: D;
 };
 
 /**
- * mount - attach a command bus island to a specific DOM element.
+ * mount - an island on one element: its own bus, its stores on that bus, and
+ * the element's `data-vc-command` and display attributes bound to both
+ * (`bindCommands`, `bindDisplay`). The stores come back under their names.
+ * `unmount()` unbinds the element and disposes the stores. A selector that
+ * matches nothing binds nothing and warns in development.
+ * tests/iife-mount.test.ts.
  *
  * @example
  * VaporChamber.mount('#analytics-island', {
- *   transport: VaporChamber.http({ endpoint: '/api/vc' }),
- *   state: { period: 'week', metrics: [] }
+ *   transport: VaporChamber.httpTransport({ endpoint: '/api/vc' }),
+ *   stores: { analytics: VaporChamber.defineChamberStore('analytics', { state, reducers }) }
  * })
  */
-function mount(selector: string, options: MountOptions = {}): {
+function mount<D extends Record<string, StoreDefinition> = {}>(selector: string, options: MountOptions<D> = {}): {
   bus: ReturnType<typeof createAsyncCommandBus>;
   dispatch: ReturnType<typeof createAsyncCommandBus>['dispatch'];
-  state: Record<string, any>;
+  stores: { [K in keyof D]: ReturnType<D[K]> };
   el: Element | null;
+  unmount: () => void;
 } {
   const el = typeof document !== 'undefined' ? document.querySelector(selector) : null;
-  const { state = {}, ...appOptions } = options;
+  const { stores: defined = {} as D, ...appOptions } = options;
   const app = createApp(appOptions);
-
-  return { ...app, state, el };
-}
-
-/**
- * connect - one-line setup mirroring the CORE variant's API. Equivalent to
- * `createApp({ transport: createHttpBridge({ csrf: true, ...opts }) })`.
- * Available in every variant so the same call site works regardless of which
- * IIFE bundle is loaded.
- */
-function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'>) {
-  const { plugins, onMissing, retry, ...httpOptions } = options;
-  return createApp({ transport: createHttpBridge({ csrf: true, ...httpOptions }), plugins, onMissing, retry });
-}
-
-/**
- * defineWidget - one-line custom-element registration mirroring the ELEMENTS
- * variant's API. Returns `false` if Vue 3.6+ Vapor is not detected.
- */
-function defineWidget(tagName: string, options: any, extraOptions?: any): boolean {
-  const El = extraOptions !== undefined
-    ? defineVaporCustomElement(options, extraOptions)
-    : defineVaporCustomElement(options);
-  if (!El) return false;
-  if (typeof customElements === 'undefined') return false;
-  if (customElements.get(tagName)) return true;
-  customElements.define(tagName, El);
-  return true;
-}
-
-/**
- * emitDOMEvent - bridge Vue's component emit() to a real DOM CustomEvent so
- * host pages can `addEventListener` on the widget tag. See ELEMENTS variant
- * for the full doc + attribution.
- */
-function emitDOMEvent(
-  el: Element,
-  eventName: string,
-  detail?: any,
-  options: { bubbles?: boolean; composed?: boolean; cancelable?: boolean } = {},
-): boolean {
-  if (typeof CustomEvent !== 'function' || !el) return true;
-  const event = new CustomEvent(eventName, {
-    detail,
-    bubbles: options.bubbles ?? true,
-    composed: options.composed ?? true,
-    cancelable: options.cancelable ?? false,
-  });
-  return el.dispatchEvent(event);
+  const names = Object.keys(defined) as (keyof D)[];
+  const stores = {} as { [K in keyof D]: ReturnType<D[K]> };
+  // The stores exist before the element binds: bindDisplay reads them at bind time.
+  for (const name of names) stores[name] = defined[name](app.bus) as ReturnType<D[keyof D]>;
+  const unbind = el === null ? [] : [bindCommands(el, app), bindDisplay(el, app)];
+  if (DEV && el === null) _report('warn', 'mount:missing:element', `mount("${selector}"): no element matches, so the island's stores are created and nothing is bound.`, undefined, { selector });
+  return {
+    ...app,
+    stores,
+    el,
+    unmount: () => {
+      for (const u of unbind) u();
+      for (const name of names) stores[name].$dispose();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +112,7 @@ const VaporChamber = {
   // --- Core factories ---
   createCommandBus,
   createAsyncCommandBus,
+  createBuffer,
 
   // --- Convenience ---
   createApp,
@@ -201,10 +122,8 @@ const VaporChamber = {
   emitDOMEvent,
 
   // --- Transport shortcuts ---
-  /** HTTP fetch transport. Alias for createHttpBridge(). */
-  http: createHttpBridge,
-  /** WebSocket transport. Alias for createWsBridge(). */
-  ws: createWsBridge,
+  httpTransport,
+  wsTransport,
   /** Server-sent events bridge. Alias for createSseBridge(). */
   sse: createSseBridge,
 
@@ -212,12 +131,23 @@ const VaporChamber = {
   logger,
   validator,
   history,
-  debounce,
-  throttle,
   authGuard,
-  optimistic,
-  persist,
   createChannel,
+  // Pacing at the sender
+  pace,
+  // The command binding on plain HTML: [data-vc-command]
+  bindCommands,
+  bindDisplay,
+
+  // --- State ---
+  /** The core store: `persist: saveTo({ key })` saves it, `share: shareTabs()` shares it across tabs, `$onField` follows a field. */
+  defineChamberStore,
+  saveTo,
+  shareTabs,
+  /** What is in flight on a bus and what failed: `pending(action, target?)`, `anyPending`, `errors`, `subscribe(fn)`. */
+  commandState,
+  /** A reply whose work goes on: `r.value instanceof Accepted`, `done` settles at the end. */
+  Accepted,
 
   // --- Vapor (Vue 3.6+) ---
   defineVaporCustomElement,

@@ -1,13 +1,12 @@
 /** Every undo is a command, `<action>$undo`: from history, and the rollbacks after a failure. Log s35.114. */
 import { describe, expect } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { history, optimisticUndo } from '../src/plugins-core';
+import { history } from '../src/plugins-core';
 import { it } from '../src/vitest';
 
 function setup() {
   const bus = createCommandBus();
   const h = history({ bus });
-  bus.use(h);
   const inverseGot: Command[] = [];
   bus.register('add', () => 1, { undo: (cmd) => { inverseGot.push(cmd); } });
   const heard: string[] = [];
@@ -30,9 +29,9 @@ describe('undo is a command', () => {
     expect(h.getState().past).toEqual([]);
   });
 
-  it('a plugin can refuse it: the inverse does not run and the step stays', () => {
+  it('a rule can refuse it: the inverse does not run and the step stays', () => {
     const { bus, h, inverseGot } = setup();
-    bus.onBefore((cmd) => { if (cmd.action === 'add$undo') throw new Error('not now'); });
+    bus.use({ authorize: () => (cmd) => (cmd.action === 'add$undo' ? { ok: false, value: undefined, error: new Error('not now') } : undefined) });
     bus.dispatch('add', 5);
     h.undo();
     expect(inverseGot).toEqual([]);
@@ -50,7 +49,6 @@ describe('undo is a command', () => {
   it('an action without undo has no $undo, and history pops its record as before', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     bus.register('plain', () => 1);
     bus.dispatch('plain', null);
     expect(bus.hasHandler('plain$undo')).toBe(false);
@@ -61,7 +59,6 @@ describe('undo is a command', () => {
   it('on the async bus', async () => {
     const bus = createAsyncCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const got: unknown[] = [];
     bus.register('add', async () => 1, { undo: (cmd) => { got.push(cmd.target); } });
     const heard: string[] = [];
@@ -75,11 +72,10 @@ describe('undo is a command', () => {
 });
 
 describe('a rollback after a failure is the same command', () => {
-  it('optimisticUndo dispatches <action>$undo', () => {
+  it('an optimistic action dispatches <action>$undo', () => {
     const bus = createCommandBus();
     const got: unknown[] = [];
-    bus.register('save', () => { throw new Error('down'); }, { undo: (cmd) => { got.push(cmd.target); } });
-    bus.use(optimisticUndo(bus, ['save'], { onRollbackError: () => {} }));
+    bus.register('save', () => { throw new Error('down'); }, { undo: (cmd) => { got.push(cmd.target); }, optimistic: true });
     const heard: string[] = [];
     bus.on('save$undo', (cmd) => heard.push(cmd.action));
     bus.dispatch('save', 1);
@@ -87,15 +83,15 @@ describe('a rollback after a failure is the same command', () => {
     expect(heard).toEqual(['save$undo']);
   });
 
-  it('optimisticUndo on the async bus calls onRollback once the rollback has run', async () => {
+  it('on the async bus, done settles once the rollback has run', async () => {
     const bus = createAsyncCommandBus({ retry: false });
     const order: string[] = [];
-    bus.register('save', async () => { throw new Error('down'); }, { undo: () => { order.push('undo'); } });
-    bus.onBefore(async () => { await Promise.resolve(); }); // the rollback's dispatch then takes a tick
-    bus.use(optimisticUndo(bus as never, ['save'], { onRollback: () => order.push('onRollback') }));
-    await bus.dispatch('save', 1);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(order).toEqual(['undo', 'onRollback']);
+    bus.register('save', async () => { throw new Error('down'); }, { undo: () => { order.push('undo'); }, optimistic: true });
+    bus.use({ validate: () => async () => { await Promise.resolve(); return undefined; } }); // the rollback's dispatch then takes a tick
+    const r = await bus.dispatch('save', 1);
+    await (r.value as { done: Promise<unknown> }).done;
+    order.push('done');
+    expect(order).toEqual(['undo', 'done']);
   });
 
   it('a transactional batch dispatches <action>$undo, and reports its result', () => {

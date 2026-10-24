@@ -18,7 +18,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect } from 'vitest';
 import { it } from '../src/vitest';
-import { ERROR_CODE_REGISTRY } from '../src/schema';
+import { ERROR_CODE_REGISTRY } from '../src/error-registry';
 
 const SRC = join(import.meta.dirname, '..', 'src');
 // The vocabulary, read from the `Condition` type itself: a copy here went stale
@@ -33,12 +33,10 @@ const CONDITIONS = VOCABULARY.join('|');
  */
 const DECLARED_NOT_MINTED: Record<string, string> = {
   'failed:handler': "a handler's throw reaches result.error raw (docs/contract.md rule 8)",
-  'already:handler': 'the overwrite notice is a DEV console line',
-  'failed:hook': 'an after-hook throw is logged, not returned',
-  'failed:listener': 'a listener throw is logged, not returned',
   'failed:step': 'workflow codes: declared for the workflow module',
   'failed:compensation': 'workflow codes: declared for the workflow module',
   'unknown:error': 'the fallback a reader classifies into, never raised',
+  'failed:report': 'the reporter prints its own failure through the console, never through _report',
 };
 
 function sourceFiles(dir: string): string[] {
@@ -48,15 +46,20 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Every `'condition:subject'` literal passed as a code, comments stripped. */
+/** Every `'condition:subject'` literal passed as a code, and every reported code's, comments stripped. */
 function minted(): Set<string> {
   const found = new Set<string>();
   const literal = new RegExp(`(?:fail|refuse|Fail|transportError|routerError|\\))\\(\\s*'((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
+  // A report names its whole code, `owner:condition:subject` (src/report.ts).
+  const reported = new RegExp(`_report\\(\\s*'(?:warn|error)',\\s*'[a-zA-Z]+:((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
   for (const file of sourceFiles(SRC)) {
     // Line comments first: a `/*` inside one (table.ts writes the splat as
     // `/*`) would otherwise open a block that swallows the code after it.
     const text = readFileSync(file, 'utf8').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const m of text.matchAll(literal)) found.add(m[1]);
+    // A report reads the raw text: its messages may hold a `/*` (a catch-all path), which
+    // the stripping above would read as a comment that swallows the next call.
+    for (const m of readFileSync(file, 'utf8').matchAll(reported)) found.add(m[1]);
   }
   return found;
 }
@@ -99,7 +102,7 @@ describe('error-code registry sweep', () => {
   });
 
   // The router owns its codes under its own name (shape rule 3), so its
-  // sweep is owner-exact: every `routerError` literal has a `router:` row and
+  // sweep is owner-exact: every `routerError` or reported literal has a `router:` row and
   // every `router:` row is raised, and no plain Error is built in its sources
   // (log s35.108).
   it('the router: every code it mints is a router: row, every router: row is minted', () => {
@@ -107,6 +110,9 @@ describe('error-code registry sweep', () => {
     const literal = new RegExp(`routerError\\(\\s*'((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
     const files = [...sourceFiles(join(SRC, 'router')), ...sourceFiles(join(SRC, 'router-fetch'))];
     for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(literal)) own.add(`router:${m[1]}`);
+    // And what it reports with its own code (src/report.ts).
+    const reported = new RegExp(`_report\\(\\s*'(?:warn|error)',\\s*'router:((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
+    for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(reported)) own.add(`router:${m[1]}`);
     const routerRows = ERROR_CODE_REGISTRY.map((e) => e.code).filter((c) => c.startsWith('router:'));
     expect([...own].sort()).toEqual(routerRows.sort());
   });

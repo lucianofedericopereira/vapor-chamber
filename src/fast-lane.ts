@@ -97,6 +97,14 @@ export type FastLaneOptions = {
    * see docs/performance.md Tuning.
    */
   removal?: 'live' | 'snapshot';
+  /**
+   * Where a listener's throw goes, with the action it was emitted on. Given,
+   * the throw is passed here and the emit goes on to the next listener, the
+   * rule a bus listener follows. Without it a throw stops the fan-out and
+   * reaches the caller of `emit`. Chosen once at factory time, like
+   * `removal`. tests/store-one-watcher.test.ts.
+   */
+  onError?: (error: unknown, action: string) => void;
 };
 
 export function createFastLane(options: FastLaneOptions = {}): FastLane {
@@ -184,7 +192,30 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
   // never branches on mode. Both share the single-listener fast path: with
   // one listener there is no neighbour to skip or double-invoke, so the
   // guard question is moot and the loop machinery is pure overhead.
-  const emit: <T>(action: string, data: T) => void = snapshot
+  // With `onError`, each call is in a try and a throw goes there; the loops
+  // are otherwise the two below. Built only when asked, so the default paths
+  // never carry the try.
+  const onError = options.onError;
+  const emit: <T>(action: string, data: T) => void = onError !== undefined
+    ? snapshot
+      ? (action, data) => {
+          const bucket = listeners.get(action) as FastListener<any>[] | undefined;
+          if (bucket === undefined) return;
+          for (let i = 0, len = bucket.length; i < len; i++) {
+            try { bucket[i](data); } catch (e) { onError(e, action); }
+          }
+        }
+      : (action, data) => {
+          const bucket = listeners.get(action) as LiveEntry[] | undefined;
+          if (bucket === undefined) return;
+          // One listener, as the default path: no neighbour, no loop.
+          if (bucket.length === 1) { try { bucket[0].fn(data); } catch (err) { onError(err, action); } return; }
+          for (let i = 0, len = bucket.length; i < len; i++) {
+            const e = bucket[i];
+            if (!e.off) { try { e.fn(data); } catch (err) { onError(err, action); } }
+          }
+        }
+    : snapshot
     ? (action, data) => {
         // SNAPSHOT mode: unsub replaces arrays (see on() above), so the ref
         // captured here is never mutated mid-flight - one call per slot, no

@@ -33,7 +33,8 @@
  * `both`, or a custom selector via the `field` option.
  */
 
-import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
+import type { Command, CommandResult, PluginParts } from './command-bus';
+import { _report } from './report';
 import { _errResult, _failures } from './command-bus';
 
 // The plugin's own failures; its declared name is their owner (docs/contract.md 5).
@@ -142,38 +143,27 @@ function rejectResult(action: string, message: string): CommandResult {
 export function validateSchemas(
   schemas: Record<string, StandardSchemaV1>,
   options: SchemaValidatorOptions = {},
-): Plugin {
+): PluginParts {
   const { field = 'target', onInvalid = 'reject' } = options;
   const compiled = compileSchemas(schemas);
-
-  const plugin: Plugin = (cmd, next) => {
-    const schema = compiled.get(cmd.action);
-    if (schema === undefined) return next();
-
-    const value = pickValue(cmd, field);
-    const result = schema['~standard'].validate(value);
-
-    // Sync plugin can't await - if a schema returns a Promise, we treat
-    // that as a configuration error and fail the dispatch loudly.
-    if (typeof (result as Promise<unknown>).then === 'function') {
-      return rejectResult(
-        cmd.action,
-        'validateSchemas received an async schema on a sync bus. Use validateSchemasAsync on createAsyncCommandBus.',
-      );
-    }
-
-    const r = result as StandardSchemaV1Result<unknown>;
-    if (r.issues !== undefined) {
-      const message = describe(r.issues);
-      if (onInvalid === 'warn') {
-        console.warn(`[vapor-chamber] validateSchemas (${cmd.action}): ${message}`);
-        return next();
-      }
-      return rejectResult(cmd.action, message);
-    }
-    return next();
+  return {
+    id: 'validateSchemas',
+    validate(action) {
+      const schema = compiled.get(action);
+      return schema && ((cmd) => {
+        const result = schema['~standard'].validate(pickValue(cmd, field));
+        // A sync bus can't await - if a schema returns a Promise, we treat
+        // that as a configuration error and fail the dispatch loudly.
+        if (typeof (result as Promise<unknown>).then === 'function') {
+          return rejectResult(
+            cmd.action,
+            'validateSchemas received an async schema on a sync bus. Use validateSchemasAsync on createAsyncCommandBus.',
+          );
+        }
+        return verdict(cmd.action, result as StandardSchemaV1Result<unknown>, onInvalid);
+      });
+    },
   };
-  return Object.assign(plugin, { id: 'validateSchemas' });
 }
 
 /**
@@ -183,26 +173,23 @@ export function validateSchemas(
 export function validateSchemasAsync(
   schemas: Record<string, StandardSchemaV1>,
   options: SchemaValidatorOptions = {},
-): AsyncPlugin {
+): PluginParts {
   const { field = 'target', onInvalid = 'reject' } = options;
   const compiled = compileSchemas(schemas);
-
-  const plugin: AsyncPlugin = async (cmd, next) => {
-    const schema = compiled.get(cmd.action);
-    if (schema === undefined) return next();
-
-    const value = pickValue(cmd, field);
-    const r = await schema['~standard'].validate(value);
-
-    if (r.issues !== undefined) {
-      const message = describe(r.issues);
-      if (onInvalid === 'warn') {
-        console.warn(`[vapor-chamber] validateSchemas (${cmd.action}): ${message}`);
-        return next();
-      }
-      return rejectResult(cmd.action, message);
-    }
-    return next();
+  return {
+    id: 'validateSchemas',
+    validate(action) {
+      const schema = compiled.get(action);
+      return schema && (async (cmd) => verdict(cmd.action, await schema['~standard'].validate(pickValue(cmd, field)), onInvalid));
+    },
   };
-  return Object.assign(plugin, { id: 'validateSchemas' });
+}
+
+/** A schema's result as the rule's answer: a refusal, a warning, or undefined. */
+function verdict(action: string, r: StandardSchemaV1Result<unknown>, onInvalid: SchemaValidatorOptions['onInvalid']): CommandResult | undefined {
+  if (r.issues === undefined) return undefined;
+  const message = describe(r.issues);
+  if (onInvalid !== 'warn') return rejectResult(action, message);
+  _report('warn', 'validateSchemas:invalid:payload', `Validation failed for "${action}": ${message}`, undefined, { action });
+  return undefined;
 }

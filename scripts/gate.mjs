@@ -223,11 +223,13 @@ step('docs', (name) => {
   // Scoped to what this step regenerates. An unscoped `git diff` here blamed the
   // docs for an unrelated edit sitting in the tree - a gate that names the wrong
   // step is worse than one that does not fire. Everything else is the last step's.
-  const d = run('git', ['diff', '--exit-code', '--stat', '--', 'docs/api', 'docs/errors.md'], { capture: true });
+  // contract/ holds the Pact files generated from scripts/contract-cases.mjs,
+  // php/src/Contract/Fixture the fixture action's generated class.
+  const d = run('git', ['diff', '--exit-code', '--stat', '--', 'docs/api', 'docs/errors.md', 'contract', 'php/src/Contract/Fixture'], { capture: true });
   if (d.status !== 0) {
-    fail(name, `docs/api or docs/errors.md regenerated with a diff - it was stale:\n${d.stdout || ''}`);
+    fail(name, `docs/api, docs/errors.md, contract/ or the contract fixture regenerated with a diff - it was stale:\n${d.stdout || ''}`);
   }
-  ok(name, 'docs/api and docs/errors.md regenerated, no diff');
+  ok(name, 'docs/api, docs/errors.md, contract/ and the contract fixture regenerated, no diff');
 });
 
 step('size:doc', (name) => {

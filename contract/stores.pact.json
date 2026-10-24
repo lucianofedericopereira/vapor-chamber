@@ -1,0 +1,111 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "stores-1",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractEcho",
+            "target": {},
+            "payload": {
+              "state": {
+                "n": 1
+              },
+              "stores": {
+                "contract": {
+                  "n": 1
+                }
+              }
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "state": {
+              "n": 1
+            },
+            "stores": {
+              "contract": {
+                "n": 1
+              }
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "stores-2",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractEcho",
+            "target": {},
+            "payload": {
+              "stores": {
+                "contract": {
+                  "n": 1
+                }
+              }
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "stores": {
+              "contract": {
+                "n": 1
+              }
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

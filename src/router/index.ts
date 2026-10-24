@@ -21,6 +21,7 @@
 
 import { type AnnounceOption, installRouteAnnouncer } from './announce';
 import { DEV } from '../dev';
+import { _report } from '../report';
 // TYPE-ONLY. The client is never built here - it arrives via `options.http`,
 // or not at all. See the comment at `http` in createRouter below.
 import type { HttpClient } from '../http';
@@ -37,7 +38,7 @@ import {
   stripBase,
 } from './history';
 import { ROUTER_KEY } from './keys';
-import { type LoaderHandlers, defaultAffects, runLoaders } from './loaders';
+import { type LoaderHandlers, _routerClients, defaultAffects, runLoaders } from './loaders';
 import type { Router } from './router-type';
 import { type RouteTable, createRouteTable } from './table';
 import type {
@@ -93,7 +94,7 @@ export type { RevalidateMap, RevalidateOptions, RevalidatePlugin } from './reval
 // Navigation facts on a bus. From this entry, as `revalidateRoutes`: it
 // imports only router types, and tree-shakes away when not called.
 export { routerFacts } from './facts';
-export type { FactSink, RouterFailedFact, RouterNavigatedFact } from './facts';
+export type { FactSink, RouterFailedFact, RouterFlagFact, RouterNavigatedFact } from './facts';
 export type { LoaderContext, LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
 export type { Router } from './router-type';
 export { compilePath, createRouteTable } from './table';
@@ -118,9 +119,11 @@ export type RouterOptions = {
   loaders?: LoaderHandlers;
   /** Override history (createMemoryHistory for tests/SSR). Default: web. */
   history?: RouterHistory;
-  /** The http client `routes: { url }` loads through. REQUIRED for that source;
-   *  unused otherwise. `routerHttp()` from `vapor-chamber/router/remote` is the
-   *  preconfigured one, and any `HttpClient` works. */
+  /** The app's http client, for every request the router makes: the
+   *  `routes: { url }` table (REQUIRED for that source), its loaders
+   *  (`LoaderContext.http`) and blade rows (`fetchBlade`'s second argument).
+   *  `routerHttp()` from `vapor-chamber/router/remote` marks it as router
+   *  traffic, and any `HttpClient` works. */
   http?: HttpClient;
   /** Document-level link interception + active stamping + hover and focus warm-up.
    *  Default: true in the browser. */
@@ -134,8 +137,9 @@ export type RouterOptions = {
   dehydrate?: (el: Element) => unknown;
   /** Fetch server HTML for blade rows. REQUIRED if the table has any;
    *  `bladeFetcher()` from `vapor-chamber/router/remote` is the in-box one. A
-   *  blade row with no fetcher is a coded `router:missing:fetchBlade`. */
-  fetchBlade?: (href: string) => Promise<string>;
+   *  blade row with no fetcher is a coded `router:missing:fetchBlade`. `http`
+   *  is the router's client, undefined when it has none. */
+  fetchBlade?: (href: string, http?: HttpClient) => Promise<string>;
   /** Terminal error handler. Default: hard-navigate on HARD_NAV_CODES, log
    *  the rest. */
   onError?: (error: unknown, to: RouteLocation) => void;
@@ -236,7 +240,9 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    * `vapor-chamber/router/remote` provides `routerHttp()` and `bladeFetcher()`
    * for the common case. Neither is privileged - any `HttpClient` works.
    */
-  const http: HttpClient | null = options.http ?? null;
+  // The app's one client for every request the router makes: the table, its
+  // loaders (LoaderContext.http) and blade rows (`fetchBlade`'s second argument).
+  const http: HttpClient | undefined = options.http;
   const loaders: LoaderHandlers = options.loaders ?? {};
   // The affect policy is resolved once: loaders are fixed for the router's life
   // (setRoutes swaps rows, never loaders), so there is nothing to recompute per
@@ -310,7 +316,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           }
           let html: string;
           try {
-            html = await fetchBlade(history.createHref(to.fullPath));
+            html = await fetchBlade(history.createHref(to.fullPath), http);
           } catch (cause) {
             throw routerError('failed:blade', `blade fetch failed for "${to.fullPath}"`, { to, cause });
           }
@@ -356,15 +362,20 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         return;
       }
       if (DEV) {
-        console.error(
-          `[vapor-chamber-router] ${error.code} for "${href}", which is already the current URL - refusing to hard-navigate (it would reload forever behind a catch-all). Add a catch-all row (path: "/*") so the client can render its own 404.`,
-          error,
+        _report('error', error.code,
+          `"${href}" is already the current URL, so the router does not hard-navigate (it would reload forever behind a catch-all). Add a catch-all row (path: "/*") so the client can render its own 404.`,
+          error, { path: href },
         );
         return;
       }
     }
-    console.error(error);
+    if (isRouterError(error)) _report('error', error.code, `the navigation to "${to.fullPath}" failed`, error, { path: to.fullPath });
+    else _report('error', 'router:failed:navigation', `the navigation to "${to.fullPath}" failed`, error, { path: to.fullPath });
   }
+
+  // Each record's groups, as its last read named them (LoaderContext.cacheGroups).
+  const groupsOf = new Map<string, readonly string[]>();
+  const remember = (recordName: string, groups: readonly string[]): void => void groupsOf.set(recordName, groups);
 
   const engine = createEngine({
     getTable: () => tableRef.value,
@@ -372,7 +383,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     resolveRender,
     runLoaders: (records, to, signal) =>
       runLoaders(loaders, records, to, signal, (recordName, revalidation, at) =>
-        engine.trackRevalidation(recordName, revalidation, at),
+        engine.trackRevalidation(recordName, revalidation, at), false, http, remember,
       ),
     loadAffectedBy: (records, keys) => records.filter((record) => affects(record, keys)),
     onError: dispatchError,
@@ -394,6 +405,34 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     },
   });
 
+  // ---- cache groups (RFC 9875): the server says which reads a write made stale ----
+
+  // A refresh in flight per record: a newer one aborts it, so the later read lands.
+  const refreshing = new Map<string, AbortController>();
+
+  /**
+   * The client invalidated `group`: the records on screen whose read named it
+   * refresh, past every cache, as a stale read's refresh does
+   * (`trackRevalidation`: `isRevalidating`, dropped if the page moved on, kept
+   * stale if it fails). The router hears it from its client, never the bus
+   * (record revision 23 item 3). tests/router/cache-groups.test.ts.
+   */
+  function refreshGroup(group: string): void {
+    const at = engine.snapshot.value.location;
+    const leaf = at.matched[at.matched.length - 1];
+    for (const record of leaf ? leaf.loadChain : []) {
+      if (!groupsOf.get(record.name)?.includes(group)) continue;
+      refreshing.get(record.name)?.abort();
+      const own = new AbortController();
+      refreshing.set(record.name, own);
+      const fresh = runLoaders(loaders, [record], at, own.signal, undefined, true, http, remember).then((data) => data.get(record.name));
+      void fresh.then(() => {}, () => {}).finally(() => {
+        if (refreshing.get(record.name) === own) refreshing.delete(record.name);
+      });
+      engine.trackRevalidation(record.name, fresh, at);
+    }
+  }
+
   // ---- start (all IO and listeners - the constructor is pure) -------------------
 
   let started: Promise<void> | null = null;
@@ -411,7 +450,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           `routes: { url: "${url}" } needs an http client - pass \`http: routerHttp()\` from vapor-chamber/router/remote (or any HttpClient of your own)`,
         );
       }
-      const response = await http.get<unknown>(url, { retry: 2 });
+      const response = await http.get<unknown>(url);
       const payload = readRoutesPayload(response.data);
       if (DEV) warnRemoteBase(payload);
       tableRef.value = createRouteTable(payload.routes);
@@ -446,8 +485,8 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    *  base, which manifests as "no link is ever intercepted". */
   function warnRemoteBase(payload: RoutesPayload): void {
     if (payload.base && payload.base !== history.base && options.base === undefined) {
-      console.warn(
-        `[vapor-chamber-router] the fetched route payload declares base "${payload.base}", but the router was already created with base "${history.base}". A remote payload arrives after the history is built - pass \`base\` to createRouter() explicitly (or deliver the table inline).`,
+      _report('warn', 'router:conflict:base',
+        `the fetched route payload declares base "${payload.base}", but the router was already created with base "${history.base}". A remote payload arrives after the history is built - pass \`base\` to createRouter() explicitly (or deliver the table inline).`,
       );
     }
   }
@@ -472,6 +511,12 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       if (disposed) return;
 
       teardowns.push(history.listen((fullPath, info) => engine.handlePop(fullPath, { delta: info.delta })));
+      if (http) {
+        teardowns.push(http.onInvalidateGroup(refreshGroup), () => {
+          for (const ctrl of refreshing.values()) ctrl.abort();
+          refreshing.clear();
+        });
+      }
 
       // Idle preheat: rows flagged meta.preheat load their lazy components
       // after the page settles (saveData/2g-aware, aborts on interaction).
@@ -621,6 +666,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       history.dispose();
     },
   };
+  if (http) _routerClients.set(router, http);
   return router as Router<TName>;
 }
 

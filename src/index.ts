@@ -7,32 +7,33 @@
  *     testing      - createTestBus, snapshot, time-travel
  *
  *   OPTIONAL (tree-shaken when unused):
- *     plugins      - logger, validator, history, debounce, throttle, authGuard, optimistic
- *     plugins-io   - persist, createChannel
- *     chamber      - Vue composables: useCommand, useCommandGroup, useCommandState, ...
+ *     plugins      - logger, validator, authGuard, and history, which installs itself on its bus
+ *     pace         - debounce or throttle a dispatch at the sender
+ *     plugins-io   - createChannel
+ *     chamber      - Vue composables: useCommand, useCommandGroup, useCommandHistory, ...
  *     chamber-vapor - Vue 3.6+ Vapor-specific API (requires Vue 3.6)
  *     http         - postCommand, createHttpClient, CSRF token reading
- *     transports   - createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge
+ *     transports   - httpTransport, wsTransport, defineTransport, createSseBridge
  *     form         - createFormBus, reactive form state
  *     schema       - LLM tool-use layer, synthesize, toTools
  *     devtools     - @vue/devtools-api integration (requires @vue/devtools-api)
  *     transitions   - <Transition> hook -> bus dispatch bridge
- *     ssr          - SSR dehydrate/rehydrate plugin
+ *     ssr          - storeStates, seedStores: the stores' states for a server render
  *     directives   - v-vc-command Vue directive (requires Vue)
  *     vite         - HMR plugin (requires Vite, see 'vapor-chamber/vite')
  *     iife         - IIFE bundles (see 'vapor-chamber/iife')
  *
  * Sub-path exports that avoid pulling in optional code:
- *   'vapor-chamber/transports'      - HTTP + WS + SSE bridges
+ *   'vapor-chamber/transports'      - httpTransport, wsTransport, createSseBridge
  *   'vapor-chamber/transitions'     - <Transition> hook -> bus dispatch
- *   'vapor-chamber/ssr'             - SSR dehydrate/rehydrate
+ *   'vapor-chamber/ssr'             - the stores' states for a server render
  *   'vapor-chamber/directives'      - v-vc-command directive
  *   'vapor-chamber/vite'            - Vite HMR plugin
  *   'vapor-chamber/fast-lane'       - minimal-allocation dispatcher for hot loops
  *   'vapor-chamber/observable'      - Symbol.observable interop (RxJS / xstream / callbag)
  *   'vapor-chamber/standard-schema' - Standard Schema v1 validator plugin (Zod / Valibot / ArkType)
  *   'vapor-chamber/alien-signals'   - alien-signals as the reactive primitive (non-Vue)
- *   'vapor-chamber/reactive'        - opt-in deep reactivity (deepSignal + useDeepCommandState)
+ *   'vapor-chamber/reactive'        - opt-in deep reactivity (deepSignal)
  *   'vapor-chamber/outbox'          - offline outbox (durable queue + Idempotency-Key replay)
  *   'vapor-chamber/mcp'             - MCP server from a schema bus (agent surface)
  *   'vapor-chamber/stream-parser'   - incremental JSON parser for streamed fetch/SSE bodies
@@ -52,8 +53,6 @@ export {
   createCommandPool,
   unsealBus,
   inspectBus,
-  buildRunner,
-  matchesPattern,
   BusError,
   RETRYABLE_CONDITIONS,
   conditionOf,
@@ -78,17 +77,13 @@ export {
   type AsyncCommandBus,
   type Handler,
   type AsyncHandler,
-  type Plugin,
-  type AsyncPlugin,
-  type SyncPlugin,
   type PluginParts,
+  type WorkTicket,
+  type Transport,
   type ActionScope,
-  type ActionList,
+  type ScopeOptions,
   type Hook,
   type AsyncHook,
-  type BeforeHook,
-  type AsyncBeforeHook,
-  type PluginOptions,
   type BatchCommand,
   type BatchOptions,
   type BatchResult,
@@ -106,20 +101,23 @@ export {
   type ResultOf,
 } from './command-bus';
 
-// Settling what `next()` gave a plugin, on either bus: what a `Plugin` uses to
-// read the result (see Plugin).
+// Settling a result that may be a promise, on either bus (a dispatch's, a
+// step's), and staying sync when it is.
 export { onSettled, type MaybeAsyncResult } from './settled';
 export { createActionFilter, type ActionFilter, type ActionFilterExpression } from './action-filter';
 
 // What an app plugin builds a result with: the bus's own two factories, so its
 // results share the bus's one hidden class (tests/plugin-result-factories).
-// A rejection is `err(fail(...))`: `fail`, the plugin's third argument, mints
-// the owner. And the library's rule for a numeric option.
+// A refusal is `err(fail(...))`: `fail`, handed to a rule or an `admit` step,
+// mints the owner. And the library's rule for a numeric option.
 export { _okResult as ok, _errResult as err } from './command-bus';
+export { matchesPattern } from './pattern';
+// The reporter: one formatter and the sinks every warning and error the library detects goes to
+export { configureReport, consoleSink, formatReport, type Report, type ReportFormat, type ReportLevel, type ReportSink } from './report';
 export { countOption } from './bounds';
 
 // Testing utilities (CORE - zero runtime deps, for test environments only)
-export { createTestBus, wired, type TestBus, type RecordedDispatch } from './testing';
+export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
 
 // -- UTILITIES ----------------------------------------------------------------
 // Declarative patterns for common bus usage. Tree-shaken when unused.
@@ -144,7 +142,6 @@ export {
   circuitBreaker,
   rateLimit,
   metrics,
-  serialize,
   idempotent,
   supersede,
   type CacheOptions,
@@ -152,11 +149,9 @@ export {
   type RateLimitOptions,
   type MetricsEntry,
   type MetricsOptions,
-  type SerializeOptions,
   type IdempotentOptions,
   type SupersedeOptions,
 } from './plugins-extra';
-export { pollWith, type PollWithOptions, type PollDone } from './poll-with';
 
 // -- OPTIONAL ------------------------------------------------------------------
 
@@ -165,20 +160,20 @@ export {
   logger,
   validator,
   history,
-  debounce,
-  throttle,
   authGuard,
-  optimistic,
-  optimisticUndo,
-  persist,
   createChannel,
   type HistoryState,
-  type OptimisticUndoOptions,
-  type PersistOptions,
-  type PersistStorage,
   type ChannelOptions,
 } from './plugins';
+
+// Pacing at the sender: debounce or throttle a dispatch before it reaches the bus
+export { pace, type PaceOptions, type Paced, type Send } from './pace';
 export { indexedDbStorage } from './idb';
+export { saveTo, type PersistStorage, type SaveToOptions, type StorePersist } from './store-persist';
+export { shareTabs, type StoreShare } from './store-share';
+
+// The command state: in flight and failed, per bus, any framework or none
+export { commandState, type CommandState, type CommandStateOptions } from './command-state';
 
 // Vue composables - optional, requires Vue >= 3.5
 export {
@@ -197,8 +192,6 @@ export {
   type SharedCommandMap,
   useSharedCommandState,
   type UseSharedCommandStateOptions,
-  useCommandState,
-  type UseCommandStateOptions,
   useCommandHistory,
   useCommandGroup,
   useCommandError,
@@ -216,9 +209,10 @@ export {
   untracked,
 } from './chamber';
 
-// Vue 3.6+ Vapor-specific API - optional, requires Vue 3.6
+// Vue 3.6+ Vapor-specific API - optional, requires Vue 3.6. The app factory,
+// `createVaporChamberApp`, is on `vapor-chamber/vapor` only: its type names
+// Vue's, which this entry never does (tests/vapor-app-types.test.ts).
 export {
-  createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
   type VaporCommandOptions,
@@ -229,7 +223,7 @@ export {
   useVaporAsyncCommand,
 } from './chamber-vapor';
 
-// HTTP client - optional, used by createHttpBridge; also available standalone
+// HTTP client - optional, used by httpTransport; also available standalone
 export {
   readCsrfToken,
   invalidateCsrfCache,
@@ -258,16 +252,20 @@ export {
   type ProblemDetails,
 } from './http-errors';
 
-// Transport plugins - optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
+// A dispatch held until its handler registers (bus option `buffer`).
+export { createBuffer, type BufferOptions, type CommandBuffer } from './buffer';
+
+// Transports - optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
+export { Accepted } from './accepted';
 export {
-  createHttpBridge,
-  createBatchingHttpBridge,
-  createWsBridge,
+  httpTransport,
+  wsTransport,
+  defineTransport,
   createSseBridge,
   createEchoBridge,
-  type HttpBridgeOptions,
-  type BatchingHttpBridgeOptions,
-  type WsBridgeOptions,
+  type HttpTransportOptions,
+  type HttpBatchOptions,
+  type WsTransportOptions,
   type SseBridgeOptions,
   type EchoBridgeOptions,
   type EchoSubscription,
@@ -286,17 +284,8 @@ export {
   type TransitionBridge,
 } from './transitions';
 
-// SSR hydration - optional; prefer 'vapor-chamber/ssr'
-export {
-  createSSRPlugin,
-  rehydrate,
-  rehydrateAsync,
-  serializeForScript,
-  type DehydratedCommand,
-  type SSRPluginOptions,
-  type SSRPlugin,
-  type RehydrateOptions,
-} from './ssr';
+// SSR by the stores' states - optional; prefer 'vapor-chamber/ssr'
+export { storeStates, seedStores, serializeForScript, liveStores } from './ssr';
 
 // Status messages for assistive technology (WCAG 4.1.3): one shared pair of
 // live regions per document, used by the directive and the router; an app can
@@ -305,6 +294,12 @@ export { announce, setAnnouncer, type AnnounceOptions, type Announcer } from './
 
 // Vue directive - optional, requires Vue; prefer 'vapor-chamber/directives'
 export { createDirectivePlugin } from './directives';
+// The command binding on plain HTML: [data-vc-command], the bus passed in, no Vue
+export { bindCommands } from './command-binding';
+// Display bindings on plain HTML: data-vc-text, -show, -each, -pending on a store and the command state
+export { bindDisplay } from './page-bindings';
+// Widgets: a Vapor custom element defined when the page needs it, and a DOM event out of it
+export { defineWidget, emitDOMEvent, type WidgetComponent, type WidgetOptions, type WidgetWhen } from './widget';
 
 // Form management - optional, no extra runtime deps
 export {
@@ -352,12 +347,8 @@ export {
   type ToolCallInput,
   schemaValidator,
   describeSchema,
-  // Error code registry and API schema for LLMs
-  ERROR_CODE_REGISTRY,
-  getErrorEntry,
-  describeErrorCodes,
+  // The API schema for LLMs
   busApiSchema,
-  type ErrorCodeEntry,
-  // retryable/category metadata
-  isRetryableCode,
 } from './schema';
+// The error code registry: severity, retry class and fix per code
+export { ERROR_CODE_REGISTRY, getErrorEntry, describeErrorCodes, isRetryableCode, type ErrorCodeEntry } from './error-registry';

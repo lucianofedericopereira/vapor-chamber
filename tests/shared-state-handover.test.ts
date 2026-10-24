@@ -1,4 +1,4 @@
-/** useSharedCommandState().isLoading across its last holder leaving, and on a sealed bus. The long note is at the end. */
+/** useSharedCommandState().pending across its last holder leaving, and on a sealed bus. The long note is at the end. */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { type CommandBus, createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
@@ -14,34 +14,43 @@ function held() {
   return { bus, release };
 }
 
-const hooks = (bus: Parameters<typeof inspectBus>[0]) => {
-  const i = inspectBus(bus);
-  return [i.beforeHookCount, i.listenerPatterns.length];
+/** Is the entry still held? A fresh holder reads the same key's signal only then. */
+const heldEntry = (bus: CommandBus, flag: object, action: string): boolean => {
+  const probe = useSharedCommandState({ bus });
+  const same = probe.pending(action) === flag;
+  probe.dispose();
+  return same;
 };
 
-describe('isLoading across the last holder leaving', () => {
+/** Nothing of the state is on the user's hooks or listeners. */
+const hooks = (bus: Parameters<typeof inspectBus>[0]) => {
+  const i = inspectBus(bus);
+  return [i.afterHookCount, i.listenerPatterns.length];
+};
+
+describe('pending across the last holder leaving', () => {
   it('control: a second holder while the first still holds reads the key lit', async () => {
     const { bus, release } = held();
     const a = useSharedCommandState({ bus });
-    a.isLoading('siteCreate');
+    a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     const b = useSharedCommandState({ bus });
-    expect(b.isLoading('siteCreate').value).toBe(true);
+    expect(b.pending('siteCreate').value).toBe(true);
     a.dispose();
     release();
     await p;
-    expect(b.isLoading('siteCreate').value).toBe(false);
+    expect(b.pending('siteCreate').value).toBe(false);
     b.dispose();
   });
 
   it('handover: the first holder leaves mid-flight, the next one reads it lit, then settled', async () => {
     const { bus, release } = held();
     const a = useSharedCommandState({ bus });
-    a.isLoading('siteCreate');
+    a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     a.dispose();
     const b = useSharedCommandState({ bus });
-    const flag = b.isLoading('siteCreate');
+    const flag = b.pending('siteCreate');
     expect(flag.value).toBe(true);
     release();
     await p;
@@ -53,41 +62,41 @@ describe('isLoading across the last holder leaving', () => {
   it('nobody holds it: the entry is released when the last key in flight settles', async () => {
     const { bus, release } = held();
     const a = useSharedCommandState({ bus });
-    a.isLoading('siteCreate');
+    const flag = a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     a.dispose();
-    expect(hooks(bus)).toEqual([1, 1]);
+    expect({ held: heldEntry(bus, flag, 'siteCreate'), hooks: hooks(bus) }).toEqual({ held: true, hooks: [0, 0] });
     release();
     await p;
-    expect(hooks(bus)).toEqual([0, 0]);
+    expect(heldEntry(bus, flag, 'siteCreate')).toBe(false);
   });
 
   it('nothing in flight: the last holder leaving releases the entry at once', () => {
     const bus = createCommandBus();
     const a = useSharedCommandState({ bus });
-    a.isLoading('x');
-    expect(hooks(bus)).toEqual([1, 1]);
-    a.dispose();
+    const flag = a.pending('x');
     expect(hooks(bus)).toEqual([0, 0]);
+    a.dispose();
+    expect(heldEntry(bus, flag, 'x')).toBe(false);
   });
 });
 
-describe('isLoading on a sealed bus', () => {
+describe('pending on a sealed bus', () => {
   it('armed, sealed, every holder leaves: the next holder tracks, the bus stays sealed', async () => {
     const { bus, release } = held();
     const a = useSharedCommandState({ bus });
-    a.isLoading('siteCreate');
+    a.pending('siteCreate');
     bus.seal();
     a.dispose();
     const b = useSharedCommandState({ bus });
-    const flag = b.isLoading('siteCreate');
+    const flag = b.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     expect(flag.value).toBe(true);
     release();
     await p;
     expect(flag.value).toBe(false);
     expect(bus.isSealed()).toBe(true);
-    expect(() => bus.onBefore(() => {})).toThrow();
+    expect(() => bus.onAfter(() => {})).toThrow();
     b.dispose();
   });
 
@@ -95,14 +104,14 @@ describe('isLoading on a sealed bus', () => {
     const bus = createCommandBus();
     let lit: boolean | undefined;
     bus.register('x', () => {
-      lit = s.isLoading('x').value;
+      lit = s.pending('x').value;
     });
     bus.seal();
     const s = useSharedCommandState({ bus });
-    s.isLoading('x');
+    s.pending('x');
     bus.dispatch('x', undefined);
     expect(lit).toBe(true);
-    expect(s.isLoading('x').value).toBe(false);
+    expect(s.pending('x').value).toBe(false);
     expect(bus.isSealed()).toBe(true);
     s.dispose();
   });
@@ -118,15 +127,15 @@ describe('isLoading on a sealed bus', () => {
  * change mounts) built a fresh entry that had not seen it start: the key read
  * false while the command ran. The entry now outlives its last holder only
  * while a command it started is in flight; the settle that ends the last one
- * releases it (third test), and with nothing in flight the release is
- * immediate (fourth). Keeping the entry armed for ever was measured and
+ * releases it (third test, `heldEntry` true then false), and with nothing
+ * in flight the release is immediate (fourth). Keeping the entry armed for ever was measured and
  * declined: an unheld bus would pay the tracking on every dispatch, 6.5x.
  *
- * The sealed bus. Tracking is a before-hook, and a sealed bus refuses
- * `onBefore`, so `isLoading()` threw `core:refused:bus` whenever the entry
+ * The sealed bus. Tracking was a before-hook, and a sealed bus refuses
+ * `onBefore`, so `pending()` threw `core:refused:bus` whenever the entry
  * had to be built after `seal()`: on the first call, and again after every
- * holder had left (a route change). The old advice, "call isLoading() before
- * sealing", cannot be met by an app whose holders unmount. The library now
- * installs its own hook past the seal (unseal, add, seal again); the bus is
- * still sealed for the app, as the last assertions of both tests show.
+ * holder had left (a route change). It then installed its hook past the seal.
+ * It is now the bus's internal facts observer, which no seal guards and
+ * no hook count shows (`hooks()` stays [0, 0]). The bus is still sealed for
+ * the app, as the last assertions of both tests show.
  */

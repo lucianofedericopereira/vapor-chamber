@@ -1,6 +1,6 @@
 /**
  * Real-path A/B for the request() / dispose() work, in the house three-arm
- * shape (tests/plugin-throw-ab.test.ts): a baseline DERIVED from the shipped
+ * shape: a baseline DERIVED from the shipped
  * src/command-bus.ts with the change reverted, a byte-identical second copy
  * of that baseline as the self-control, and the shipped source - every timed
  * arm a derived copy, loaded the same way.
@@ -52,13 +52,14 @@ const OLD_SYNC_REQUEST = `function syncRequest(s: SyncState, action: string, tar
       timeout
     );
 
-    const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
+    const cmd: Command = { action, target, payload, meta: stampMeta(payload), signal: undefined };
     const execute = (): CommandResult => {
       try { return okResult(responder(cmd)); }
       catch (e) { return errResult(e as Error); }
     };
 
-    const pluginResult = s.runner(cmd, execute);
+    const rec = recordOf(s, action);
+    const pluginResult = syncWork(rec, cmd, execute);
 
     syncRunHooks(s, cmd, pluginResult);
 
@@ -238,7 +239,7 @@ describe('request() / dispose() - real path A/B', () => {
       for (const a of ['now', 'later', 'fails', 'rejects', 'missing']) out.push(shape(await s.request(a, 1)));
       out.push(shape(await s.request('slow', 1, undefined, { timeout: 5 })));
       // A live caller signal changes nothing on either arm, and the sync command
-      // has the same four fields with or without one: one shape, both arms.
+      // has the same five fields with or without one, `signal` undefined: one shape, both arms.
       const live = new AbortController();
       let keys: string[] = [];
       s.respond('keys', (c) => { keys = Object.keys(c); return c.target; });
@@ -256,7 +257,7 @@ describe('request() / dispose() - real path A/B', () => {
     };
     const shipped = await settled(arms.shipped);
     expect(shipped).toEqual(await settled(arms.pre));
-    expect(shipped.filter((v) => Array.isArray(v))).toEqual([['action', 'target', 'payload', 'meta'], ['action', 'target', 'payload', 'meta']]);
+    expect(shipped.filter((v) => Array.isArray(v))).toEqual([['action', 'target', 'payload', 'meta', 'signal'], ['action', 'target', 'payload', 'meta', 'signal']]);
 
     // --- intended difference 1: dispose() settles a waiting request -----------
     for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'core:aborted:dispatch']] as const) {

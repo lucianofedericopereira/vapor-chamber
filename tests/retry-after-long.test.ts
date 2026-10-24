@@ -1,9 +1,9 @@
 /** A Retry-After over 30 s is read as declared and never waited out short. Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { _failures, createAsyncCommandBus, type BusError } from '../src/command-bus';
+import { _failures, createAsyncCommandBus } from '../src/command-bus';
 import { postCommand, _parseRetryAfter } from '../src/http';
 import { createOutbox } from '../src/outbox';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { singleServer } from './backend-stubs';
 
 afterEach(() => {
@@ -38,7 +38,7 @@ describe('the HTTP client does not retry inside a request sooner than declared',
     const fetch = vi.fn().mockResolvedValue(mockResponse(503, { 'retry-after': '120' }));
     vi.stubGlobal('fetch', fetch);
     vi.useFakeTimers();
-    const settled = postCommand('/api/cmd', {}, { retry: 2 }).then(() => 'resolved', (e) => (e as { context?: { status?: number } }).context?.status);
+    const settled = postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } }).then(() => 'resolved', (e) => (e as { context?: { status?: number } }).context?.status);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await settled).toBe(503);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -50,7 +50,7 @@ describe('the HTTP client does not retry inside a request sooner than declared',
       .mockResolvedValueOnce(mockResponse(200, { 'content-type': 'application/json' }));
     vi.stubGlobal('fetch', fetch);
     vi.useFakeTimers();
-    const pending = postCommand('/api/cmd', {}, { retry: 1 });
+    const pending = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(2000);
     expect((await pending).status).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -93,17 +93,12 @@ describe('the outbox gets the long wait', () => {
       })
       : [200, { state: 1 }]));
     let online = false;
-    const outbox = createOutbox({ storage: { load: () => null, save: () => {}, clear: () => {} }, isOnline: () => online });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const outbox = createOutbox({ storage: null, isOnline: () => online });
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }), outbox });
     await bus.dispatch('orderA', {});
     online = true;
-    const rejected: string[] = [];
-    bus.on('outboxRejected', (cmd) => rejected.push((cmd.target as { error: BusError }).error.code));
 
     expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(rejected).toEqual([]);
     await vi.advanceTimersByTimeAsync(119_999);
     expect(sent.length).toBe(1);
     await vi.advanceTimersByTimeAsync(1);

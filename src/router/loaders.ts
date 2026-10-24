@@ -14,6 +14,7 @@
  * matching handler is a coded `router:missing:loader`.
  */
 
+import type { HttpClient } from '../http';
 import { isRouterError, routerError } from './errors';
 import type { QueryParamDef, RouteLocation, TableRecord } from './types';
 import { encodeSplat } from './table';
@@ -42,7 +43,26 @@ export type LoaderContext = {
    * cache when it is true, or it hands back the copy from before the change.
    */
   refresh: boolean;
+  /**
+   * The router's client (its `http` option), or undefined when it has none. A
+   * loader that makes requests reads through it, so the app's reads, commands
+   * and route data share one cache. tests/router/one-client.test.ts.
+   */
+  http?: HttpClient;
+  /**
+   * Name the groups this record's data belongs to: the read's `Cache-Groups`
+   * (RFC 9875). When the router's client invalidates one of them, the router
+   * refreshes the record (fetchLoaders reports them). tests/router/cache-groups.test.ts.
+   */
+  cacheGroups: (groups: readonly string[]) => void;
 };
+
+/**
+ * @internal - each router's client, recorded by `createRouter`: a refresh that
+ * runs loaders outside a navigation (`revalidateRoutes`) reads through the
+ * client the navigations read through.
+ */
+export const _routerClients = new WeakMap<object, HttpClient>();
 
 /** Handles `load` values under a registered prefix
  *  ('rows:products' -> ref 'products'). */
@@ -128,6 +148,10 @@ export async function runLoaders(
   onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void,
   /** See LoaderContext.refresh. */
   refresh = false,
+  /** See LoaderContext.http. */
+  http?: HttpClient,
+  /** See LoaderContext.cacheGroups: the record's name and its groups. */
+  onGroups?: (recordName: string, groups: readonly string[]) => void,
 ): Promise<Map<string, unknown>> {
   const results = new Map<string, unknown>();
   await Promise.all(
@@ -137,6 +161,8 @@ export async function runLoaders(
       const ctx: LoaderContext = {
         revalidate: (fresh) => onRevalidate?.(record.name, fresh, location),
         refresh,
+        http,
+        cacheGroups: (groups) => onGroups?.(record.name, groups),
       };
       try {
         if (prefixed) {

@@ -163,3 +163,39 @@ describe('supersede plugin', () => {
     expect(r3.ok && r3.value).toBe('abc');
   });
 });
+
+describe('supersede is the async bus\'s', () => {
+  it('a sync bus refuses it at use(), and keeps nothing of it', ({ bus }) => {
+    let seen: AbortSignal | undefined | 'none' = 'none';
+    bus.register('search', (cmd) => { seen = cmd.signal; return 1; });
+    expect(() => bus.use(supersede())).toThrow(expect.objectContaining({ code: 'supersede:invalid:bus' }));
+    expect(bus.dispatch('search', {})).toMatchObject({ ok: true, value: 1 });
+    expect(seen).toBeUndefined();
+  });
+
+  it('control: the async bus installs it', ({ asyncBus: bus }) => {
+    expect(() => bus.use(supersede())).not.toThrow();
+  });
+});
+
+describe('a part whose attach throws leaves nothing installed', () => {
+  const boom = () => ({ id: 'boom', begin: () => ({ signal: new AbortController().signal }), attach: () => { throw new Error('no'); } });
+
+  it('on the bus: the throw reaches use(), and its step never runs', ({ bus }) => {
+    let seen: AbortSignal | undefined | 'none' = 'none';
+    bus.register('go', (cmd) => { seen = cmd.signal; return 1; });
+    expect(() => bus.use(boom())).toThrow('no');
+    bus.dispatch('go', 1);
+    expect(seen).toBeUndefined();
+  });
+
+  it('on the test bus too', async () => {
+    const { createTestBus } = await import('../src/testing');
+    const bus = createTestBus({ passthroughHandlers: true });
+    let seen: AbortSignal | undefined | 'none' = 'none';
+    bus.register('go', (cmd) => { seen = cmd.signal; return 1; });
+    expect(() => bus.use(boom())).toThrow('no');
+    bus.dispatch('go', 1);
+    expect(seen).toBeUndefined();
+  });
+});

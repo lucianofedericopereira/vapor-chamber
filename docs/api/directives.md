@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/directives';
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:880](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L880)
+**Function** - [src/directives.ts:286](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L286)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
@@ -37,7 +37,7 @@ the whole branch folds out of a production build.
 
 ### vcCommandVapor
 
-**Function** - [src/directives.ts:724](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L724)
+**Function** - [src/directives.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L130)
 
 ```ts
 vcCommandVapor(el: Element, value?: () => unknown, _argument?: () => unknown, modifiers?: Record<string, boolean | undefined>) => (() => void) | undefined
@@ -104,12 +104,13 @@ import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives';
   <button v-vc-command.stop="'cartAdd'" data-vc-payload='{"id":1}'>Add</button>
 </template>
 
-// or app-wide: createVaporApp(App).directive('vc-command', vcCommandVapor)
+// or app-wide, on the typed app from 'vapor-chamber/vapor':
+// createVaporChamberApp(App).directive('vc-command', vcCommandVapor)
 ```
 
 ### vcOptimisticVapor
 
-**Function** - [src/directives.ts:857](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L857)
+**Function** - [src/directives.ts:263](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L263)
 
 ```ts
 vcOptimisticVapor(el: Element, value?: () => unknown) => () => void
@@ -147,7 +148,7 @@ const bump = (cmd) => { count.value++; return () => { count.value--; }; };
 
 ### vcPayloadVapor
 
-**Function** - [src/directives.ts:823](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L823)
+**Function** - [src/directives.ts:229](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L229)
 
 ```ts
 vcPayloadVapor(el: Element, value?: () => unknown) => () => void

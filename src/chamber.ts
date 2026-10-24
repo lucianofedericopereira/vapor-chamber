@@ -12,11 +12,14 @@
  */
 
 import { DEV } from './dev';
-import { disposeAll, _targetKey, unsealBus, _isAsyncBus, _isSyncBus, _errResult,type BaseBus, type CommandBus,type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { _report } from './report';
+import { disposeAll, _pastSeal, _isAsyncBus, _mayReject, _errResult, _scoped, type ScopeOptions, type BaseBus, type CommandBus,type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type PluginParts, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
-import { createLedger } from './ledger';
+import { createLedger, recordOn } from './ledger';
 import { countOption } from './bounds';
+import { commandState, type CommandState, type CommandStateOptions } from './command-state';
 import { getCommandBus, resetCommandBus, resolveBus, setCommandBus, type BusOption, type ResultOn } from './shared-bus';
+import { _paceOf, pace, type PaceOption, type PacedOn } from './pace';
 
 /**
  * Build-time flag injected by `scripts/build.mjs` via Vite `define`: `true` in
@@ -59,10 +62,6 @@ declare const __VC_WIRED__: boolean | undefined;
  * (measured in the 1.26 evaluation).
  */
 declare const __VC_WIRED_BUILD__: boolean | undefined;
-// The build profile: true from `vaporChamberWire({ profile: 'lean' })`, false
-// from the plugin otherwise and from the IIFE builds; undefined (performance)
-// through a bundler without the plugin. Read in trackLoading.
-declare const __VC_LEAN__: boolean | undefined;
 
 import type { Signal } from './signal';
 
@@ -93,8 +92,8 @@ let _vueOnActivated: ((fn: () => void) => void) | null = null;
 let _vueOnDeactivated: ((fn: () => void) => void) | null = null;
 let _vueProbed = false;
 // Vue's DEEP ref(), kept separately from the shallowRef() wired into signal().
-// Used only by the opt-in vapor-chamber/reactive companion (deepSignal /
-// useDeepCommandState); the core never touches it.
+// Used only by the opt-in vapor-chamber/reactive companion (deepSignal); the
+// core never touches it.
 let _vueDeepRefFn: (<T>(v: T) => { value: T }) | null = null;
 
 // Vue 3.6+ Vapor detection
@@ -114,6 +113,18 @@ let _autoCleanupWarned = false;
 /** Promise that resolves once Vue detection is complete. Await this in composables
  *  that need Vue APIs to be available before first use. */
 let _probePromise: Promise<void> | null = null;
+
+/**
+ * The async probe's specifier, at module scope so the build keeps it a name.
+ *
+ * Rolldown inlines a single-use local `const` into a literal `import("vue")`,
+ * whatever `external`, `inlineConst` or `treeshake` say. A module-scope one
+ * survives. A literal is what a bundler resolves: a Vite dev server answered
+ * 500 for the package in an app with no `vue`, and webpack failed to build.
+ * Guarded by tests/dist-optional-peers.test.ts and
+ * tests/root-no-vue-dev-server.test.ts (log 36.F26).
+ */
+const VUE_PKG = 'vue';
 
 /** Takes what the library uses from a Vue namespace; every caller passes one. */
 function applyVueModule(vue: any): void {
@@ -248,9 +259,9 @@ let _vueConfigured = false;
  *
  * @example
  * import * as Vue from 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
- * import { configureVue, createVaporChamberApp } from 'vapor-chamber';
+ * import { configureVue } from 'vapor-chamber';
  * configureVue(Vue);
- * createVaporChamberApp(App).mount('#app');
+ * Vue.createVaporApp(App).mount('#app');
  */
 export function configureVue(vue: object): void {
   if (!vue) return;
@@ -337,18 +348,20 @@ export function untracked<T>(fn: () => T): T {
  * (tryAutoCleanup), whichever comes first - a component that only registers
  * handlers or listens never dispatches, and it degrades in production just
  * the same. The point is to fire while the probe is still succeeding: on the
- * probe path everything works under the dev server and silently stops working
- * once the app is built, so warning only on observed failure would warn only
- * where nothing can be logged. Conditions: Vue is here (`_vueDeepRefFn`), the
+ * probe path everything works while Vue reaches the library at runtime and
+ * silently stops working in a production bundle, so warning only on observed
+ * failure would warn only where nothing can be logged. Conditions: Vue is here (`_vueDeepRefFn`), the
  * build-time wiring is not (`_vueSubpathLoaded`), and no `vaporChamberWire()`
  * is wiring the build (`__VC_WIRED__`) - for its users the advice below names
  * an import the plugin already covers. One-shot, since both call sites are
  * hot. Folds away entirely in production builds.
  *
- * Where it shows: in a page where DEV is on - one under Vite's dev server,
- * where the ESM build's DEV reads `import.meta.env.DEV` because a page has no
- * `process` (measured in a real browser, Vite 8, package pre-bundled and
- * served unbundled), or a test runner with a DOM. Not on a server (no
+ * Where it shows: where DEV is on and Vue arrived at runtime - a Vite dev
+ * page with vaporChamberHMR(), whose shim fills the library's slot, a test
+ * runner with a DOM, or a page whose import map names `vue`. A Vite dev page
+ * without that plugin no longer gets here: the probe's specifier is a runtime
+ * name, so it fails and warnUnwired() speaks instead (log 36.F26, both
+ * measured in a real browser, Vite 8.3.5). Not on a server (no
  * `window`): Node resolves the bare `import()` in production too - measured
  * with the package externalized, a root composable gets a real Vue ref under
  * NODE_ENV=production - so there the advice below would be wrong.
@@ -362,10 +375,11 @@ export function untracked<T>(fn: () => T): T {
 function warnProbePath(): void {
   if (DEV && typeof window !== 'undefined' && _vueDeepRefFn !== null && !_vueSubpathLoaded && !_untrackWarned && !(typeof __VC_WIRED__ !== 'undefined' && __VC_WIRED__)) {
     _untrackWarned = true;
-    console.warn(
-      '[vapor-chamber] Vue detected at runtime rather than at build time.\n' +
-      'This works right now because the dev server can resolve a bare ' +
-      '`import()`. A production bundle cannot, and there, silently, ' +
+    _report('warn', 'vue:unexpected:probe',
+      'Vue detected at runtime rather than at build time.\n' +
+      'This works here because Vue reached the library at runtime ' +
+      '(vaporChamberHMR() in dev, a test runner or an import map). A production bundle ' +
+      'has none of these, and there, silently, ' +
       (_vueConfigured
         ? ''
         : 'the composables lose reactivity (their state becomes a plain { value }), ' +
@@ -413,8 +427,8 @@ function warnUnwired(): void {
     if (!(typeof __VC_WIRED_BUILD__ !== 'undefined' && __VC_WIRED_BUILD__) && !_unwiredWarned && (globalThis as any).__VUE__ === true) {
       _unwiredWarned = true;
       // Short on purpose: unlike the DEV text above, this ships in the IIFEs.
-      console.warn(
-        '[vapor-chamber] Composables run without reactivity, cleanup or KeepAlive guard. ' +
+      _report('warn', 'vue:missing:wiring',
+        'Composables run without reactivity, cleanup or KeepAlive guard. ' +
         (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__
           ? ''
           : "Import them from 'vapor-chamber/vue' (or /vapor), or: ") +
@@ -453,10 +467,10 @@ function probeVue(): void {
     if (fromGlobal) applyVueModule(fromGlobal);
 
     // 2. Async probe: dynamic import for ESM / Vite / bundler environments.
-    //    Resolved by the time user code's first await/tick completes.
-    //    Variable indirection prevents TS from statically resolving the optional peer dep.
-    const vuePkg = 'vue';
-    _probePromise = import(/* @vite-ignore */ vuePkg)
+    //    Resolved by the time user code's first await/tick completes. Only Node
+    //    and an import map resolve it: no bundler sees the name (VUE_PKG).
+    //    webpack folds a module-scope `const` too, so it is told to leave it.
+    _probePromise = import(/* webpackIgnore: true */ /* @vite-ignore */ VUE_PKG)
       .then((vue: any) => {
         // Only into an empty registry, or from the Vue already wired: one Vue
         // is one `ref`. A Vite server build that inlines Vue finds Node's own
@@ -492,9 +506,7 @@ function probeVue(): void {
      * The specifier is held in a variable so no bundler can fold it back into a
      * literal `import()` of that specifier: that would make the optional peer
      * statically resolvable from the package root and break consumers who lack it. Guarded by
-     * `tests/dist-optional-peers.test.ts`, which is also why `src/vue.ts` is built
-     * as its own pass in `scripts/build.mjs` - marking the peer external in the
-     * main build is exactly what lets the fold happen.
+     * `tests/dist-optional-peers.test.ts`.
      *
      * Declared inside this block, not beside probeVue: webpack parses a
      * function whether or not anything calls it, and warned "Critical
@@ -513,11 +525,9 @@ function probeVue(): void {
       // (tests/untracked-build-time-wins.test.ts).
       if (_vueSubpathLoaded) return;
       try {
-        // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
-        // straight back into a literal `import()` of that specifier by Rollup now that the
-        // package is a declared (optional) peer - Vite's lib mode auto-externalises
-        // peers, and an external specifier is exactly what constant propagation is
-        // free to inline. That literal is the leak `tests/dist-optional-peers.test.ts`
+        // Assembled, not written. A plain local `const pkg = '@vue/reactivity'` is
+        // folded straight back into a literal `import()` of that specifier by the
+        // build (see VUE_PKG). That literal is the leak `tests/dist-optional-peers.test.ts`
         // guards: statically resolvable from the package root, so every consumer
         // without the optional peer breaks at dep-optimize. `@vite-ignore` does not
         // prevent it - the pre-bundled dep is re-analysed.
@@ -692,8 +702,8 @@ export function tryAutoCleanup(disposeFn: () => void): void {
     DEV
   ) {
     _autoCleanupWarned = true;
-    console.warn(
-      '[vapor-chamber] Heads-up (not an error): a composable ran outside a Vue ' +
+    _report('warn', 'vue:missing:scope',
+      'A composable ran outside a Vue ' +
       "setup() / effectScope(), so its cleanup won't run automatically. Either call " +
       'the returned dispose() yourself, or run the composable inside setup() / ' +
       'effectScope(). Expected and harmless when intentional - e.g. in tests, ' +
@@ -751,13 +761,13 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 }
 
 // ---------------------------------------------------------------------------
-// runDispatch - shared loading/error wrapper. Two callers, both in this file:
-// `useCommand` and `useCommandQuery`. It takes the bus and the call's
-// arguments, not a thunk, and calls `bus.dispatch` / `bus.query` directly.
-// Against the thunk shape (one closure per call through `untracked`) this
-// takes 0.915-0.934x the time on `useCommand().dispatch`, 2.7-3.9 ns less
-// (`npm run ab`, two call lengths, controls within 1%; log s35.53). With both
-// callers interleaved the
+// runCommand and runDispatch - the composables' dispatch brackets. runCommand
+// is `useCommand`'s, runDispatch `useCommandQuery`'s (its `loading` and
+// `data`). Each takes the bus and the call's arguments, not a thunk, and
+// calls `bus.dispatch` / `bus.query` directly. Against the thunk shape (one
+// closure per call through `untracked`) this took 0.915-0.934x the time on
+// `useCommand().dispatch`, 2.7-3.9 ns less (`npm run ab`, two call lengths,
+// controls within 1%; log s35.53). With both callers interleaved the
 // workload's own control spread up to 1.36x across processes, so no figure is
 // claimed for that shape. A function passed in and called with
 // `.call` gained nothing; why is not settled (V8 can inline through a
@@ -768,12 +778,11 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 // wrapper and says why at its own site (~1.2x leaner than this .then-chain,
 // measured, on a path whose entire point is to allocate nothing).
 //
-// Overlapping dispatches through one composable: `loading` is true while ANY
+// Overlapping queries through one composable: `loading` is true while ANY
 // is in flight, written on 0 <-> 1 of `n` (the first to settle cleared it while
-// another still ran), and `onSuccess` (useCommandQuery's `data`) takes only
-// the LATEST dispatch's answer, by `seq` (an older one landing last overwrote
-// it). `lastError` stays the last failure to arrive: keeping only the latest
-// dispatch's would hide an older one's failure. tests/composable-overlap.test.ts.
+// another still ran), and `onSuccess` (`data`) takes only the LATEST query's
+// answer, by `seq` (an older one landing last overwrote it).
+// tests/composable-overlap.test.ts.
 //
 // The counts are one record per composable, both fields set at creation
 // (docs/V8-RULES.md 1-2), made at its FIRST dispatch, not when it is created.
@@ -788,13 +797,58 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 //   difference (+0.6 / +0.7%, CI includes 1). Dispatch reads -4.5 / -6.2 ns.
 // So the slot is a `var` on purpose: an initializer here is measured cost.
 // A WeakMap keyed by `loading` instead kept creation at base but cost every
-// dispatch +4.7 / +5.9 ns.
+// dispatch +4.7 / +5.9 ns. useCommand's command-state slot is a `var` for the
+// same reason.
 // ---------------------------------------------------------------------------
+
+/** A failure that escaped a bracket, as a result of the bus's own kind: a promise on an async bus. */
+function escaped(bus: CommandBus, error: Error): CommandResult | Promise<CommandResult> {
+  const failed = _errResult(error);
+  return _isAsyncBus(bus) ? Promise.resolve(failed) : failed;
+}
+
+/**
+ * @internal useCommand's dispatch: untracked, and a throw is a failed result. `options` is a paced run's cancel signal (`pace`).
+ * `rejects` is `_mayReject(bus)`, read once by the composable: a bus that cannot reject gets no `.then`.
+ */
+export function runCommand(bus: CommandBus, rejects: boolean, action: string, target: unknown, payload: unknown, options?: { signal?: AbortSignal }): CommandResult | Promise<CommandResult> {
+  let result: any;
+  try {
+    // A dispatch is an action, not a read. Without this, every reactive value
+    // the HANDLER touches becomes a dependency of whatever effect called the
+    // composable, so the component re-runs on state it never mentions. Vue
+    // fixed the same class twice in 3.6.0-rc.3 (#15203/#15204) the same way.
+    // Pass-through when Vue is absent.
+    if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
+      result = bus.dispatch(action, target, payload, options);
+    } else {
+      warnProbePath();
+      _pause();
+      try {
+        result = bus.dispatch(action, target, payload, options);
+      } finally {
+        _reset();
+      }
+    }
+  } catch (e) {
+    // The one throw left by contract, `onMissing: 'throw'`. Its caller is
+    // typed for the bus's kind (ResultOn), so it settles as a failed result,
+    // a promise on an async bus (tests/composables-result-types.test.ts).
+    return escaped(bus, e as Error);
+  }
+  // On an async bus that can reject the same throw is a rejection: settled as a
+  // failed result by one module-level function, no closure per call
+  // (tests/usecommand-pending.test.ts). A bus that cannot reject resolves as is.
+  return rejects && result && typeof result.then === 'function' ? (result as Promise<CommandResult>).then(undefined, rejected) : result;
+}
+
+/** A rejected dispatch as a failed result. */
+const rejected = (e: Error): CommandResult => _errResult(e);
 
 /** @internal A composable's in-flight count and its latest dispatch. */
 export type DispatchCounts = { n: number; seq: number };
 
-/** @internal */
+/** @internal useCommandQuery's query: `loading` while any is in flight, `onSuccess` for the latest. */
 export function runDispatch(
   bus: CommandBus,
   query: boolean,
@@ -802,25 +856,19 @@ export function runDispatch(
   target: unknown,
   payload: unknown,
   loading: Signal<boolean>,
-  lastError: Signal<Error | null>,
   st: DispatchCounts,
   onSuccess?: (value: any) => void,
 ): CommandResult | Promise<CommandResult> {
   let result: any;
   const mine = ++st.seq;
   try {
-    // Both opening writes are INSIDE the try. A synchronous subscriber can
+    // The opening write is INSIDE the try. A synchronous subscriber can
     // throw out of a signal write; outside the try that left `loading` true
     // with the error escaping `dispatch`. Here it is a failed result like any
     // other, and the handler does not run
     // (tests/rundispatch-throwing-subscriber.test.ts).
     if (st.n++ === 0) loading.value = true;
-    lastError.value = null;
-    // A dispatch is an action, not a read. Without this, every reactive value
-    // the HANDLER touches becomes a dependency of whatever effect called the
-    // composable, so the component re-runs on state it never mentions. Vue
-    // fixed the same class twice in 3.6.0-rc.3 (#15203/#15204) the same way.
-    // Pass-through when Vue is absent.
+    // Untracked, as runCommand's (see there).
     if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
       result = query ? bus.query(action, target, payload) : bus.dispatch(action, target, payload);
     } else {
@@ -834,28 +882,23 @@ export function runDispatch(
     }
   } catch (e) {
     if (--st.n === 0) loading.value = false;
-    const error = e as Error;
-    lastError.value = error;
     // An async bus never throws here, a subscriber does. Its caller is typed
     // for a promise (ResultOn), so the failure settles as one
     // (tests/composables-result-types.test.ts).
-    const failed = _errResult(error);
-    return _isAsyncBus(bus) ? Promise.resolve(failed) : failed;
+    return escaped(bus, e as Error);
   }
   if (result && typeof result.then === 'function') {
     return (result as Promise<CommandResult>).then(
       (r) => {
         if (--st.n === 0) loading.value = false;
-        if (!r.ok) lastError.value = r.error ?? null;
-        else if (mine === st.seq) onSuccess?.(r.value);
+        if (r.ok && mine === st.seq) onSuccess?.(r.value);
         return r;
       },
-      (e: Error) => { if (--st.n === 0) loading.value = false; lastError.value = e; return _errResult(e); },
+      (e: Error) => { if (--st.n === 0) loading.value = false; return _errResult(e); },
     );
   }
   if (--st.n === 0) loading.value = false;
-  if (!result.ok) lastError.value = result.error ?? null;
-  else if (mine === st.seq) onSuccess?.(result.value);
+  if (result.ok && mine === st.seq) onSuccess?.(result.value);
   return result;
 }
 
@@ -864,39 +907,64 @@ export function runDispatch(
 // ---------------------------------------------------------------------------
 
 /**
- * useCommand - reactive command dispatch with optional bus subscriptions.
+ * useCommand - command dispatch with bus subscriptions, cleaned up with the scope.
  *
- * Returns `dispatch` + reactive `loading` / `lastError`, plus `register` / `on` /
- * `emit` for managing handlers and listeners with auto-cleanup on scope disposal
- * (`onScopeDispose`). Vapor-safe - works in `<script setup vapor>` and VDOM alike,
- * with no `getCurrentInstance()` dependency. For fire-and-forget with zero reactive
- * overhead, use `defineVaporCommand()` instead.
+ * `{ debounce: ms }` or `{ throttle: ms }` paces its `dispatch` at the sender
+ * (`pace`): a paced dispatch returns a promise, and search as you type passes
+ * the typed text as the payload so the keystrokes share one key.
+ *
+ * Returns `dispatch`, `pending(action, target?)` (the bus's command state for
+ * that key, `commandState`), plus `register` / `on` / `emit` for handlers and
+ * listeners, all released on scope disposal (`onScopeDispose`). Vapor-safe -
+ * works in `<script setup vapor>` and VDOM alike, with no
+ * `getCurrentInstance()` dependency. A dispatch's own failure is its result.
+ * The bus's recent failures are `useSharedCommandState().errors`.
  *
  * (Absorbed the former `useVaporCommand` - the Vapor-safety distinction was obsolete;
  * this is now the single command composable.)
  *
  * @example
- * const { dispatch, register, on, loading, lastError } = useCommand();
+ * const { dispatch, register, pending } = useCommand();
  * register('cartAdd', (cmd) => addToCart(cmd.target));
+ * const adding = pending('cartAdd', { id: product.id });
  * dispatch('cartAdd', { id: product.id });
  */
-export function useCommand<B extends BaseBus = CommandBus>(options?: BusOption<B>) {
+export function useCommand<B extends BaseBus = CommandBus, D extends number | undefined = undefined, T extends number | undefined = undefined>(options?: BusOption<B> & PaceOption<D, T>) {
   // Untyped internally; the public dispatch/register signatures below carry
   // the SharedCommandMap typing (GlobalCommands augmentation).
   const bus = resolveBus(options?.bus);
-  const loading = signal(false);
-  const lastError = signal<Error | null>(null);
+  const rejects = _mayReject(bus);
   // A `var` with no initializer: see runDispatch (no bytecode on creation).
-  var counts: DispatchCounts | undefined;
+  // Held from the first pending() call, released with the composable.
+  var state: CommandState | undefined;
   const listeners: Array<() => void> = [];
   const registered: Array<{ action: string; handler: Handler; opts?: RegisterOptions; off: (() => void) | null }> = [];
 
-  function dispatch<A extends keyof SharedCommandMap & string>(
+  function direct<A extends keyof SharedCommandMap & string>(
     action: A,
     target: TargetOf<SharedCommandMap, A>,
     payload?: PayloadOf<SharedCommandMap, A>,
-  ): ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>> {
-    return runDispatch(bus, false, action, target, payload, loading, lastError, (counts ??= { n: 0, seq: 0 })) as ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>>;
+  ): PacedOn<B, CommandResult<ResultOf<SharedCommandMap, A>>, D, T> {
+    return runCommand(bus, rejects, action, target, payload) as PacedOn<B, CommandResult<ResultOf<SharedCommandMap, A>>, D, T>;
+  }
+
+  // Paced at the sender when an option says so, decided here: without one the
+  // dispatch is `direct`, with no wrapper and no read per call.
+  let dispatch = direct;
+  const pacing = _paceOf(options);
+  if (pacing !== undefined) {
+    const paced = pace((action, target, payload, options) => runCommand(bus, rejects, action, target, payload, options), pacing);
+    listeners.push(paced.dispose);
+    dispatch = paced as unknown as typeof direct;
+  }
+
+  /** In flight for this key, bus-wide (`commandState`'s `pending`). */
+  function pending<A extends keyof SharedCommandMap & string>(action: A, target?: TargetOf<SharedCommandMap, A>): Readonly<Signal<boolean>> {
+    if (state === undefined) {
+      state = commandState(bus);
+      listeners.push(state.dispose);
+    }
+    return state.pending(action, target);
   }
 
   function register<A extends keyof SharedCommandMap & string>(
@@ -953,493 +1021,32 @@ export function useCommand<B extends BaseBus = CommandBus>(options?: BusOption<B
 
   tryAutoCleanup(dispose);
 
-  return { dispatch, register, on, emit, loading, lastError, dispose };
+  return { dispatch, pending, register, on, emit, dispose };
 }
 
 // ---------------------------------------------------------------------------
 // useSharedCommandState
 // ---------------------------------------------------------------------------
 
-/**
- * Shared state attached to one bus. The ref-count tracks how many
- * `useSharedCommandState()` callers are still subscribed; when it hits zero
- * we drop the entry so the WeakMap can collect it (the bus itself is also
- * weakly held).
- */
-type SharedCommandStateEntry = {
-  inFlight: Signal<number>;
-  isAnyLoading: Signal<boolean>;
-  lastError: Signal<Error | null>;
-  errors: Signal<Error[]>;
-  errorCount: Signal<number>;
-  refCount: number;
-  maxSize: number;
-  /** Bus-wide error observer - unhooked when refCount hits 0. */
-  unsub: () => void;
-  /** Per-(action, target) loading: a map by action, then by the target's
-   *  `commandKey` part (`_targetKey`), so a dispatch builds no key string. Null
-   *  until the first `isLoading()` call, so a bus nobody asks per-key questions
-   *  of pays nothing. */
-  slots: Map<string, Map<string, LoadingSlot>> | null;
-  /** The slot each started Command counted into, so a settle is matched to
-   *  ITS start and never decrements someone else's. On an async bus, or one
-   *  this library did not make; a sync bus uses `stack`. */
-  started: Map<Command, LoadingSlot> | null;
-  /** A sync bus's starts, each Command followed by its slot, innermost last.
-   *  Its settles come in LIFO order on every nesting path
-   *  (tests/isloading-nesting.test.ts), so a settle is matched at the top. The
-   *  match is still by identity: a settle with no start (a query, an emit, a
-   *  command already running when tracking began) is not found and takes
-   *  nothing, and one below a start that never settled is found and removed
-   *  there. */
-  stack: Array<Command | LoadingSlot> | null;
-  /** The loading before-hook - unhooked with `unsub`. */
-  unBefore: (() => void) | null;
-  /** Commands started and not yet settled. While above 0 the entry outlives
-   *  its last holder, so the next one sees the key still in flight; the
-   *  settle that ends the last one releases it. */
-  pending: number;
-  /** An unread slot back at 0 is pruned only while its action's bucket holds
-   *  more than this: 256 in the performance profile (the slot is reused, no
-   *  allocation, set or delete per dispatch: 0.848-0.865x on a tracked
-   *  dispatch, 21-22 ns, log s35.61), 0 in lean (pruned at once). Set from
-   *  `__VC_LEAN__` when tracking starts (trackLoading), never per dispatch. */
-  pruneAbove: number;
-};
-
-/** One key's in-flight count and the flag its readers subscribe to. `flag` is
- *  null until `isLoading()` reads the key, created then from the count, so a key
- *  nobody asks about costs no signal and no reactive write per dispatch
- *  (0.969-0.982x on a tracked dispatch, 3.6-6.1 ns, log s35.53). Once
- *  created it is written only on 0 <-> 1, so a reader re-runs on transitions of
- *  ITS key and on nothing else, and the slot is kept when its count returns to
- *  0, since the reader holds the signal and later dispatches must write that
- *  same one. A slot without one is pruned then in the lean profile; the
- *  performance profile keeps it for the next dispatch of its key while its
- *  bucket holds 256 or fewer (see `pruneAbove`). */
-type LoadingSlot = { key: string; n: number; flag: Signal<boolean> | null; bucket: Map<string, LoadingSlot> };
-
-const _sharedStates = new WeakMap<CommandBus, SharedCommandStateEntry>();
-
-function loadingSlot(slots: Map<string, Map<string, LoadingSlot>>, action: string, key: string): LoadingSlot {
-  let bucket = slots.get(action);
-  if (bucket === undefined) {
-    bucket = new Map();
-    slots.set(action, bucket);
-  }
-  let slot = bucket.get(key);
-  if (slot === undefined) {
-    slot = { key, n: 0, flag: null, bucket };
-    bucket.set(key, slot);
-  }
-  return slot;
-}
-
-/** Unhook the entry from its bus and forget it. */
-function releaseSharedState(entry: SharedCommandStateEntry, bus: CommandBus): void {
-  entry.unsub(); // the bus-wide error observer
-  entry.unBefore?.(); // and the loading before-hook, if one was installed
-  _sharedStates.delete(bus);
-}
+export type UseSharedCommandStateOptions<B extends BaseBus = BaseBus> = BusOption<B> & CommandStateOptions;
 
 /**
- * Install a composable's observer past the seal. `seal()` protects the
- * handler/plugin topology, not the observation layer (command-bus.ts), so the
- * library's own hooks go in, and the bus is sealed again before this returns.
- * tests/composables-sealed-bus.test.ts.
- */
-function pastSeal<T>(bus: CommandBus, install: () => T): T {
-  const sealed = bus.isSealed();
-  if (sealed) unsealBus(bus);
-  try { return install(); }
-  finally { if (sealed) bus.seal(); }
-}
-
-/**
- * Install per-key tracking on first use: a before-hook starts a Command, the
- * entry's `on('*')` observer settles it. On a sealed bus the hook is the
- * library's own, installed past the seal: the bus is sealed again before
- * this returns.
- */
-function trackLoading(entry: SharedCommandStateEntry, bus: CommandBus): Map<string, Map<string, LoadingSlot>> {
-  if (entry.slots === null) {
-    const slots = new Map<string, Map<string, LoadingSlot>>();
-    // The build profile, read once per entry: a `typeof` of a global nobody
-    // defined is a slow lookup (docs/V8-RULES.md rule 6), and a define folds
-    // this line to the write or to nothing.
-    if (typeof __VC_LEAN__ !== 'undefined' && __VC_LEAN__) entry.pruneAbove = 0;
-    pastSeal(bus, () => {
-      if (_isSyncBus(bus)) {
-        const stack: Array<Command | LoadingSlot> = [];
-        entry.unBefore = bus.onBefore((cmd: Command) => {
-          const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
-          if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
-          entry.pending++;
-          stack.push(cmd, slot);
-        });
-        entry.stack = stack;
-      } else {
-        // A Map, not a WeakMap: every start is deleted at its settle, and a start
-        // that never settled would already hold `pending` above 0 (the entry and
-        // the key stay), so weakness would free only the Command. The WeakMap cost
-        // 24-26 ns of a tracked dispatch's ~188 (this Map: 0.858-0.871x, log s35.53).
-        const started = new Map<Command, LoadingSlot>();
-        entry.unBefore = bus.onBefore((cmd: Command) => {
-          const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
-          if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
-          entry.pending++;
-          started.set(cmd, slot);
-        });
-        entry.started = started;
-      }
-    });
-    entry.slots = slots;
-  }
-  return entry.slots;
-}
-
-export type UseSharedCommandStateOptions<B extends BaseBus = BaseBus> = BusOption<B> & {
-  /**
-   * How many recent errors to retain in `errors`. The list is kept
-   * newest-last; older entries drop off. Default: 10.
-   */
-  maxSize?: number;
-};
-
-/**
- * useSharedCommandState - one set of reactive signals shared across every
- * caller, instead of two signals (`loading`, `lastError`) per call.
+ * useSharedCommandState - the bus's command state (`commandState`) as a Vue
+ * view: the same handle, released when the component's scope ends.
  *
- * Designed for component-heavy pages where many components need to react to
- * "is *anything* in flight?" or "what was the last error?". Replaces
- * `N x useCommand()` allocations with a single shared state per bus.
- *
- * Memory math: 50 components x 2 signals each = 100 signal nodes today.
- * With shared state: ~5 signal nodes total + a counter, regardless of
- * subscriber count.
+ * Every caller on one bus reads the same signals, so 50 components cost one
+ * state, not 100 signals. `pending(action, target?)` is in flight for that
+ * key, `anyPending` for any command, bus-wide: a dispatch from anywhere counts.
  *
  * @example
- * // Components using this share isAnyLoading, errors, etc.
- * const { dispatch, isAnyLoading, lastError } = useSharedCommandState();
- * await dispatch('cartAdd', product);
- *
- * @example
- * // Disable an entire toolbar while any command is in flight.
- * const { isAnyLoading } = useSharedCommandState();
- * <Button :disabled="isAnyLoading">Save</Button>
- *
- * Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
+ * const { pending, anyPending, lastError } = useSharedCommandState();
+ * const saving = pending('cartAdd', { id: product.id });
+ * <Button :disabled="anyPending">Save</Button>
  */
-export function useSharedCommandState<B extends BaseBus = CommandBus>(options: UseSharedCommandStateOptions<B> = {}) {
-  const bus = resolveBus(options.bus);
-  const maxSize = countOption(options.maxSize, 10); // a NaN is the default (bounds.ts)
-
-  let state = _sharedStates.get(bus);
-  if (!state) {
-    // Observe errors BUS-WIDE, not only dispatches made through this
-    // composable's own dispatch wrapper. Any failed command on the bus - from
-    // useCommand, raw bus.dispatch, anywhere - lands in the
-    // shared error list. (Both sync and async buses fan results to on('*')
-    // listeners after settling.)
-    //
-    // The same observer settles per-key loading (isLoading). Before-hooks and
-    // this fan-out are paired on every dispatch exit - normal, handler
-    // throw/reject, a before-hook's throw - or neither fires (a buffered miss).
-    // Some exits settle with NO start: a pre-flight abort, a query, emit(), a
-    // before-hook that threw ahead of ours. Matching by Command object ignores
-    // those rather than decrementing another dispatch's count. Every start has
-    // a settle: the runners turn a plugin's throw into a
-    // <plugin>:failed:plugin result (pluginThrew), and the one throw left by
-    // contract, `onMissing: 'throw'`, is settled before it is re-thrown
-    // (syncRunSettling). Pinned by tests/command-loading-fixture.test.ts and
-    // tests/plugin-throw-fixture.test.ts. inFlight/isAnyLoading stay scoped
-    // to this composable's wrapper.
-    // Declared ahead of `entry`, which it reads only when a command settles,
-    // long after the literal below has run.
-    const observe: Listener = (cmd, result) => {
-      let slot: LoadingSlot | undefined;
-      const stack = entry.stack;
-      if (stack !== null) {
-        let i = stack.length - 2;
-        if (i >= 0 && stack[i] === cmd) {
-          slot = stack.pop() as LoadingSlot;
-          stack.pop();
-        } else {
-          i -= 2;
-          while (i >= 0 && stack[i] !== cmd) i -= 2;
-          if (i >= 0) slot = stack.splice(i, 2)[1] as LoadingSlot;
-        }
-      } else if (entry.started !== null) {
-        slot = entry.started.get(cmd);
-        if (slot !== undefined) entry.started.delete(cmd);
-      }
-      if (slot !== undefined) {
-        if (--slot.n === 0) {
-          if (slot.flag !== null) slot.flag.value = false;
-          else if (slot.bucket.size > entry.pruneAbove) slot.bucket.delete(slot.key);
-        }
-        if (--entry.pending === 0 && entry.refCount <= 0) releaseSharedState(entry, bus);
-      }
-      if (!result.ok && result.error) {
-        entry.lastError.value = result.error;
-        const next = entry.errors.value.slice();
-        next.push(result.error);
-        while (next.length > entry.maxSize) next.shift();
-        entry.errors.value = next;
-        entry.errorCount.value = next.length;
-      }
-    };
-    const entry: SharedCommandStateEntry = {
-      inFlight: signal(0),
-      isAnyLoading: signal(false),
-      lastError: signal<Error | null>(null),
-      errors: signal<Error[]>([]),
-      errorCount: signal(0),
-      refCount: 0,
-      maxSize,
-      unsub: bus.on('*', observe),
-      slots: null,
-      started: null,
-      stack: null,
-      unBefore: null,
-      pending: 0,
-      pruneAbove: 256,
-    };
-    state = entry;
-    _sharedStates.set(bus, state);
-  } else if (maxSize < state.maxSize) {
-    // Tighten the cap if the new caller wants a smaller buffer; never grow
-    // it above another caller's request (avoid surprise memory growth).
-    state.maxSize = maxSize;
-  }
-  state.refCount++;
-
-  function recordError(err: Error): void {
-    // `onMissing: 'throw'` is now settled by the bus before it is re-thrown,
-    // so the on('*') observer above has already recorded this exact error;
-    // recording it again from the catch below would double-count it.
-    if (state!.lastError.value === err) return;
-    state!.lastError.value = err;
-    const next = state!.errors.value.slice();
-    next.push(err);
-    while (next.length > state!.maxSize) next.shift();
-    state!.errors.value = next;
-    state!.errorCount.value = next.length;
-  }
-
-  function decrement(): void {
-    const n = Math.max(0, state!.inFlight.value - 1);
-    state!.inFlight.value = n;
-    state!.isAnyLoading.value = n > 0;
-  }
-
-  function increment(): void {
-    state!.inFlight.value++;
-    state!.isAnyLoading.value = true;
-  }
-
-  function dispatch(
-    action: string,
-    target: any,
-    payload?: any,
-    opts?: { signal?: AbortSignal },
-  ): ResultOn<B> {
-    let result: any;
-    try {
-      // The opening writes are inside the try, as runDispatch's are: a sync
-      // subscriber that throws on one fails the dispatch, and the count
-      // returns to 0 (tests/shared-state-throwing-subscriber.test.ts).
-      increment();
-      result = untracked(() => bus.dispatch(action, target, payload, opts));
-    } catch (e) {
-      const error = e as Error;
-      recordError(error);
-      decrement();
-      // A subscriber can throw on an async bus too, typed for a promise.
-      const failed = _errResult(error);
-      return (_isAsyncBus(bus) ? Promise.resolve(failed) : failed) as ResultOn<B>;
-    }
-
-    if (result && typeof result.then === 'function') {
-      return (result as Promise<CommandResult>).then(
-        // Settled results are recorded by the bus-wide on('*') observer -
-        // recording here too would double-count.
-        (r) => { decrement(); return r; },
-        // A rejected dispatch promise bypassed the bus's errResult fan-out,
-        // so no listener fired - record it here.
-        (e: Error) => { recordError(e); decrement(); return _errResult(e); },
-      ) as ResultOn<B>;
-    }
-
-    // Settled sync results already hit the bus-wide on('*') observer.
-    decrement();
-    return result;
-  }
-
-  /** Wipe accumulated errors. Does not affect in-flight counter. */
-  function clear(): void {
-    state!.errors.value = [];
-    state!.errorCount.value = 0;
-    state!.lastError.value = null;
-  }
-
-  /**
-   * Reactive "is THIS (action, target) in flight?", bus-wide - any dispatch
-   * counts, not only this composable's. Keyed like `commandKey`, so object
-   * targets match by value. `isLoading(action)` is the exact key
-   * `(action, undefined)`, not "any target of this action".
-   *
-   * Atomic: each key has its own signal, written only when its count crosses
-   * 0 <-> 1, so a reader re-runs on ITS key's transitions and no other's.
-   * Counting starts at the bus's first call, for every key, and stops when
-   * the last holder leaves with nothing in flight. A dispatch already in
-   * flight when it starts is not counted (tests/command-loading-fixture.test.ts).
-   * It works on a sealed bus (see trackLoading), and a key still in flight
-   * when the last holder leaves reads lit for the next one (see `pending`).
-   */
-  function isLoading(action: string, target?: unknown): Readonly<Signal<boolean>> {
-    const slot = loadingSlot(trackLoading(state!, bus), action, _targetKey(target));
-    // Created on the first read, lit if the key is already in flight.
-    if (slot.flag === null) slot.flag = signal(slot.n > 0);
-    return slot.flag;
-  }
-
-  // Once per holder: a manual dispose() followed by the scope's own would
-  // count this holder out twice and release an entry a later holder uses
-  // (tests/shared-state-dispose-twice.test.ts).
-  let held = true;
-  function dispose(): void {
-    if (!held) return;
-    held = false;
-    // With a command in flight the entry stays (see `pending`).
-    if (--state!.refCount <= 0 && state!.pending === 0) releaseSharedState(state!, bus);
-  }
-
-  tryAutoCleanup(dispose);
-
-  return {
-    dispatch,
-    /** Reactive per-(action, target) loading flag - see isLoading above. */
-    isLoading,
-    /** Number of dispatches currently in flight across all subscribers. */
-    inFlight: state.inFlight,
-    /** True when `inFlight > 0`. Bind to button `disabled` etc. */
-    isAnyLoading: state.isAnyLoading,
-    /** Most recent error (across all subscribers). */
-    lastError: state.lastError,
-    /** Ring buffer of recent errors, newest last, capped at `maxSize`. */
-    errors: state.errors,
-    /** Current size of the `errors` buffer. */
-    errorCount: state.errorCount,
-    /** Wipe accumulated errors. */
-    clear,
-    /** Manually unhook. Most callers don't need this - `tryAutoCleanup`
-     *  hooks Vue's scope/unmount lifecycle. */
-    dispose,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// useCommandState
-// ---------------------------------------------------------------------------
-
-export type UseCommandStateOptions = BusOption & {
-  /**
-   * When true, multiple synchronous dispatches within the same microtask are
-   * accumulated and the signal is written once via `queueMicrotask`. Pairs with
-   * Vue 3.6.0-beta.12's v-for source coalescing: our side defers the signal
-   * write, Vue's runtime coalesces the resulting DOM update into one pass.
-   *
-   * Vue 3.6.0-beta.13: v-for consumers of coalesced state benefit from two
-   * additional runtime optimizations - specialized v-for block operations
-   * (runtime-vapor: specialize v-for block operations) and reduced v-if branch
-   * scope overhead (runtime-vapor: reduce v-if branch scope overhead). Signal
-   * writes flushed here land into a faster Vapor runtime patch path.
-   *
-   * Trade-off: 1 microtask of signal latency. Use for arrays consumed by v-for
-   * that receive rapid bulk updates (batch dispatch, form field arrays, scroll
-   * position lists). Default: false (immediate write per dispatch).
-   */
-  coalesce?: boolean;
-};
-
-/**
- * useCommandState - create reactive state that updates via commands.
- *
- * Auto-cleanup on Vue component unmount or scope disposal.
- *
- * @example
- * // Immediate mode (default):
- * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] });
- *
- * @example
- * // Coalesced mode - batch writes for v-for lists:
- * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] }, { coalesce: true });
- */
-export function useCommandState<T>(
-  initial: T,
-  handlers: {
-    [action: string]: (state: T, cmd: Command) => T;
-  },
-  options: UseCommandStateOptions = {}
-) {
-  return _createCommandState(initial, handlers, options, signal);
-}
-
-/**
- * @internal - shared core for `useCommandState` (shallow, default) and the
- * opt-in `useDeepCommandState` from `vapor-chamber/reactive` (deep). The only
- * difference between the two is the `createSignal` factory: the core passes the
- * shallow `signal()`; the companion passes a deep `ref()`-backed factory. All
- * dispatch/coalesce/cleanup logic is identical and lives here so the two
- * variants can never drift.
- */
-export function _createCommandState<T>(
-  initial: T,
-  handlers: {
-    [action: string]: (state: T, cmd: Command) => T;
-  },
-  options: UseCommandStateOptions,
-  createSignal: <V>(v: V) => Signal<V>,
-): { state: Signal<T>; dispose: () => void } {
-  const { coalesce = false } = options;
-  const bus = resolveBus(options.bus);
-  const state = createSignal(initial);
-  const unregisters: Array<() => void> = [];
-
-  // coalesce bookkeeping - only allocated when coalesce: true
-  let _pending: T = initial;
-  let _hasPending = false;
-  let _scheduled = false;
-
-  for (const [action, handler] of Object.entries(handlers)) {
-    const unregister = bus.register(action, (cmd) => {
-      if (coalesce) {
-        _pending = handler(_hasPending ? _pending : state.value, cmd);
-        _hasPending = true;
-        if (!_scheduled) {
-          _scheduled = true;
-          queueMicrotask(() => {
-            state.value = _pending;
-            _hasPending = false;
-            _scheduled = false;
-          });
-        }
-        return _pending;
-      }
-      state.value = handler(state.value, cmd);
-      return state.value;
-    });
-    unregisters.push(unregister);
-  }
-
-  const dispose = () => {
-    disposeAll(unregisters);
-  };
-
-  tryAutoCleanup(dispose);
-
-  return { state, dispose };
+export function useSharedCommandState<B extends BaseBus = CommandBus>(options: UseSharedCommandStateOptions<B> = {}): CommandState {
+  const state = commandState(resolveBus(options.bus), options);
+  tryAutoCleanup(state.dispose);
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -1452,40 +1059,39 @@ export function _createCommandState<T>(
  * Auto-cleanup on Vue component unmount or scope disposal.
  * Undo dispatches `<action>$undo`, which runs the inverse registered via register(action, handler, { undo }).
  */
-export function useCommandHistory(options: {
+export function useCommandHistory(options: ScopeOptions & {
   maxSize?: number;
-  filter?: (cmd: Command) => boolean;
 } & BusOption = {}) {
-  const { maxSize, filter } = options;
+  const { maxSize } = options;
   const bus = resolveBus(options.bus);
 
-  const past = signal<Command[]>([]);
-  const future = signal<Command[]>([]);
+  const past = signal<readonly Command[]>([]);
+  const future = signal<readonly Command[]>([]);
   const canUndo = signal(false);
   const canRedo = signal(false);
 
   // `paused` brackets TIME (a KeepAlive deactivation), not one dispatch; the
-  // rest of the recording rule, and undo/redo, live in ONE place,
-  // createLedger (ledger.ts), shared with the history() plugin. What is this
-  // composable's own: recording through onAfter, the pause, and mirroring the
-  // stacks into signals.
+  // rest of the recording rule, the recorder and undo/redo live in ONE place,
+  // ledger.ts, shared with history(). What is this composable's own: the
+  // pause and mirroring the stacks into signals.
   let paused = false;
   const ledger = createLedger({
     maxSize,
-    filter,
+    actions: options.actions,
+    actionFilter: options.actionFilter,
     bus,
     skip: () => paused,
     onChange: (futureMoved) => {
-      past.value = ledger.past.slice();
-      // Only renew the redo stack when it moved - a fresh [] every dispatch
-      // is a new identity that re-triggers every future/canRedo watcher.
-      if (futureMoved) future.value = ledger.future.slice();
+      past.value = ledger.past;
+      // The ledger's own arrays, read-only: each change writes new ones, so
+      // no copy. The redo stack is set only when it moved.
+      if (futureMoved) future.value = ledger.future;
       canUndo.value = ledger.canUndo();
       canRedo.value = ledger.future.length > 0;
     },
   });
 
-  const unsubscribe = pastSeal(bus, () => bus.onAfter((cmd, result) => ledger.record(cmd, result)));
+  const unsubscribe = recordOn(bus, ledger);
 
   tryKeepAliveHooks(
     () => { paused = true; },
@@ -1521,15 +1127,17 @@ export function useCommandHistory(options: {
 /**
  * useCommandQuery - CQRS read-side composable with reactive state.
  *
- * Wraps bus.query() with reactive `data`, `loading`, and `lastError` signals.
- * query() skips onBefore hooks (no auth gates, no loading spinners for reads)
- * but runs plugins, handlers, and afterHooks.
+ * Wraps bus.query() with reactive `data` and `loading` signals. A query's own
+ * failure is its result. The bus's recent failures are
+ * `useSharedCommandState().errors`.
+ * query() runs the rules, the steps, the handler and the afterHooks; its
+ * start is not counted as pending.
  *
  * Supports both sync and async buses - if the result is a Promise, loading
  * stays true until it resolves.
  *
  * @example
- * const { query, data, loading, lastError } = useCommandQuery();
+ * const { query, data, loading } = useCommandQuery();
  * const result = query('getUser', { id: 42 });
  * // data.value = result.value after query completes
  */
@@ -1540,16 +1148,15 @@ export function useCommandQuery<B extends BaseBus = CommandBus>(options?: BusOpt
   warnUnwired();
   const data = signal<any>(null);
   const loading = signal(false);
-  const lastError = signal<Error | null>(null);
   // A `var` with no initializer: see runDispatch (no bytecode on creation).
   var counts: DispatchCounts | undefined;
   const onData = (value: any): void => { data.value = value; };
 
   function query(action: string, target: any, payload?: any): ResultOn<B> {
-    return runDispatch(bus, true, action, target, payload, loading, lastError, (counts ??= { n: 0, seq: 0 }), onData) as ResultOn<B>;
+    return runDispatch(bus, true, action, target, payload, loading, (counts ??= { n: 0, seq: 0 }), onData) as ResultOn<B>;
   }
 
-  return { query, data, loading, lastError };
+  return { query, data, loading };
 }
 
 // ---------------------------------------------------------------------------
@@ -1613,7 +1220,7 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
     return untracked(() => bus.dispatch(prefixed(action), target, payload)) as ResultOn<B>;
   }
 
-  /** Read-only dispatch - skips onBefore hooks, runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - runs the rules, the steps and the handler, fires afterHooks. */
   function query(action: string, target: any, payload?: any): ResultOn<B> {
     return untracked(() => bus.query(prefixed(action), target, payload)) as ResultOn<B>;
   }
@@ -1629,7 +1236,7 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
     return unregister;
   }
 
-  function use(plugin: Plugin): () => void {
+  function use(plugin: PluginParts): () => void {
     const remove = bus.use(plugin);
     cleanups.push(remove);
     return remove;
@@ -1637,7 +1244,8 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
 
   function on(pattern: string, listener: Listener): () => void {
     // Translate wildcard to namespaced: '*' -> 'cart*', 'add' -> 'cartAdd'
-    const namespacedPattern = pattern === '*' ? `${namespace}*` : prefixed(pattern);
+    // `prefixed` keeps a trailing `*`, so `'*'` becomes the namespace's prefix pattern.
+    const namespacedPattern = prefixed(pattern);
     const unsub = bus.on(namespacedPattern, listener);
     cleanups.push(unsub);
     return unsub;
@@ -1660,20 +1268,19 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
  * useCommandError - component-scoped error boundary for command failures.
  *
  * Subscribes to the bus and captures all failed command results reactively.
- * Optional filter narrows which actions are tracked.
+ * Optional `actions` and `actionFilter` narrow which actions are tracked.
  *
  * @example
  * const { latestError, errors, clearErrors } = useCommandError()
  *
  * // Only watch cart commands
- * const { latestError } = useCommandError({ filter: cmd => cmd.action.startsWith('cart') })
+ * const { latestError } = useCommandError({ actions: ['cart*'] })
  */
-export function useCommandError(options: {
-  filter?: (cmd: Command) => boolean;
+export function useCommandError(options: ScopeOptions & {
   /** Max errors retained - oldest are dropped first (ring buffer). Default: 50. */
   maxSize?: number;
 } & BusOption = {}) {
-  const { filter } = options;
+  const inside = _scoped(options); // asked once per action; null while there is no scope
   const maxSize = countOption(options.maxSize, 50); // a NaN is the default (bounds.ts)
   const bus = resolveBus(options.bus);
 
@@ -1682,10 +1289,10 @@ export function useCommandError(options: {
   const latestError = signal<Error | null>(null);
   let paused = false;
 
-  const unsubscribe = pastSeal(bus, () => bus.onAfter((cmd, result) => {
+  const unsubscribe = _pastSeal(bus, () => bus.onAfter((cmd, result) => {
     if (paused) return;
     if (!result.ok && result.error) {
-      if (!filter || filter(cmd)) {
+      if (inside === null || inside(cmd.action)) {
         latestError.value = result.error;
         const next = errors.value.slice();
         next.push({ cmd, error: result.error, timestamp: Date.now() });

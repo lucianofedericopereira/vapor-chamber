@@ -1,9 +1,9 @@
 // `$reset()` is a command: plugins, history and listeners see it, and it reaches storage.
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
-import { persist } from '../src/plugins-io';
 import { defineChamberStore } from '../src/store';
+import { saveTo } from '../src/store-persist';
+import { history } from '../src/plugins-core';
 
 type Counter = { n: number };
 
@@ -17,34 +17,38 @@ function memoryStorage(initial: string | null = null) {
   return {
     getItem: () => stored,
     setItem: (_k: string, v: string) => { stored = v; },
-    removeItem: () => { stored = null; },
     read: () => stored,
   };
 }
 
 describe('store $reset as a command', () => {
-  it('persist hears the reset, and a reload reads the reset state', () => {
+  it("the store's persist saves the reset, and a reload reads the reset state", async () => {
     const storage = memoryStorage();
-    const bus = createCommandBus();
-    const store = useCounter(bus);
-    bus.use(persist({ key: 'vc:counter', storage, getState: () => store.state.value }));
+    const usePersisted = defineChamberStore('counter', {
+      state: (): Counter => ({ n: 0 }),
+      reducers: { set: (_s: Counter, n: number) => ({ n }) },
+      persist: saveTo({ key: 'vc:counter', storage }),
+    });
+    const store = usePersisted(createCommandBus());
     store.set(5);
+    await Promise.resolve();
     expect(storage.read()).toBe(JSON.stringify({ n: 5 }));
 
     store.$reset();
+    await Promise.resolve();
 
     expect(storage.read()).toBe(JSON.stringify({ n: 0 }));
-    // The reload: a fresh persist over the same storage loads what the next page would.
-    expect(persist<Counter>({ key: 'vc:counter', storage, getState: () => ({ n: -1 }) }).load()).toEqual({ n: 0 });
     store.$dispose();
+    // The reload: the next page's store reads what was saved.
+    storage.setItem('vc:counter', JSON.stringify({ n: 0 }));
+    expect(usePersisted(createCommandBus()).state.value).toEqual({ n: 0 });
   });
 
   it('a listener hears it, and history records it', () => {
     const bus = createCommandBus();
     const heard: string[] = [];
     bus.on('*', (cmd) => heard.push(cmd.action));
-    const h = history();
-    bus.use(h);
+    const h = history({ bus });
     const store = useCounter(bus);
     store.set(5);
     store.$reset();
@@ -64,11 +68,11 @@ describe('store $reset as a command', () => {
     store.$dispose();
   });
 
-  it('a plugin can refuse it, and then the state is unchanged', () => {
+  it('a rule can refuse it, and then the state is unchanged', () => {
     const bus = createCommandBus();
     const store = useCounter(bus);
     store.set(5);
-    bus.use((cmd, next) => (cmd.action === 'counter$reset' ? { ok: false, value: undefined, error: new Error('refused') } : next()));
+    bus.use({ authorize: (action) => (action === 'counter$reset' ? () => ({ ok: false, value: undefined, error: new Error('refused') }) : undefined) });
     const result = store.$reset() as { ok: boolean };
     expect(result.ok).toBe(false);
     expect(store.state.value).toEqual({ n: 5 });
@@ -96,37 +100,33 @@ describe('store $reset as a command', () => {
 });
 
 describe('$reset goes back to state(), so state() is the reset target', () => {
-  it('a state() that reads storage resets to the saved record, not the default', () => {
+  it('a state() that reads storage resets to the saved record, not the default', async () => {
     const storage = memoryStorage();
-    const bus = createCommandBus();
-    const saved = persist<Counter>({ key: 'vc:f1', storage, getState: () => ({ n: -1 }) });
     const useSaved = defineChamberStore('saved', {
-      state: (): Counter => saved.load() ?? { n: 0 },
+      state: (): Counter => JSON.parse(storage.read() ?? 'null') ?? { n: 0 },
       reducers: { set: (_s: Counter, n: number) => ({ n }) },
+      persist: saveTo({ key: 'vc:f1', storage }),
     });
-    const store = useSaved(bus);
-    bus.use(persist({ key: 'vc:f1', storage, getState: () => store.state.value }));
+    const store = useSaved(createCommandBus());
     store.set(5);
+    await Promise.resolve();
     store.$reset();
     expect(store.state.value).toEqual({ n: 5 });
-    expect(storage.read()).toBe(JSON.stringify({ n: 5 }));
     store.$dispose();
   });
 
-  it('a pure state(), with the saved record loaded by an action, resets to the default', () => {
+  it("a pure state(), with the saved record read by the store's persist, resets to the default", async () => {
     const storage = memoryStorage(JSON.stringify({ n: 5 }));
-    const bus = createCommandBus();
-    const p = persist<Counter>({ key: 'vc:f1b', storage, getState: () => store.state.value });
     const useLoaded = defineChamberStore('loaded', {
       state: (): Counter => ({ n: 0 }),
-      reducers: { load: (s: Counter, saved: Counter | null) => saved ?? s },
+      reducers: { set: (_s: Counter, n: number) => ({ n }) },
+      persist: saveTo({ key: 'vc:f1b', storage }),
     });
-    const store = useLoaded(bus);
-    bus.use(p);
-    store.load(p.load());
+    const store = useLoaded(createCommandBus());
     expect(store.state.value).toEqual({ n: 5 });
     store.$reset();
     expect(store.state.value).toEqual({ n: 0 });
+    await Promise.resolve();
     expect(storage.read()).toBe(JSON.stringify({ n: 0 }));
     store.$dispose();
   });

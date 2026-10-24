@@ -26,26 +26,6 @@ const code = (r: { error?: unknown }) => (r.error as { code?: string } | undefin
 
 /** Each bus subject: add a hook, run one action through it, read the outcome. */
 const subjects: Array<[string, Make]> = [
-  ['sync bus onBefore', () => {
-    const bus = createCommandBus();
-    bus.register('go', () => 1);
-    return {
-      add: (fn) => bus.onBefore(fn as never),
-      run: async () => { const r = bus.dispatch('go', {}); return { ok: r.ok, code: code(r) }; },
-      clear: () => { bus.clear(); bus.register('go', () => 1); },
-      dispose: () => bus.dispose(),
-    };
-  }],
-  ['async bus onBefore', () => {
-    const bus = createAsyncCommandBus();
-    bus.register('go', async () => 1);
-    return {
-      add: (fn) => bus.onBefore(fn as never),
-      run: async () => { const r = await bus.dispatch('go', {}); return { ok: r.ok, code: code(r) }; },
-      clear: () => { bus.clear(); bus.register('go', async () => 1); },
-      dispose: () => bus.dispose(),
-    };
-  }],
   ['sync bus onAfter', () => {
     const bus = createCommandBus();
     bus.register('go', () => 1);
@@ -63,15 +43,6 @@ const subjects: Array<[string, Make]> = [
       add: (fn) => bus.onAfter(fn as never),
       run: async () => { const r = await bus.dispatch('go', {}); return { ok: r.ok, code: code(r) }; },
       clear: () => { bus.clear(); bus.register('go', async () => 1); },
-      dispose: () => bus.dispose(),
-    };
-  }],
-  ['test bus onBefore', () => {
-    const bus = createTestBus({ passthroughHandlers: true });
-    bus.register('go', () => 1);
-    return {
-      add: (fn) => bus.onBefore(fn as never),
-      run: async () => { const r = bus.dispatch('go', {}); return { ok: r.ok, code: code(r) }; },
       dispose: () => bus.dispose(),
     };
   }],
@@ -243,24 +214,6 @@ describe('clear() from a hook', () => {
   });
 });
 
-describe('removal while an async before-hook awaits', () => {
-  it('a later hook removed during the await does not run', async () => {
-    const bus = createAsyncCommandBus();
-    const calls: string[] = [];
-    let release!: () => void;
-    const held = new Promise<void>((res) => (release = res));
-    bus.onBefore(async () => { calls.push('A'); await held; });
-    const offB = bus.onBefore(() => { calls.push('B'); });
-    bus.register('go', async () => { calls.push('handler'); return 1; });
-    const going = bus.dispatch('go', {});
-    await tick();
-    offB();
-    release();
-    expect({ ok: (await going).ok, calls }).toEqual({ ok: true, calls: ['A', 'handler'] });
-    bus.dispose();
-  });
-});
-
 describe('a hook that adds one', () => {
   it('both router loops run the added hook in the same navigation; the bus runs it from the next dispatch', async () => {
     const seen = await onEvery(async (s, calls) => {
@@ -279,20 +232,16 @@ describe('a hook that adds one', () => {
 });
 
 describe('a hook that throws', () => {
-  it('before-hooks stop the action with a coded failure, later ones do not run; after-hooks are contained', async () => {
+  it('after-hooks are contained; a router guard stops the navigation with a coded failure', async () => {
     const seen = await onEvery(async (s, calls) => {
       s.add(() => { calls.push('A'); throw new Error('no'); });
       s.add(() => calls.push('B'));
       return s.run();
     });
-    const refused = { out: { ok: false, code: 'core:refused:hook' }, calls: ['A'], logged: 0 };
     const contained = { out: { ok: true, code: undefined }, calls: ['A', 'B'], logged: 1 };
     expect(seen).toEqual({
-      'sync bus onBefore': refused,
-      'async bus onBefore': refused,
       'sync bus onAfter': contained,
       'async bus onAfter': contained,
-      'test bus onBefore': refused,
       'test bus onAfter': contained,
       // Reported to the router's onError, whose default logs it.
       'router beforeEach': { out: { ok: false, code: 'router:failed:guard' }, calls: ['A'], logged: 1 },
@@ -321,23 +270,6 @@ describe('an async hook outlived by a newer request', () => {
     r.dispose();
   });
 
-  it('async bus: a caller abort during an async before-hook does not stop the handler', async () => {
-    const bus = createAsyncCommandBus();
-    const calls: string[] = [];
-    let release!: () => void;
-    const held = new Promise<void>((res) => (release = res));
-    bus.onBefore(async () => { calls.push('A'); await held; });
-    bus.register('go', async () => { calls.push('handler'); return 1; });
-    const ac = new AbortController();
-    const going = bus.dispatch('go', {}, undefined, { signal: ac.signal });
-    await tick();
-    ac.abort();
-    release();
-    const r = await going;
-    expect({ ok: r.ok, calls }).toEqual({ ok: true, calls: ['A', 'handler'] });
-    bus.dispose();
-  });
-
   it('control: an abort before the dispatch starts skips the handler', async () => {
     const bus = createAsyncCommandBus();
     const calls: string[] = [];
@@ -352,8 +284,8 @@ describe('an async hook outlived by a newer request', () => {
  * Plan 1.28 item 4 (log s35.207, fixed in s35.209). The router keeps its own
  * guard chain, whose comment (src/router/engine.ts, the guard loop) records
  * the bus's remove-during-iteration lesson. This file runs the same cases on
- * router guards, router after-hooks, both buses' before- and after-hooks and
- * the TestBus.
+ * router guards, router after-hooks, both buses' after-hooks and the TestBus.
+ * The bus's public before-hooks left in plan 1.32 step 8e (log 36.109).
  *
  * Removal: the router moves its cursor by identity. The bus's hook loops
  * walked to the length they started with while `addHook`'s unsubscribe
@@ -365,16 +297,14 @@ describe('an async hook outlived by a newer request', () => {
  * `it.fails` rows (970d9cd). The hooks now follow the listeners' rule
  * (fanOutListeners): an entry marked `off` and a replaced array, so a
  * dispatch runs the hooks that existed when it started and skips one removed
- * during it. The rows for two removals in one run, `clear()` from a hook and
- * a removal while an async hook awaits pin the cases a copy-only fix misses.
+ * during it. The rows for two removals in one run and `clear()` from a hook
+ * pin the cases a copy-only fix misses.
  *
  * Adding during a run: the bus runs a hook added during a dispatch from the
  * next one (its listeners' rule, the DOM's). Both router loops re-read the
  * length, so an added guard or after-hook runs in the same navigation.
  *
- * A newer request during an async hook: the router supersedes. The bus has no
- * newer-request rule at the hook level (`supersede` is a plugin, below the
- * hooks), and a caller abort while a before-hook awaits is not checked before
- * the handler. Cancellation inside a started dispatch is the handler's own
- * (it reads `cmd.signal`), the same as inside the plugin chain.
+ * A newer request during an async guard: the router supersedes. On the bus a
+ * newer request is `supersede`'s, a work step. Cancellation inside a started
+ * dispatch is the handler's own (it reads `cmd.signal`).
  */

@@ -24,10 +24,12 @@
  *
  * WHY THAT MATTERS, and it is the whole design. Because `cart.add(42)` is a
  * command, everything the bus already does applies with no store-specific code:
- * `persist` saves it, `history` records it (and undoes it for a store defined
+ * `history` records it (and undoes it for a store defined
  * with `undo: true`), `share` keeps the same state in every tab,
- * `optimistic` rolls it back, `idempotent` collapses a double-submit,
- * `serialize` orders same-key writes, and the devtools timeline shows it. Pinia
+ * its `optimistic` option rolls a failed write back, `idempotent` collapses a
+ * double-submit, its `exclusive` option orders its sent writes, and the
+ * devtools timeline shows it. Its
+ * saved state is its own option (`persist`, src/store-persist.ts). Pinia
  * grew a bus of about 60 lines inside itself (4.0.3: `action()` / `$onAction`)
  * to reach a fraction of that, because no bus existed underneath. Here the bus is the
  * foundation and the store is the thin part.
@@ -60,13 +62,17 @@
  * which is why `$reset` and every action build fresh objects.
  */
 
-import { type ShallowRef, effect, effectScope, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
-import { type DefineChamberStore, type StoreRuntime, createStoreDefiner } from './store-base';
+import { effect, effectScope, getCurrentScope, onScopeDispose, reactive, shallowRef } from 'vue';
+import { type DefineChamberStore, type StoreRuntime, _fieldCell, createStoreDefiner } from './store-base';
 
 export type { ChamberStore, ChamberStoreOptions, StoreReducer, StoreRouter } from './store-base';
+export { saveTo, type PersistStorage, type SaveToOptions, type StorePersist } from './store-persist';
+export { shareTabs, type StoreShare } from './store-share';
 
 const vueRuntime: StoreRuntime = {
   cell: (initial) => shallowRef(initial),
+  // `deep`: Vue's one cached reactive proxy of the raw state.
+  view: (value) => reactive(value as object) as typeof value,
   // One sync effect in a detached scope (not the calling component's), so a
   // watch lives with the store, not with whoever subscribed first.
   // `fn` runs inside the effect's run, so what it reads tracks into this
@@ -89,8 +95,6 @@ const vueRuntime: StoreRuntime = {
 
 export const defineChamberStore: DefineChamberStore = createStoreDefiner(vueRuntime);
 
-const bindings = new WeakMap<object, Map<string, ShallowRef<unknown>>>();
-
 /**
  * A field of a store as a read-only Vue ref, over the store's `$onField`
  * events: a component reading one field re-renders when that field changes,
@@ -105,14 +109,5 @@ export function fieldRef<S extends object, K extends keyof S & string>(
   store: { readonly state: { readonly value: S }; $onField: (key: K, fn: (value: S[K]) => void) => () => void },
   key: K,
 ): { readonly value: S[K] } {
-  let refs = bindings.get(store);
-  if (refs === undefined) { refs = new Map(); bindings.set(store, refs); }
-  let r = refs.get(key);
-  if (r === undefined) {
-    const made = shallowRef<unknown>(store.state.value[key]);
-    store.$onField(key, (value) => { made.value = value; });
-    refs.set(key, made);
-    r = made;
-  }
-  return r as { readonly value: S[K] };
+  return _fieldCell(store, key, shallowRef);
 }

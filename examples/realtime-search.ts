@@ -1,14 +1,15 @@
 /**
  * Real-time Search Example
  *
- * Demonstrates: the debounce plugin. It runs on either bus: a debounced
- * dispatch answers `{ pending: true, key }` at once, and the latest one runs after
- * the quiet period.
+ * Shows only the latest query of a burst running, its results shown. The sender
+ * paces: `pace(bus.dispatch, { debounce })` runs the last call of a burst, and
+ * its caller gets the real results. An earlier call answers `pace:aborted:dispatch`.
+ * The typed text is the PAYLOAD: calls are keyed by action and target, so every
+ * keystroke shares one key and the burst coalesces.
  */
 
-import { createCommandBus, debounce, logger } from 'vapor-chamber';
+import { createCommandBus, logger, pace, type BusError } from 'vapor-chamber';
 
-// Simulated search results
 const products = [
   { id: 1, name: 'Wireless Headphones', category: 'Electronics' },
   { id: 2, name: 'Wireless Mouse', category: 'Electronics' },
@@ -20,76 +21,30 @@ const products = [
   { id: 8, name: 'Desk Lamp', category: 'Furniture' },
 ];
 
-// Create sync bus with debounce
 const bus = createCommandBus();
 
 bus.use(logger());
 
-// Debounce search queries - wait 300ms after typing stops
-bus.use(debounce(['searchQuery'], 300));
-
-// Handler
-bus.register('searchQuery', (cmd) => {
-  const query = (cmd.target as string).toLowerCase();
-
-  if (!query) {
-    return [];
-  }
-
-  const results = products.filter(p =>
-    p.name.toLowerCase().includes(query) ||
-    p.category.toLowerCase().includes(query)
-  );
-
-  return results;
+// The query is the payload.
+bus.register('searchQuery', ({ payload }) => {
+  const query = (payload as string).toLowerCase();
+  return query ? products.filter((p) => p.name.toLowerCase().includes(query) || p.category.toLowerCase().includes(query)) : [];
 });
 
-// Simulated rapid typing
-function simulateTyping() {
-  console.log('--- Simulating rapid typing "wire" ---');
-  console.log('(Only the last query should execute due to debounce)\n');
+// Wait 300 ms after typing stops. The sender paces; the bus never does.
+const search = pace(bus.dispatch, { debounce: 300 });
 
-  // These happen quickly - debounce returns pending for intermediate calls
-  const results = [
-    bus.dispatch('searchQuery', 'w'),
-    bus.dispatch('searchQuery', 'wi'),
-    bus.dispatch('searchQuery', 'wir'),
-    bus.dispatch('searchQuery', 'wire'),
-  ];
+console.log('--- Simulating rapid typing "wire" ---');
+console.log('(Only the last query runs: the earlier ones are superseded)\n');
 
-  console.log('\nResults returned immediately:');
-  results.forEach((r, i) => {
-    const query = ['w', 'wi', 'wir', 'wire'][i];
-    if (r.value?.pending) {
-      console.log(`Query "${query}": pending (debounced)`);
-    } else {
-      console.log(`Query "${query}":`, r.value);
-    }
-  });
+const typed = ['w', 'wi', 'wir', 'wire'];
+const results = await Promise.all(typed.map((query) => search('searchQuery', {}, query)));
+results.forEach((r, i) => {
+  if (r.ok) console.log(`Query "${typed[i]}":`, r.value);
+  else console.log(`Query "${typed[i]}": superseded (${(r.error as BusError).code})`);
+});
 
-  // Wait for debounced execution. Note: a debounced action's dispatch ALWAYS
-  // returns { pending: true, key } - including this one - because the plugin defers
-  // the real handler run. Results arrive via the deferred execution (observe
-  // them with bus.on('searchQuery', ...)), never in the dispatch return value.
-  console.log('\n--- Waiting 500ms for debounce to complete ---');
-  setTimeout(() => {
-    console.log('\n--- Dispatch after debounce period ---');
-    const finalResult = bus.dispatch('searchQuery', 'wire');
-    console.log('Result:', finalResult); // -> { ok: true, value: { pending: true, key: 'searchQuery:wire' } }
-  }, 500);
-}
-
-// Search by category
-function searchByCategory() {
-  console.log('\n--- Search by category "Electronics" (after debounce clears) ---');
-  setTimeout(() => {
-    const result = bus.dispatch('searchQuery', 'Electronics');
-    console.log('Result:', result);
-  }, 1000);
-}
-
-// Run examples
-simulateTyping();
-searchByCategory();
-
-export { bus };
+// A new burst, after the first one has run
+console.log('\n--- Search by category "Electronics" ---');
+const category = await search('searchQuery', {}, 'Electronics');
+console.log('Result:', category.ok ? category.value : category.error);

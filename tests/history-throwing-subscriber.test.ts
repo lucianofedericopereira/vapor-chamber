@@ -89,7 +89,7 @@ describe('useCommandHistory: a throwing sync subscriber during undo and redo', (
     // Not undone, and every signal says so.
     expect(state()).toEqual({ value: 1, past: 1, future: 0, canUndo: true, canRedo: false });
     // The subscriber's error is reported the way a throwing undo handler's is.
-    expect(logged.mock.calls).toEqual([['[vapor-chamber] Undo handler error for "inc":', boom]]);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] history:failed:move: Undo handler threw for "inc"/), boom]]);
 
     // The history still works once the subscriber is gone.
     runner.effect.stop();
@@ -118,7 +118,7 @@ describe('useCommandHistory: a throwing sync subscriber during undo and redo', (
     expect(threw).toBe(1);
     expect(escaped).toBeUndefined();
     expect(state()).toEqual({ value: 0, past: 0, future: 1, canUndo: false, canRedo: true });
-    expect(logged.mock.calls).toEqual([['[vapor-chamber] Redo dispatch error for "inc":', boom]]);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] history:failed:move: Redo dispatch threw for "inc"/), boom]]);
 
     runner.effect.stop();
     h.redo();

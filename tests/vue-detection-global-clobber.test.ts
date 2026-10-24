@@ -43,10 +43,9 @@
  * why.
  *
  * This is why detection gains a channel the library owns - `configureVue()`
- * and `__VAPOR_CHAMBER_VUE__` in `src/chamber.ts`. `__VUE__` stays supported
- * as a legacy fallback (devtools-hook pages and existing setups rely on it),
- * but it is not the only door, and it is not asked to hold a value type Vue
- * overwrites on mount.
+ * and `__VAPOR_CHAMBER_VUE__` in `src/chamber.ts`. `__VUE__` is never read for Vue
+ * itself: it holds a value Vue overwrites on mount. Only Vue's own `true` there
+ * is read, to say that Vue is on the page but unreachable.
  */
 
 import { describe, expect, it } from 'vitest';

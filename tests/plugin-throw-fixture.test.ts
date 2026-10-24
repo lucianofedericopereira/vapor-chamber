@@ -1,34 +1,9 @@
 // @vitest-environment happy-dom
-/**
- * FIXTURE - a plugin that throws, or returns a rejected promise, becomes an
- * errResult with code `plugin:failed:plugin`.
- *
- * The bus's contract is "dispatch always returns a result". Before this, a
- * plugin that threw in its own body escaped `buildRunner` / `buildAsyncRunner`
- * before the settle, so after-hooks, `on('*')`, the shared error observer and
- * `isLoading` all missed it, and the throw escaped into the caller (a click
- * handler, a read gate). The conversion sits at the invocation boundary of
- * every plugin, so an OUTER plugin receives the failure through `next()` like
- * any other and its cleanup runs.
- *
- * One error is NOT relabeled: `onMissing: 'throw'` throws (sync bus) or
- * rejects (async bus) from below the chain by contract, and must still reach
- * the caller as itself.
- *
- * Everything runs against the real buses and, for the loading and error
- * observers, the real `useSharedCommandState` on the with-vapor browser dist
- * via `configureVue()` - the same setup as command-loading-fixture.
- */
+/** A plugin part that throws, or answers a rejected promise, becomes `plugin:failed:plugin`; the long note is at the end. */
 
 import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { configureVue, useSharedCommandState } from '../src/chamber';
-import {
-  BusError,
-  type AsyncPlugin,
-  type CommandResult,
-  createAsyncCommandBus,
-  createCommandBus,
-  type SyncPlugin, ownerOf } from '../src/command-bus';
+import { BusError, type CommandResult, createAsyncCommandBus, createCommandBus, ownerOf } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
 import { stubEnv } from '../src/vitest-pure';
 import { it } from '../src/vitest';
@@ -43,75 +18,67 @@ beforeEach(async () => {
 afterEach(() => { errSpy.mockRestore(); });
 
 const boom = new Error('plugin blew up');
+/** A step that throws, and one whose answer rejects. */
+const throwing = { admit: () => { throw boom; } };
+const rejecting = { reuse: () => Promise.reject(boom) };
 
-function expectThrew(r: CommandResult, action: string, cause: unknown = boom): void {
+function expectThrew(r: CommandResult, action: string, part: string, cause: unknown = boom): void {
   expect(r).toFailWith('plugin:failed:plugin');
   expect(r.error).toBeInstanceOf(BusError);
   const e = r.error as BusError;
-  expect(e.code).toBe('plugin:failed:plugin');
   expect(ownerOf(e)).toBe('plugin');
   expect(e.action).toBe(action);
   expect(e.cause).toBe(cause);
+  expect(e.context).toEqual({ part });
 }
 
-describe('sync bus - a throwing plugin', () => {
+describe('sync bus - a throwing part', () => {
   it('dispatch returns plugin:failed:plugin with the original as cause, and does not throw', () => {
     const bus = createCommandBus();
     bus.register('act', () => 'ok');
-    bus.use(() => { throw boom; });
+    bus.use(throwing);
     let r!: CommandResult;
     expect(() => { r = bus.dispatch('act', 1); }).not.toThrow();
-    expectThrew(r, 'act');
+    expectThrew(r, 'act', 'admit');
   });
 
-  it('an OUTER plugin receives it through next() and its cleanup runs; hooks and on(*) see the same result', () => {
+  it('after-hooks and on(*) see the same result', () => {
     const bus = createCommandBus();
     bus.register('act', () => 'ok');
-    const seen: string[] = [];
-    let viaNext: CommandResult | undefined;
-    const outer: SyncPlugin = (_cmd, next) => {
-      try { viaNext = next(); return viaNext; }
-      finally { seen.push('outer cleanup'); }
-    };
-    bus.use(outer, { priority: 10 });
-    bus.use(() => { throw boom; }, { priority: 1 });
+    bus.use(throwing);
     let after: CommandResult | undefined;
     let star: CommandResult | undefined;
     bus.onAfter((_c, res) => { after = res; });
     bus.on('*', (_c, res) => { star = res; });
-
     const r = bus.dispatch('act', 1);
-    expectThrew(r, 'act');
-    expect(viaNext).toBe(r);
-    expect(seen).toEqual(['outer cleanup']);
+    expectThrew(r, 'act', 'admit');
     expect(after).toBe(r);
     expect(star).toBe(r);
   });
 
-  it('query takes the same path', () => {
+  it('query and request() take the same path', async () => {
     const bus = createCommandBus();
     bus.register('read', () => 'v');
-    bus.use(() => { throw boom; });
-    expectThrew(bus.query('read', 1), 'read');
-  });
-
-  it('request() resolves with it', async () => {
-    const bus = createCommandBus();
     bus.respond('qa', () => 'answer');
-    bus.use(() => { throw boom; });
-    expectThrew(await bus.request('qa', {}), 'qa');
+    bus.use(throwing);
+    expectThrew(bus.query('read', 1), 'read', 'admit');
+    expectThrew(await bus.request('qa', {}), 'qa', 'admit');
   });
 
-  it('a thrown non-Error is kept as the cause verbatim', () => {
+  it('a thrown non-Error is kept as the cause verbatim, and a rule throwing names its part', () => {
     const bus = createCommandBus();
     bus.register('act', () => 'ok');
-    bus.use(() => { throw 'a string'; });
-    expectThrew(bus.dispatch('act', 1), 'act', 'a string');
+    bus.use({ admit: () => { throw 'a string'; } });
+    expectThrew(bus.dispatch('act', 1), 'act', 'admit', 'a string');
+    const ruled = createCommandBus();
+    ruled.register('act', () => 'ok');
+    ruled.use({ validate: () => () => { throw boom; } });
+    expectThrew(ruled.dispatch('act', 1), 'act', 'validate');
   });
 
   it('DEV: console.error names the throw, so the conversion does not hide the bug', ({ bus }) => {
     bus.register('act', () => 'ok');
-    bus.use(() => { throw boom; });
+    bus.use(throwing);
     bus.dispatch('act', 1);
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('plugin:failed:plugin'), boom);
     expect(String(errSpy.mock.calls[0][0])).toContain('"act"');
@@ -123,7 +90,7 @@ describe('sync bus - a throwing plugin', () => {
     const fresh = await import('../src/command-bus');
     const bus = fresh.createCommandBus();
     bus.register('act', () => 'ok');
-    bus.use(() => { throw boom; });
+    bus.use(throwing);
     const r = bus.dispatch('act', 1);
     expect((r.error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(r.error?.cause).toBe(boom);
@@ -131,117 +98,70 @@ describe('sync bus - a throwing plugin', () => {
     vi.resetModules();
   });
 
-  it("onMissing: 'throw' is NOT relabeled: it still throws NO_HANDLER through a plugin", () => {
+  it("onMissing: 'throw' is NOT relabeled: it still throws NO_HANDLER past a step, settled once", () => {
     const bus = createCommandBus({ onMissing: 'throw' });
-    bus.use((_c, next) => next());
+    const landed: CommandResult[] = [];
+    bus.use({ begin: () => ({ landed: (r: CommandResult) => { landed.push(r); } }) });
+    const star: CommandResult[] = [];
+    bus.on('*', (_c, r) => { star.push(r); });
     let caught: unknown;
     try { bus.dispatch('nobody', 1); } catch (e) { caught = e; }
     expect((caught as BusError).code).toBe('core:missing:handler');
+    expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
+    expect(landed.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
     expect(errSpy).not.toHaveBeenCalled();
   });
 
-  it("onMissing: 'throw' settles ONCE before it throws; a plugin that recovers it settles with its own result instead", () => {
-    const bus = createCommandBus({ onMissing: 'throw' });
-    const star: CommandResult[] = [];
-    const after: CommandResult[] = [];
-    bus.on('*', (_c, r) => { star.push(r); });
-    bus.onAfter((_c, r) => { after.push(r); });
-    expect(() => bus.dispatch('nobody', 1)).toThrow('No handler');
-    expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
-    expect(after).toEqual(star);
-
-    const recovered = { ok: false, value: undefined, error: new Error('recovered') } as CommandResult;
-    bus.use((_c, next) => { try { return next(); } catch { return recovered; } });
-    expect(bus.dispatch('nobody', 2)).toBe(recovered);
-    expect(star).toHaveLength(2);
-    expect(star[1]).toBe(recovered);
-  });
-
-  it('isLoading settles back to false and the shared error observer records it', () => {
+  it('pending settles back to false and the shared error observer records it', () => {
     const bus = createCommandBus();
     bus.register('svcRestart', () => 'up');
     const shared = useSharedCommandState({ bus });
-    const flag = shared.isLoading('svcRestart', 'httpd');
-    bus.use(() => { throw boom; });
+    const flag = shared.pending('svcRestart', 'httpd');
+    bus.use(throwing);
     const r = bus.dispatch('svcRestart', 'httpd');
-    expectThrew(r, 'svcRestart');
+    expectThrew(r, 'svcRestart', 'admit');
     expect(flag.value).toBe(false);
     expect(shared.lastError.value).toBe(r.error);
     shared.dispose();
   });
 
-  it('the TestBus shares the runner, so it converts too', () => {
+  it('the TestBus runs the same steps, so it converts too', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     bus.register('act', () => 'ok');
-    bus.use(() => { throw boom; });
-    expectThrew(bus.dispatch('act', 1), 'act');
+    bus.use(throwing);
+    expectThrew(bus.dispatch('act', 1), 'act', 'admit');
   });
 });
 
-describe('async bus - a throwing or rejecting plugin', () => {
+describe('async bus - a throwing or rejecting part', () => {
   it('a synchronous throw resolves to plugin:failed:plugin, never rejects', async () => {
     const bus = createAsyncCommandBus();
     bus.register('act', async () => 'ok');
-    bus.use(() => { throw boom; });
-    expectThrew(await bus.dispatch('act', 1), 'act');
+    bus.use(throwing);
+    expectThrew(await bus.dispatch('act', 1), 'act', 'admit');
   });
 
-  it('a rejected promise resolves to plugin:failed:plugin, never rejects', async () => {
+  it('a rejected answer resolves to plugin:failed:plugin, never rejects, and on(*) fires', async () => {
     const bus = createAsyncCommandBus();
     bus.register('act', async () => 'ok');
-    bus.use(() => Promise.reject(boom));
-    expectThrew(await bus.dispatch('act', 1), 'act');
-  });
-
-  it('an OUTER plugin sees { ok: false, error } through next().then, its cleanup runs, on(*) fires', async () => {
-    const bus = createAsyncCommandBus();
-    bus.register('act', async () => 'ok');
-    const seen: string[] = [];
-    let viaNext: CommandResult | undefined;
-    const outer: AsyncPlugin = (_cmd, next) =>
-      Promise.resolve(next())
-        .then((r) => { viaNext = r; return r; })
-        .finally(() => { seen.push('outer cleanup'); });
-    bus.use(outer, { priority: 10 });
-    bus.use(async () => { throw boom; }, { priority: 1 });
+    bus.use(rejecting);
     let star: CommandResult | undefined;
     bus.on('*', (_c, res) => { star = res; });
-
     const r = await bus.dispatch('act', 1);
-    expectThrew(r, 'act');
-    expect(viaNext).toBe(r);
-    expect(seen).toEqual(['outer cleanup']);
+    expectThrew(r, 'act', 'reuse');
     expect(star).toBe(r);
-  });
-
-  it('a pass-through plugin above a rejecting one still resolves plugin:failed:plugin (the inner level converted it)', async () => {
-    // The pass-through returns its next() promise unwrapped - the level below
-    // already converted - so this pins that skipping the wrap loses nothing.
-    const bus = createAsyncCommandBus();
-    bus.register('act', async () => 'ok');
-    bus.use((_c, next) => next(), { priority: 10 });
-    bus.use(() => Promise.reject(boom), { priority: 1 });
-    const r = await bus.dispatch('act', 1);
-    expectThrew(r, 'act');
-    expect((r.error as BusError).context).toEqual({ index: 1 });
   });
 
   it('query takes the same path', async () => {
     const bus = createAsyncCommandBus();
     bus.register('read', async () => 'v');
-    bus.use(() => Promise.reject(boom));
-    expectThrew(await bus.query('read', 1), 'read');
+    bus.use(rejecting);
+    expectThrew(await bus.query('read', 1), 'read', 'reuse');
   });
 
-  it("onMissing: 'throw' is NOT relabeled: it still rejects NO_HANDLER through a plugin", async () => {
+  it("onMissing: 'throw' is NOT relabeled: it still rejects NO_HANDLER past a step, settled once", async () => {
     const bus = createAsyncCommandBus({ onMissing: 'throw' });
-    bus.use((_c, next) => next());
-    await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'core:missing:handler' });
-    expect(errSpy).not.toHaveBeenCalled();
-  });
-
-  it("onMissing: 'throw' settles ONCE before it rejects; a plugin that recovers it settles with its own result instead", async () => {
-    const bus = createAsyncCommandBus({ onMissing: 'throw' });
+    bus.use({ begin: () => undefined });
     const star: CommandResult[] = [];
     const after: CommandResult[] = [];
     bus.on('*', (_c, r) => { star.push(r); });
@@ -250,24 +170,35 @@ describe('async bus - a throwing or rejecting plugin', () => {
     await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'core:missing:handler' });
     expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
     expect(after).toEqual(star);
-
-    const recovered = { ok: false, value: undefined, error: new Error('recovered') } as CommandResult;
-    bus.use((_c, next) => (next() as Promise<CommandResult>).catch(() => recovered));
-    expect(await bus.dispatch('nobody', 2)).toBe(recovered);
-    expect(star).toHaveLength(2);
-    expect(star[1]).toBe(recovered);
+    expect(errSpy).not.toHaveBeenCalled();
   });
 
-  it('isLoading settles back to false after a rejecting plugin', async () => {
+  it('pending settles back to false after a rejecting part', async () => {
     const bus = createAsyncCommandBus();
     bus.register('svcRestart', async () => 'up');
     const shared = useSharedCommandState({ bus: bus as any });
-    const flag = shared.isLoading('svcRestart', 'httpd');
-    bus.use(() => Promise.reject(boom));
+    const flag = shared.pending('svcRestart', 'httpd');
+    bus.use(rejecting);
     const run = bus.dispatch('svcRestart', 'httpd');
     expect(flag.value).toBe(true);
-    expectThrew(await run, 'svcRestart');
+    expectThrew(await run, 'svcRestart', 'reuse');
     expect(flag.value).toBe(false);
     shared.dispose();
   });
 });
+
+/*
+ * The bus's contract is "dispatch always returns a result". A plugin part
+ * that throws or rejects (a rule, a work step) becomes its plugin's
+ * `failed:plugin`, `context.part` naming the part, before the settle, so
+ * after-hooks, `on('*')`, the command state and `pending` all see it, and the
+ * throw never escapes into the caller (a click handler, a read gate).
+ * Development logs it once. One error is NOT relabeled: `onMissing: 'throw'`
+ * throws (sync bus) or rejects (async bus) from the work by contract, and
+ * reaches the caller as itself, settled once (a step's ticket lands with it).
+ * Before plan 1.32 step 8d this file pinned the chain's boundary: an outer
+ * plugin saw the failure through `next()`. No part holds `next` now, so that
+ * half went with the chain. Everything runs on the real buses and, for the
+ * loading and error observers, the real `useSharedCommandState` on the
+ * with-vapor browser dist through `configureVue()`.
+ */

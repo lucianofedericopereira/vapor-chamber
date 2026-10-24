@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { createExampleConfig } from '../vite.base';
+import { createExampleConfig } from '../vite.base.ts';
 
 // No vapor flag needed: @vitejs/plugin-vue >=5 detects `<script setup vapor>`
 // and routes those components to @vue/compiler-vapor automatically.

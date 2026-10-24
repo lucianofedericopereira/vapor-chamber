@@ -29,6 +29,7 @@
  */
 
 import { DEV } from './dev';
+import { _report } from './report';
 import { countOption } from './bounds';
 import { BusError, _withOrigin, _errResult } from './command-bus';
 import type { CommandResult } from './command-bus';
@@ -126,7 +127,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.31.0';
+export const MCP_SERVER_VERSION = '1.32.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -194,8 +195,8 @@ export function createMcpHandler(
   const allowed = options.actionFilter;
   if (allowed === undefined && DEV) {
     const exposed = Object.keys(bus.getSchema());
-    console.warn(
-      `[vapor-chamber] createMcpHandler({ actionFilter }) was omitted - all ${exposed.length} schema ` +
+    _report('warn', 'mcp:missing:filter',
+      `createMcpHandler({ actionFilter }) was omitted - all ${exposed.length} schema ` +
         `action(s) are exposed to the MCP client, writes included: ${exposed.join(', ')}. ` +
         'An MCP client is an LLM-driven caller; pass an allowlist ' +
         "(e.g. actionFilter: createActionFilter([{ prefix: { action: 'cartRead' } }])), " +

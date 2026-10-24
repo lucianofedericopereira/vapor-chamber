@@ -1,24 +1,24 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - per-(action, target) loading from `useSharedCommandState().isLoading`.
+ * FIXTURE - per-(action, target) loading from `useSharedCommandState().pending`.
  *
  * The question a panel asks is "is THIS service restarting", which the global
- * `inFlight` / `isAnyLoading` cannot answer. Everything here runs against the
+ * `anyPending` cannot answer. Everything here runs against the
  * real thing: a real Vapor component mounted from the with-vapor browser dist,
  * the chamber pointed at that same module via `configureVue()` (two Vue dists
  * are two disconnected reactivity engines - see keepalive-input-scope-fixture),
  * and real sync and async buses dispatched through the RAW `bus.dispatch`, not
- * the composable's wrapper - loading is bus-wide, so any dispatch counts.
+ * a composable - loading is bus-wide, so any dispatch counts.
  *
  * Atomicity is measured, not assumed: each key is read inside its own
  * `watchEffect({ flush: 'sync' })` in the component's setup, and the run
  * counters must show that a transition on one key never re-runs a reader of
  * another.
  *
- * The pairing this rests on: the start is a before-hook and the settle is the
- * `on('*')` fan-out, matched by the Command object itself. So a settle with no
- * start - a pre-flight abort, a query, a before-hook that threw ahead of ours -
- * is ignored rather than decremented from someone else's count. The one exit
+ * The pairing this rests on: the start is the bus's `started` fact (before every
+ * before-hook) and the settle its `settled` fact (before every listener), matched
+ * by the Command object itself. So a settle with no start - a pre-flight abort,
+ * a query - is ignored rather than decremented from someone else's count. The one exit
  * with a start and no settle is a PLUGIN that throws or rejects: neither runner
  * catches it, so no after-hook or listener fires. Pinned at the end.
  * That was true until plugin:failed:plugin: both runners now convert the throw into
@@ -48,7 +48,7 @@ function deferred<T = unknown>() {
 }
 
 /**
- * Mount a Vapor component that reads one isLoading() per key in its own
+ * Mount a Vapor component that reads one pending() per key in its own
  * sync-flush effect. Returns the live values, the per-key run counts, and the
  * composable handle.
  */
@@ -61,7 +61,7 @@ function mountPanel(bus: CommandBus, keys: Array<[string, unknown?]>) {
       for (const [action, target] of keys) {
         const name = `${action}:${String(target)}`;
         seen[name] = [];
-        const flag = shared.isLoading(action, target);
+        const flag = shared.pending(action, target);
         v.watchEffect(() => { seen[name].push(flag.value); }, { flush: 'sync' });
       }
       return v.template('<div>panel</div>', true)();
@@ -78,7 +78,7 @@ function mountPanel(bus: CommandBus, keys: Array<[string, unknown?]>) {
   };
 }
 
-describe('isLoading - async bus', () => {
+describe('pending - async bus', () => {
   it('true while THIS target is in flight, false once it settles; another target never re-runs', async () => {
     const bus = createAsyncCommandBus() as unknown as CommandBus;
     const gates: Record<string, ReturnType<typeof deferred>> = {};
@@ -88,7 +88,7 @@ describe('isLoading - async bus', () => {
     expect(p.seen['svcRestart:httpd']).toEqual([false]);
 
     const run = bus.dispatch('svcRestart', 'httpd') as unknown as Promise<unknown>;
-    // The before-hook runs before the async dispatch's first await.
+    // The start is announced before the async dispatch's first await.
     expect(p.seen['svcRestart:httpd']).toEqual([false, true]);
 
     gates.httpd.resolve('up');
@@ -113,7 +113,7 @@ describe('isLoading - async bus', () => {
 
     gates[0].resolve('a');
     await a;
-    expect(p.shared.isLoading('svcRestart', 'httpd').value).toBe(true);
+    expect(p.shared.pending('svcRestart', 'httpd').value).toBe(true);
     expect(p.seen['svcRestart:httpd']).toEqual([false, true]);
 
     gates[1].resolve('b');
@@ -131,8 +131,8 @@ describe('isLoading - async bus', () => {
     const live = bus.dispatch('svcRestart', 'httpd') as unknown as Promise<unknown>;
     expect(p.seen['svcRestart:httpd']).toEqual([false, true]);
 
-    // Already-aborted: the bus settles it (after-hooks + on('*')) without ever
-    // running before-hooks. That settle has no start and must be ignored.
+    // Already-aborted: the bus settles it (after-hooks, the settled fact) without
+    // a start. That settle must be ignored.
     const ac = new AbortController();
     ac.abort();
     const aborted = await (bus as any).dispatch('svcRestart', 'httpd', undefined, { signal: ac.signal });
@@ -160,11 +160,11 @@ describe('isLoading - async bus', () => {
   });
 });
 
-describe('isLoading - sync bus', () => {
+describe('pending - sync bus', () => {
   it('true inside the handler, false after; another target never re-runs', ({ bus }) => {
     let during: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', 'httpd'], ['svcRestart', 'nginx']]);
-    bus.register('svcRestart', () => { during = p.shared.isLoading('svcRestart', 'httpd').value; return 'up'; });
+    bus.register('svcRestart', () => { during = p.shared.pending('svcRestart', 'httpd').value; return 'up'; });
 
     bus.dispatch('svcRestart', 'httpd');
     expect(during).toBe(true);
@@ -180,10 +180,10 @@ describe('isLoading - sync bus', () => {
     p.unmount();
   });
 
-  it('tracking starts at the first isLoading() on the bus: a dispatch already in flight is not counted', ({ bus }) => {
+  it('tracking starts at the first pending() on the bus: a dispatch already in flight is not counted', ({ bus }) => {
     const s = useSharedCommandState({ bus });
     let during: boolean | undefined;
-    bus.register('svcRestart', () => { during = s.isLoading('svcRestart', 'httpd').value; });
+    bus.register('svcRestart', () => { during = s.pending('svcRestart', 'httpd').value; });
     bus.dispatch('svcRestart', 'httpd');
     expect(during).toBe(false);
     // From then on it is.
@@ -192,29 +192,29 @@ describe('isLoading - sync bus', () => {
     s.dispose();
   });
 
-  it('a before-hook that throws AHEAD of ours: nothing started, nothing stuck, nothing stolen', ({ bus }) => {
-    // Registered before the panel, so it runs before our before-hook.
-    bus.onBefore((cmd) => { if (cmd.payload === 'deny') throw new Error('denied'); });
+  it('a rule that refuses: its start settles, nothing stuck, nothing stolen', ({ bus }) => {
+    // Installed before the panel: the start is announced before every rule anyway.
+    bus.use({ id: 'gate', authorize: () => (cmd, fail) => (cmd.payload === 'deny' ? { ok: false, value: undefined, error: fail('refused:action', 'denied') } : undefined) });
     bus.register('svcRestart', () => 'up');
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
 
     const r = bus.dispatch('svcRestart', 'httpd', 'deny');
-    expect(r).toFailWith('core:refused:hook');
-    expect(p.seen['svcRestart:httpd']).toEqual([false]);
+    expect(r).toFailWith('gate:refused:action');
+    expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
 
     bus.dispatch('svcRestart', 'httpd');
-    expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
+    expect(p.seen['svcRestart:httpd']).toEqual([false, true, false, true, false]);
     p.unmount();
   });
 
-  it('a query of the same key (no before-hooks) does not clear it', ({ bus }) => {
+  it('a query of the same key (no counted start) does not clear it', ({ bus }) => {
     let observed: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
     bus.register('svcStatus', () => 'up');
     bus.register('svcRestart', () => {
-      // A query settles through on('*') with no start; ignored.
+      // A query settles with no start: ignored.
       bus.query('svcRestart', 'httpd');
-      observed = p.shared.isLoading('svcRestart', 'httpd').value;
+      observed = p.shared.pending('svcRestart', 'httpd').value;
       return 'up';
     });
     bus.dispatch('svcRestart', 'httpd');
@@ -224,21 +224,21 @@ describe('isLoading - sync bus', () => {
   });
 });
 
-describe('isLoading - keys', () => {
+describe('pending - keys', () => {
   it('object targets key by value (commandKey), not identity', ({ bus }) => {
     let during: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', { host: 'a', svc: 'httpd' }]]);
-    bus.register('svcRestart', () => { during = p.shared.isLoading('svcRestart', { host: 'a', svc: 'httpd' }).value; });
+    bus.register('svcRestart', () => { during = p.shared.pending('svcRestart', { host: 'a', svc: 'httpd' }).value; });
     bus.dispatch('svcRestart', { svc: 'httpd', host: 'a' });
     expect(during).toBe(true);
     p.unmount();
   });
 
-  it('isLoading(action) with no target is the exact key (action, undefined), not "any target"', ({ bus }) => {
+  it('pending(action) with no target is the exact key (action, undefined), not "any target"', ({ bus }) => {
     const obs: Array<[boolean, boolean]> = [];
     const p = mountPanel(bus, [['cacheFlush', undefined], ['cacheFlush', 'eu']]);
     bus.register('cacheFlush', () => {
-      obs.push([p.shared.isLoading('cacheFlush').value, p.shared.isLoading('cacheFlush', 'eu').value]);
+      obs.push([p.shared.pending('cacheFlush').value, p.shared.pending('cacheFlush', 'eu').value]);
     });
     bus.dispatch('cacheFlush', 'eu');
     bus.dispatch('cacheFlush', undefined);
@@ -249,17 +249,17 @@ describe('isLoading - keys', () => {
   it('the same signal comes back for one key, from any subscriber on the bus', ({ bus }) => {
     const a = useSharedCommandState({ bus });
     const b = useSharedCommandState({ bus });
-    expect(a.isLoading('svcRestart', 'httpd')).toBe(b.isLoading('svcRestart', 'httpd'));
-    expect(a.isLoading('svcRestart', 'httpd')).not.toBe(a.isLoading('svcRestart', 'nginx'));
+    expect(a.pending('svcRestart', 'httpd')).toBe(b.pending('svcRestart', 'httpd'));
+    expect(a.pending('svcRestart', 'httpd')).not.toBe(a.pending('svcRestart', 'nginx'));
     a.dispose(); b.dispose();
   });
 });
 
-describe('isLoading - lifecycle', () => {
-  it('the last dispose unhooks the before-hook: later dispatches no longer write the key', ({ bus }) => {
+describe('pending - lifecycle', () => {
+  it('the last dispose releases the state: later dispatches no longer write the key', ({ bus }) => {
     bus.register('svcRestart', () => 'up');
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
-    const flag = p.shared.isLoading('svcRestart', 'httpd');
+    const flag = p.shared.pending('svcRestart', 'httpd');
     p.unmount(); // scope disposal -> refCount 0
 
     let during: boolean | undefined;
@@ -270,12 +270,12 @@ describe('isLoading - lifecycle', () => {
     expect(p.seen['svcRestart:httpd']).toEqual([false]);
   });
 
-  it('RESOLVED (was a known limit): a plugin that throws settles - the runner converts it, the key returns to false', () => {
+  it('RESOLVED (was a known limit): a plugin part that throws settles - the bus converts it, the key returns to false', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.register('svcRestart', () => 'up');
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
-    bus.use(() => { throw new Error('plugin blew up'); });
+    bus.use({ admit: () => { throw new Error('plugin blew up'); } });
     const r = bus.dispatch('svcRestart', 'httpd');
     expect((r.error as any)?.code).toBe('plugin:failed:plugin');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
@@ -283,8 +283,8 @@ describe('isLoading - lifecycle', () => {
   });
 
   it("onMissing: 'throw' settles before it throws - the caller still gets the throw, the key returns to false", () => {
-    // The throw that remains by contract leaves execute() after our
-    // before-hook ran. The dispatch settles it (after-hooks + on('*')) before
+    // The throw that remains by contract leaves execute() after the start was
+    // announced. The dispatch settles it (after-hooks, the settled fact) before
     // re-throwing, so a started key cannot stay true.
     const bus = createCommandBus({ onMissing: 'throw' });
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);

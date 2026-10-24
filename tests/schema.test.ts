@@ -13,11 +13,10 @@ import {
   describeSchema,
   createSchemaCommandBus,
   createAsyncSchemaCommandBus,
-  ERROR_CODE_REGISTRY,
-  isRetryableCode,
   type AnthropicTool,
   type BusSchema,
 } from '../src/schema';
+import { ERROR_CODE_REGISTRY, isRetryableCode } from '../src/error-registry';
 import { RETRYABLE_CONDITIONS } from '../src/command-bus';
 import { _failures, retryClass, type FailCode } from '../src/failure';
 import { it } from '../src/vitest';
@@ -618,7 +617,7 @@ describe('ERROR_CODE_REGISTRY retry metadata', () => {
 
 
   it('isRetryableCode consults the registry, undefined for unknown codes', () => {
-    expect(isRetryableCode('core:limited:handler')).toBe(true);
+    expect(isRetryableCode('pace:limited:dispatch')).toBe(true);
     expect(isRetryableCode('core:exceeded:depth')).toBe(false);
     expect(isRetryableCode('NOT_A_CODE')).toBeUndefined();
   });

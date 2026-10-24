@@ -69,88 +69,48 @@ describe('createCommandBus', () => {
   });
 
   describe('use (plugins)', () => {
-    it('should execute plugin before handler', ({ bus }) => {
+    it('runs a started part before the handler and a settled part after it', ({ bus }) => {
       const order: string[] = [];
-
-      bus.use((_cmd, next) => {
-        order.push('plugin-before');
-        const result = next();
-        order.push('plugin-after');
-        return result;
-      });
-
+      bus.use({ started: () => { order.push('started'); }, settled: () => { order.push('settled'); } });
       bus.register('testAction', () => {
         order.push('handler');
         return 'done';
       });
-
       bus.dispatch('testAction', {});
-
-      expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
+      expect(order).toEqual(['started', 'handler', 'settled']);
     });
 
-    it('should allow plugin to short-circuit', ({ bus }) => {
+    it('a reuse step may answer in place of the handler', ({ bus }) => {
       const handler = vi.fn(() => 'handler-result');
-
-      bus.use((_cmd, _next) => {
-        return { ok: false, error: new Error('Blocked') };
-      });
-
+      bus.use({ reuse: () => ({ ok: false, value: undefined, error: new Error('Blocked') }) });
       bus.register('testAction', handler);
-
       const result = bus.dispatch('testAction', {});
-
       expect(result.ok).toBe(false);
       expect(result.error?.message).toBe('Blocked');
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should execute plugins in order (first = outermost)', ({ bus }) => {
+    it('runs each kind of part in install order', ({ bus }) => {
       const order: string[] = [];
-
-      bus.use((_cmd, next) => {
-        order.push('plugin1-before');
-        const result = next();
-        order.push('plugin1-after');
-        return result;
-      });
-
-      bus.use((_cmd, next) => {
-        order.push('plugin2-before');
-        const result = next();
-        order.push('plugin2-after');
-        return result;
-      });
-
+      bus.use({ started: () => { order.push('1 started'); }, settled: () => { order.push('1 settled'); } });
+      bus.use({ started: () => { order.push('2 started'); }, settled: () => { order.push('2 settled'); } });
       bus.register('testAction', () => {
         order.push('handler');
         return 'done';
       });
-
       bus.dispatch('testAction', {});
-
-      expect(order).toEqual([
-        'plugin1-before',
-        'plugin2-before',
-        'handler',
-        'plugin2-after',
-        'plugin1-after',
-      ]);
+      expect(order).toEqual(['1 started', '2 started', 'handler', '1 settled', '2 settled']);
     });
 
     it('should return unsubscribe function', ({ bus }) => {
-      const plugin = vi.fn((_cmd, next) => next());
-
-      const unsubscribe = bus.use(plugin);
+      const started = vi.fn();
+      const unsubscribe = bus.use({ started });
       bus.register('testAction', () => 'result');
-
       bus.dispatch('testAction', {});
-      expect(plugin).toHaveBeenCalledTimes(1);
-
+      expect(started).toHaveBeenCalledTimes(1);
       unsubscribe();
-
       bus.dispatch('testAction', {});
-      expect(plugin).toHaveBeenCalledTimes(1);
+      expect(started).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -214,80 +174,11 @@ describe('createCommandBus', () => {
   });
 });
 
-describe('re-entrant plugin chain', () => {
-  // A plugin may call `next()` more than once per dispatch - retry() does it
-  // once per attempt. Each call must replay the SAME tail of the chain, not
-  // fall through to the handler because a shared cursor was already exhausted.
-  it('replays every downstream plugin when an upstream plugin calls next() twice', ({ bus }) => {
-    const order: string[] = [];
-
-    bus.use((_cmd, next) => {
-      order.push('outer:1');
-      next();
-      order.push('outer:2');
-      return next();
-    });
-    bus.use((_cmd, next) => {
-      order.push('inner');
-      return next();
-    });
-
-    let handlerRuns = 0;
-    bus.register('act', () => {
-      handlerRuns++;
-      return 'done';
-    });
-
-    const result = bus.dispatch('act', {});
-    expect(result.ok).toBe(true);
-    expect(handlerRuns).toBe(2);
-    // 'inner' ran on both passes - it was skipped on the second before the fix.
-    expect(order).toEqual(['outer:1', 'inner', 'outer:2', 'inner']);
-  });
-
-  // The reason the runner cannot use the cheaper save/restore cursor, which
-  // benchmarks identically to the pre-fix shared cursor: a plugin may call
-  // `next()` long AFTER it returned. debounce/throttle do exactly that from a
-  // timer. With save/restore the deferred call re-enters the same plugin and
-  // the handler never runs; the old shared cursor survived it only by accident
-  // (its exhausted index happened to land on `execute()`).
-  it('a plugin may call next() after it has already returned (deferred continuation)', async ({ bus }) => {
-    const order: string[] = [];
-
-    bus.use((_cmd, next) => {
-      setTimeout(() => {
-        order.push('deferred');
-        next();
-      }, 1);
-      return { ok: true, value: 'queued' };
-    });
-    bus.use((_cmd, next) => {
-      order.push('downstream');
-      return next();
-    });
-    bus.register('act', () => {
-      order.push('handler');
-      return 'done';
-    });
-
-    expect(bus.dispatch('act', {}).value).toBe('queued');
-    await new Promise((r) => setTimeout(r, 20));
-
-    // The deferred call resumes at the SAME position it would have, not at
-    // this plugin's own index and not past the rest of the chain.
-    expect(order).toEqual(['deferred', 'downstream', 'handler']);
-  });
-
+describe('concurrent dispatches', () => {
   it('keeps concurrent dispatches on the async bus independent', async ({ asyncBus: bus }) => {
     const seen: string[] = [];
-    bus.use(async (cmd, next) => {
-      seen.push(`p1:${cmd.action}`);
-      return next();
-    });
-    bus.use(async (cmd, next) => {
-      seen.push(`p2:${cmd.action}`);
-      return next();
-    });
+    bus.use({ started: (cmd) => { seen.push(`p1:${cmd.action}`); } });
+    bus.use({ started: (cmd) => { seen.push(`p2:${cmd.action}`); } });
     bus.register('a', async () => 'a');
     bus.register('b', async () => 'b');
 
@@ -427,7 +318,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
 
     expect(result.ok).toBe(true); // a listener throwing does not fail dispatch
     expect(seen).toEqual(['second']);
-    expect(consoleError).toHaveBeenCalledWith('[vapor-chamber] Listener error:', expect.any(Error));
+    expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] core:failed:listener: a listener threw on /), expect.any(Error));
   });
 });
 
@@ -524,25 +415,18 @@ describe('createAsyncCommandBus', () => {
     expect(result.error?.message).toBe('Async error');
   });
 
-  it('should support async plugins', async ({ asyncBus: bus }) => {
+  it('should support async parts', async ({ asyncBus: bus }) => {
     const order: string[] = [];
-
-    bus.use(async (_cmd, next) => {
-      order.push('plugin-before');
-      await new Promise((r) => setTimeout(r, 5));
-      const result = await next();
-      order.push('plugin-after');
-      return result;
+    bus.use({
+      validate: () => async () => { order.push('rule'); await new Promise((r) => setTimeout(r, 5)); return undefined; },
+      settled: () => { order.push('settled'); },
     });
-
     bus.register('asyncAction', async () => {
       order.push('handler');
       return 'done';
     });
-
     await bus.dispatch('asyncAction', {});
-
-    expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
+    expect(order).toEqual(['rule', 'handler', 'settled']);
   });
 
   it('should support async hooks', async ({ asyncBus: bus }) => {
@@ -634,12 +518,12 @@ describe('syncQuery bare-bus fast path', () => {
     expect(r.error?.message).toContain('No handler');
   });
 
-  it('uses full runner path when a plugin is installed', ({ bus }) => {
+  it('runs the work steps when a step plugin is installed', ({ bus }) => {
     bus.register('get', () => 1);
-    const pluginSpy = vi.fn((_cmd: any, next: any) => next());
-    bus.use(pluginSpy);
+    const begin = vi.fn(() => undefined);
+    bus.use({ begin });
     bus.query('get', {});
-    expect(pluginSpy).toHaveBeenCalled();
+    expect(begin).toHaveBeenCalled();
   });
 });
 
@@ -813,7 +697,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   // The test above only proves the warning FIRES when DEV is true (the
   // vitest default). It never proves silence in production, on either of
   // DEV's two resolution paths - same gap class devWarnThenableResult and
-  // the onMissing:'buffer' overflow warning had. Closing both here.
+  // the buffer's overflow warning had. Closing both here.
 
   it('warnBatchOptionConflict is silent when __VC_DEV__=false (IIFE build path)', async () => {
     using _VC_DEV = stubGlobal('__VC_DEV__', false);
@@ -852,59 +736,6 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   });
 });
 
-describe('per-instance throttle timers - async bus', () => {
-  it('dispose clears a pending throttle timer (mirrors the sync-bus test above)', async () => {
-    // No retry: the refusal itself is under test, not the wait it declares.
-    const bus1 = createAsyncCommandBus({ retry: false });
-    const bus2 = createAsyncCommandBus({ retry: false });
-
-    bus1.register('a', async () => 1, { throttle: 10000 });
-    bus2.register('a', async () => 2, { throttle: 10000 });
-
-    // First dispatch on each - goes through, parks a timer in each bus's own
-    // s.throttleTimers.
-    const r1 = await bus1.dispatch('a', {});
-    const r2 = await bus2.dispatch('a', {});
-    expect(r1.ok).toBe(true);
-    expect(r2.ok).toBe(true);
-
-    // Dispose bus1 while its timer is still pending - asyncDispose() must
-    // clear it, not just clear listeners/handlers.
-    bus1.dispose();
-
-    // Bus2 is untouched - still throttled.
-    const r3 = await bus2.dispatch('a', {});
-    expect(r3).toFailWith('core:limited:handler');
-    expect(r3.error?.message).toContain('throttled');
-
-    bus2.dispose();
-  });
-});
-
-describe('async before-hook: plain synchronous throw + after-hooks registered', () => {
-  // tests/command-bus-features.test.ts:2521 covers `onBefore(async () => { throw })`
-  // - an async function's synchronous throw is actually a REJECTED PROMISE, so
-  // that test exercises the thenable/await branch, not a plain sync hook. It
-  // also registers no onAfter, so the "await the after-hooks promise from
-  // inside the catch" branch never runs either. This test is the mirror image
-  // of both, and also proves the documented contract that after-hooks still
-  // fire when a before-hook cancels the dispatch (observability is intact).
-  it('a plain (non-async) onBefore hook that throws still runs after-hooks', async ({ asyncBus: bus }) => {
-    let handlerRan = false;
-    const afterCalls: Array<{ action: string; ok: boolean }> = [];
-
-    bus.register('act', async () => { handlerRan = true; return 1; });
-    bus.onBefore((_cmd) => { throw new Error('sync-blocked'); }); // not async - no Promise involved
-    bus.onAfter((cmd, result) => { afterCalls.push({ action: cmd.action, ok: result.ok }); });
-
-    const result = await bus.dispatch('act', {});
-
-    expect(result).toFailWith('core:refused:hook');
-    expect(result.error?.message).toBe('sync-blocked');
-    expect(handlerRan).toBe(false);
-    expect(afterCalls).toEqual([{ action: 'act', ok: false }]); // after-hook still fired
-  });
-});
 
 describe('devWarnThenableResult - folds away in production, both DEV paths', () => {
   // DEV is a module-level const captured at import time (see src/dev.ts and
@@ -925,11 +756,9 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
-    // A plain (non-`async`) function that returns a thenable - isAsyncFn()
-    // only catches literal `async` functions at use()-time (an unconditional,
-    // non-DEV-gated warning); this shape reaches devWarnThenableResult's
-    // dispatch-time behavioral check instead, which IS the one gated by DEV.
-    bus.use(((_cmd: unknown, next: () => unknown) => Promise.resolve(next())) as never); // thenable result on a SYNC bus - the warning under test
+    // A step answering a thenable reaches devWarnThenableResult's
+    // dispatch-time check, the one gated by DEV.
+    bus.use({ reuse: () => Promise.resolve({ ok: true, value: 1, error: undefined }) }); // thenable result on a SYNC bus - the warning under test
     bus.register('act', () => 1);
 
     bus.dispatch('act', {});
@@ -944,7 +773,7 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
-    bus.use(((_cmd: unknown, next: () => unknown) => Promise.resolve(next())) as never); // thenable result on a SYNC bus - the warning under test
+    bus.use({ reuse: () => Promise.resolve({ ok: true, value: 1, error: undefined }) }); // thenable result on a SYNC bus - the warning under test
     bus.register('act', () => 1);
 
     bus.dispatch('act', {});

@@ -82,7 +82,7 @@ describe('timer delays', () => {
  * anything past 2^31-1. bounds.ts has the rule for a caller's number (NaN is
  * the default, a larger value the maximum), but each site applied it by hand,
  * and nothing checked that it did. Five sites missed it (audit D7, D8, D9 and
- * debounce, log 36.11), each found one at a time.
+ * the debounce plugin, now `pace`, log 36.11), each found one at a time.
  *
  * So the rule is a type. `Delay` (src/bounds.ts) is a number only
  * `delayOption` and `isDelay` make, and this test reads every timer call in

@@ -1,14 +1,16 @@
 /**
- * Feature example: vaporChamberHMR - Vite hot reload that keeps the bus
- * =====================================================================
- * Without this plugin, each HMR update resets the bus: handlers are lost,
- * state is cleared, and the page feels like a full reload.
+ * Feature example: vaporChamberHMR - a hot update keeps the bus and the cart
+ * ==========================================================================
+ * Edit the module that holds your handlers and your store, and Vite runs it
+ * again. The shared bus stays and the cart keeps its items: the plugin marks
+ * the update, and the store the module builds starts from the state of the one
+ * it replaces (docs/store.md). Without the plugin the same edit gives an empty
+ * cart.
  *
- * With it: the bus and its handlers survive a hot update. A re-run module
- * still builds its own state again from the initial value.
+ * Two files, one app: the config, and the module a component imports.
  */
 
-// ─── vite.config.ts ──────────────────────────────────────────────────────────
+// --- vite.config.ts ---------------------------------------------------------
 
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -17,61 +19,41 @@ import { vaporChamberHMR } from 'vapor-chamber/vite'
 export default defineConfig({
   plugins: [
     vue(),
-    vaporChamberHMR({
-      verbose: true,    // log HMR events to console (dev only)
-    }),
+    vaporChamberHMR({ verbose: true }), // logs each hot update to the console (serve only)
   ],
 })
 
-// ─── main.ts - unchanged; HMR is transparent ────────────────────────────────
+// --- src/cart.ts ------------------------------------------------------------
 
 // One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and
 // wires Vue (the root would not).
-import { createCommandBus, setCommandBus, useCommandState } from 'vapor-chamber/vue'
+import { getCommandBus } from 'vapor-chamber/vue'
+import { defineChamberStore } from 'vapor-chamber/store'
 
-const bus = createCommandBus()
-setCommandBus(bus)
+// The shared bus, not a new one: a store belongs to its bus, so a re-run
+// module that made its own bus would start every store from nothing.
+const bus = getCommandBus()
 
-// This handler survives HMR - the bus is preserved across module reloads.
-// Its own action: useCommandState below registers a handler per action in
-// its map, and a second register of one action replaces the first.
+// An edited handler replaces the old one when the module re-runs.
 bus.register('cartCheckout', (cmd) => {
-  console.log('cartCheckout handler still registered after HMR ✓')
+  console.log('cartCheckout runs, handler edited or not')
   return { ordered: cmd.target }
 })
 
-// This state does not survive a hot update: the re-run module builds it again
-// from the initial value. Only the bus is kept.
-// Outside a component, for brevity: in an app this runs in setup(). Here nothing
-// disposes it automatically (the DEV heads-up says so); call dispose() when done.
-const { state: cartState } = useCommandState(
-  { items: [] as string[], count: 0 },
-  {
-    'cartAdd':    (s, cmd) => ({ items: [...s.items, cmd.target.name], count: s.count + 1 }),
-    'cartRemove': (s, cmd) => ({ items: s.items.filter(n => n !== cmd.target.name), count: s.count - 1 }),
-  }
-)
+type Cart = { items: string[]; count: number }
+const useCart = defineChamberStore('cart', {
+  state: (): Cart => ({ items: [], count: 0 }),
+  reducers: {
+    add:    (s: Cart, item: { name: string }) => ({ items: [...s.items, item.name], count: s.count + 1 }),
+    remove: (s: Cart, item: { name: string }) => ({ items: s.items.filter((n) => n !== item.name), count: s.count - 1 }),
+  },
+})
 
-bus.dispatch('cartAdd', { name: 'T-Shirt' })
-// -> State: { items: ['T-Shirt'], count: 1 }
-// -> After HMR: a new state, { items: [], count: 0 }, until this re-run
-//    module dispatches cartAdd again and shows count: 1.
+// Outside a component, for brevity: in an app a component calls `useCart(bus)`
+// in setup() and the store leaves with it. Here the module owns the store, and
+// a re-run takes it over with its state.
+const cart = useCart(bus)
 
-bus.dispatch('cartCheckout', { id: 1 })
-// -> logs "cartCheckout handler still registered after HMR ✓"
-
-/*
- * How it works:
- *
- * 1. On first load: bus is stored on globalThis.__VAPOR_CHAMBER_BUS__
- * 2. On HMR update: the preserved bus is restored via setCommandBus()
- * 3. New handler registrations from the updated module are added to the same bus
- * 4. The useCommandState signals are not kept: the re-run module creates new
- *    ones from their initial values.
- *
- * The plugin injects a shim import into every script (.ts, .js, .tsx, .jsx)
- * that imports vapor-chamber, never into a .vue file. One import reaches the
- * whole module graph, so no manual code changes are needed anywhere in the app.
- */
-
-export { bus, cartState }
+// A component calls `cart.add({ name })` (the command `cartAdd`) or
+// `bus.dispatch('cartCheckout', order)`, and reads `cart.state.value`.
+export { bus, cart }

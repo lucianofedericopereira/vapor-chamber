@@ -8,7 +8,15 @@
 // dispatches inside the timed call (the gc is ~99% of it), and a 1 MB young
 // generation (`--flags=--max-semi-space-size=1`, controls failed).
 import { createAsyncCommandBus } from '__DIST__/index.js';
-import { createHttpBridge } from '__DIST__/transports.js';
+import * as T from '__DIST__/transports.js';
+
+// Either arm: 1.32 declares the transport at the bus, 1.31 installs the bridge.
+const sending = (options, endpoint) => {
+  if (T.httpTransport) return createAsyncCommandBus({ ...options, transport: T.httpTransport({ endpoint }) });
+  const bus = createAsyncCommandBus(options);
+  bus.use(T.createHttpBridge({ endpoint }));
+  return bus;
+};
 
 const text = JSON.stringify({ state: 1 });
 const h = { 'content-type': 'application/json' };
@@ -19,8 +27,7 @@ const ok = {
 };
 globalThis.fetch = async () => ok;
 
-const bus = createAsyncCommandBus({ retry: false });
-bus.use(createHttpBridge({ endpoint: '/ok' }));
+const bus = sending({ retry: false }, '/ok');
 
 const run = async (n) => {
   let s = 0;

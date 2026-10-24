@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> - a <!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> aligned. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> - a <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> aligned. LGPL-2.1.
 </p>
 
 ---
 
-Each user action is a command with **one handler**, a **plugin pipeline** around it, and
+Each user action is a command with **one handler**, **plugins** placed around it, and
 **signal-native** reactive state. It replaces scattered event listeners and prop drilling with
 one flow.
 
@@ -21,29 +21,30 @@ bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 bus.use(logger());
 bus.use(validator({ cartAdd: (cmd) => cmd.target.id ? null : 'Missing ID' }));
 
-// In a component - same shared bus, with reactive state
-const { dispatch, loading, lastError } = useCommand();
+// In a component - same shared bus, with this key's busy state
+const { dispatch, pending } = useCommand();
+const adding = pending('cartAdd', { id: product.id });
 dispatch('cartAdd', { id: product.id });
 ```
 
-`emit` is fire-and-forget, with many listeners. `dispatch` has one handler and a plugin pipeline,
-so each action has one place to read and to test.
+`emit` is fire-and-forget, with many listeners. `dispatch` has one handler and its plugins' rules
+and steps, so each action has one place to read and to test.
 
 ## What's in the can
 
 | | |
 |---|---|
-| **Core** (the bus) | dispatch/query/emit, plugin pipeline, wildcard listeners - framework-agnostic, no Vue import, **<!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli** |
-| **Vue composables** | `useCommand`, `useCommandState`, shared state, `defineVaporCommand`, full Vapor wrappers |
+| **Core** (the bus) | dispatch/query/emit, plugin parts, wildcard listeners - framework-agnostic, no Vue import, **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli** |
+| **Vue composables** | `useCommand`, shared state, `defineVaporCommand`, full Vapor wrappers |
 | **Router** (opt-in) | URL-addressed reads for Vue 3.6 over a server catch-all - route tables and loaders as data |
-| **Plugins** (opt-in) | logger, validator, history (undo/redo), debounce, throttle, persist, serialize, idempotent, auth guard. Retry is the async bus's own |
-| **Transports** (opt-in) | HTTP bridge, batching HTTP, WebSocket, SSE, Laravel Echo/Reverb |
-| **Extras** (opt-in) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
+| **Plugins** (opt-in) | logger, validator, history (undo/redo), idempotent, auth guard. Retry is the async bus's own. Pacing (debounce, throttle) is the sender's: `pace()` |
+| **Transports** (opt-in) | `httpTransport` (with `batch`), WebSocket, SSE, Laravel Echo/Reverb |
+| **Extras** (opt-in) | SSR by the stores' states, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
 
-- **Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
+- **Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3931<!-- /vc:tests --> tests** in <!-- vc:testFiles -->383<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->4866<!-- /vc:tests --> tests** in <!-- vc:testFiles -->466<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -59,7 +60,7 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-It needs Node >= 22.12. Vue is an **optional** peer dep: >= 3.5 for composables, >= <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->
+It needs Node >= 22.12. Vue is an **optional** peer dep: >= 3.5 for composables, >= <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->
 for the full Vapor surface. The core bus runs without Vue entirely. Vite >= 5 and `@vitejs/plugin-vue`
 >= 5 are needed only for the `vapor-chamber/vite` plugins (HMR, `vaporChamberWire()`) and Vapor SFC support.
 
@@ -89,9 +90,9 @@ store from one is refused by the other's bus (`tests/library-names.test.ts`).
   [examples/laravel-backend/](examples/laravel-backend).
 - **Astro** - [examples/exo-astro](examples/exo-astro) is a declarative directive set (`v-scope`,
   `v-command`, `v-bind-text`, `v-show`, `v-each`) for coordinating independent page sections. It
-  uses `onMissing: 'buffer'`, so sections can dispatch before their handlers hydrate.
+  passes `buffer: createBuffer()`, so sections can dispatch before their handlers hydrate.
 - **Performance & tuning** - [docs/performance.md](docs/performance.md): what's optimized by
-  default, the tuning knobs (`persist({ coalesce: true })`, `configureUid`, `configureSignal`),
+  default, the tuning knobs (`configureUid`, `configureSignal`), a store's saves,
   variant selection, benchmark snapshot.
 - **Failures and the wire** - [docs/contract.md](docs/contract.md): the `owner:condition:subject`
   codes, the conditions, and the request and answer shapes both sides of the wire read.
@@ -166,7 +167,7 @@ A misspelled action or field in a component is a compile error, before any reque
 
 Import from the static entry, `vapor-chamber/vue` (or `vapor-chamber/vapor` when the app calls the
 library's Vapor API, such as `createVaporChamberApp`). It
-carries the composables (`useCommand`, `useCommandState`, `signal`, ...) and the root's whole
+carries the composables (`useCommand`, `useCommandHistory`, `signal`, ...) and the root's whole
 surface: the bus, plugins, transports. The static entry hands Vue to the library at build time, the
 moment it is imported, so even module-scope state is reactive:
 
@@ -244,7 +245,7 @@ pins Vue's virtual-DOM runtime into your bundle. It therefore lives behind its o
 
 | entry | bindings retained from `vue` | brotli |
 |---|---|--:|
-| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->10.8<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->11.3<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | `defineComponent h inject provide` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | `createDynamicComponent createIf createSlot defineVaporComponent inject provide` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
 
@@ -256,7 +257,7 @@ as its own chunk, the first time it renders one.
 **A pure-Vapor app can skip the vDOM renderer entirely** (experimental, v1.x).
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name built from Vapor's own helpers,
 so rendering a route needs no `vaporInteropPlugin`. Take the startup chunk of a Vite production
-build. It comes out **<!-- vc:outletSaving -->23.05<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->73.8<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
+build. It comes out **<!-- vc:outletSaving -->17.97<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.0<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
 app rendering through the vDOM outlet plus interop. The same harness derives that baseline
 (`tests/vapor/vapor-outlet-size.test.ts`).
 
@@ -289,7 +290,7 @@ createVaporChamberApp(App).mount('#app');   // no vDOM runtime
 ```vue
 <script setup vapor>
 import { useCommand } from 'vapor-chamber/vapor';
-const { dispatch, loading } = useCommand();
+const { dispatch, pending } = useCommand();
 </script>
 ```
 
@@ -308,7 +309,7 @@ createApp(App).use(vaporInteropPlugin).mount('#app');
 <script setup vapor>
 // the same import in vDOM and Vapor components alike
 import { useCommand } from 'vapor-chamber/vue';
-const { dispatch, loading } = useCommand();
+const { dispatch, pending } = useCommand();
 </script>
 ```
 
@@ -352,7 +353,7 @@ Every dispatch returns `{ ok: boolean, value?: any, error?: Error }`.
 <details>
 <summary><b>Handlers, naming, and results</b></summary>
 
-One handler per action. Returns a value or throws:
+One handler per action, the newest registration still live: when it is unregistered, the one it covered answers again. Returns a value or throws:
 
 ```typescript
 bus.register('cartAdd', (cmd) => {
@@ -360,10 +361,9 @@ bus.register('cartAdd', (cmd) => {
   return cart.items;    // becomes result.value
 });
 
-// with undo support and per-command throttling
+// with undo support
 bus.register('cartAdd', addHandler, {
   undo: (cmd) => { cart.items.pop(); },
-  throttle: 300,   // max once per 300ms per target
 });
 ```
 
@@ -385,64 +385,74 @@ checked against the pattern.
 <details>
 <summary><b>Plugins and before/after hooks</b></summary>
 
-Plugins wrap handlers - they can modify commands, short-circuit, observe results, or transform
-output:
+A plugin is an object of parts. The bus places each part where it belongs, and no
+part holds `next`, so two plugins give the same outcome in either install order:
 
 ```typescript
-import { onSettled, type Plugin } from 'vapor-chamber';
+import { type Command, type PluginParts } from 'vapor-chamber';
 
-const timingPlugin: Plugin = (cmd, next) => {
-  const start = Date.now();
-  return onSettled(next(), (result) => {
-    console.log(`${cmd.action} took ${Date.now() - start}ms`);
-    return result;
-  });
+function timing(): PluginParts {
+  const starts = new Map<Command, number>();
+  return {
+    id: 'timing',
+    started: (cmd) => { starts.set(cmd, performance.now()); },
+    settled: (cmd) => {
+      console.log(`${cmd.action} took ${performance.now() - (starts.get(cmd) ?? 0)}ms`);
+      starts.delete(cmd);
+    },
+  };
+}
+bus.use(timing());
+```
+
+| Part | When the bus calls it | What it may do |
+|---|---|---|
+| `started(cmd)` | a dispatch or a query starts, before its rules | observe |
+| `settled(cmd, result)` | every outcome, after the `onAfter` hooks | observe |
+| `authorize(action)`, `validate(action)` | asked once per action; its rule runs before the work | refuse |
+| `reuse(cmd)` | before the work | answer with a stored result |
+| `admit(cmd, fail)` | after every `reuse` | refuse (a limit), taking nothing |
+| `begin(cmd)` | the command goes to the work | hand a `WorkTicket`: the work's `signal`, `landed(result)`, an `answer` |
+| `attach(bus)` | at `use()` | subscribe; return the detach |
+
+`id`, `actions` and `actionFilter` scope every part; `dispose` and `forget` run
+at the bus's `dispose()` and after an undo lands. A command's own values are
+the sender's: the bus never rewrites a command, so the caller adds them.
+
+A refusal builds its result with `err(error)`, the bus's own factory, so every
+result keeps one hidden class; `ok(value)` builds an answer. `fail(code,
+message)`, handed to a rule and an `admit` step, mints the failure's owner from
+the plugin's `id`. `countOption(value, fallback)` is the library's rule for a
+numeric option (NaN falls back to the default, negatives clamp, fractions
+truncate):
+
+```typescript
+import { err, type PluginParts } from 'vapor-chamber';
+
+const qtyGuard: PluginParts = {
+  id: 'qtyGuard', // the code reads qtyGuard:invalid:payload
+  validate: (action) => action === 'cartAdd'
+    ? (cmd, fail) => (cmd.payload?.qty > 0 ? undefined : err(fail('invalid:payload', 'qty must be positive')))
+    : undefined,
 };
-bus.use(timingPlugin);
 ```
 
-A `Plugin` runs on either bus, so `next()` may be a promise: read the result
-through `onSettled`, which stays synchronous on the sync bus. The type enforces
-it (`result.ok` straight off `next()` does not compile). A plugin for one bus
-only is a `SyncPlugin` (its `next()` is always a result) or an `AsyncPlugin`.
-
-A plugin that answers without calling `next()` builds its result with `ok(value)`
-or `err(error)`, the bus's own factories, so every result keeps one hidden class.
-A refusal is `err(fail(code, message))`: `fail`, the third argument, mints the
-failure's owner from the plugin's `id`. `countOption(value, fallback)` is the
-library's rule for a numeric option (NaN falls back to the default, negatives
-clamp, fractions truncate):
+A gate is a rule: it refuses before the work, and a rule may be async. A rule
+runs for a dispatch and a query alike, so a gate names the actions it gates.
+After-hooks run once a command settles:
 
 ```typescript
-import { err, type Plugin } from 'vapor-chamber';
-
-const qtyGuard: Plugin = Object.assign(
-  (cmd, next, fail) => cmd.payload?.qty > 0 ? next() : err(fail('invalid:payload', 'qty must be positive')),
-  { id: 'qtyGuard' },  // the code reads qtyGuard:invalid:payload
-);
-```
-
-Execution is by priority (highest first), then registration order:
-
-```typescript
-bus.use(validatorPlugin, { priority: 10 }); // first
-bus.use(analyticsPlugin, { priority: 1 });
-bus.use(loggerPlugin);                      // priority 0 (default), last
-```
-
-Before hooks run ahead of the handler. Throw to cancel: the dispatch returns `{ ok: false }` with a
-`core:refused:hook` error whose `cause` is what you threw.
-
-```typescript
-bus.onBefore((cmd) => {
-  if (!user.isAuth && protectedActions.includes(cmd.action)) throw new Error('Unauthenticated');
+// a client-wide read-only mode over every write
+bus.use({
+  id: 'readOnly',
+  authorize: (action) => (isWrite(action)
+    ? (cmd, fail) => (maintenance.value ? err(fail('refused:action', 'Read-only mode')) : undefined)
+    : undefined),
 });
-bus.onBefore(() => { isLoading.value = true; });
-bus.onAfter(()  => { isLoading.value = false; });
-
-// on an async bus, hooks can be async
-asyncBus.onBefore(async (cmd) => { await rateLimiter.check(cmd.action); });
+bus.onAfter((cmd, result) => { if (!result.ok) report(result.error); });
 ```
+
+What is in flight is `commandState(bus).pending(action)` (`vapor-chamber`).
 
 </details>
 
@@ -465,8 +475,8 @@ bus.on('cartAdd', trackAdd, { signal: controller.signal });
 } // unsubscribed automatically at scope exit
 ```
 
-`query()` is `dispatch()` minus the `onBefore` hooks - reads shouldn't trigger mutation gates
-(auth checks, spinners, optimistic updates). Plugins and `onAfter` still fire. This is the CQRS
+`query()` is a read: the command state does not count it as pending. Its rules,
+steps and `onAfter` still run. This is the CQRS
 separation: `dispatch()` writes, `query()` reads.
 
 ```typescript
@@ -501,7 +511,14 @@ bus.dispatch('orderShip', order, {
 });
 ```
 
-Every failure a dispatch or a bridge returns is a `BusError`, with two
+History reads `causationId`: a command a handler dispatches with its parent's id is undone
+with the parent, and a redo of the parent applies it once.
+
+A command's `action`, `target`, `payload` and `meta` are `readonly` in its type: every part,
+listener and history entry reads the one command, so build a new value instead of writing
+it. The meta's own fields stay writable.
+
+Every failure a dispatch or a transport returns is a `BusError`, with two
 exceptions. A handler's own throw and an `Error` given as the abort reason come
 back as themselves. A `BusError`'s code is `owner:condition:subject`: who raised
 it, what went wrong, and what it is about. The bus sets the owner, never the
@@ -519,7 +536,7 @@ if (!result.ok && result.error instanceof BusError) {
 }
 ```
 
-A plugin's failures carry its declared `id` as the owner (`throttle:limited:handler`,
+A plugin's failures carry its declared `id` as the owner (`rateLimit:limited:action`,
 `circuitBreaker:limited:action`). A backend's problem is
 `remote:<condition of its status>:<its code>`, inside a 2xx `{ problem }` too.
 
@@ -544,10 +561,10 @@ conditions read 1:1 against gRPC's canonical codes
 table, with fix suggestions. Production messages state the fact and leave the
 fix to it.
 
-`<id>:failed:plugin` means a plugin threw or rejected: `cause` is the original,
-`context.index` its place in the chain. Every built-in plugin declares its id
-(`serialize:failed:plugin`). The bridges are `transport`, like their other
-failures. A plugin of yours without one reads `plugin:failed:plugin`. It is a
+`<id>:failed:plugin` means a plugin's part threw or rejected: `cause` is the
+original, `context.part` the part (`validate`, `admit`, ...). Every built-in plugin declares its id
+(`cache:failed:plugin`). A transport that throws reads `transport:failed:send`,
+like its other failures. A plugin of yours without an id reads `plugin:failed:plugin`. It is a
 bug in the pipeline, not a failing server. The bus does not re-run it, and
 `circuitBreaker` neither counts it nor resets on it.
 
@@ -558,11 +575,27 @@ const info = inspectBus(bus);
 info.actions;          // ['cartAdd', 'cartRemove', ...]
 info.undoActions;      // actions with registered undo handlers
 info.pluginCount;      // 3
-info.pluginPriorities; // [10, 5, 0]
-info.plugins;          // [{ id: 'logger', priority: 10, actions: undefined, actionFilter: false, transport: false }, ...]
+info.plugins;          // [{ id: 'logger', actions: undefined, actionFilter: false, parts: ['settled'] }, ...] in install order
 info.sealed;           // false
 info.dispatchDepth;    // 0 (increments during nested dispatch)
-info.activeTimers;     // throttle timers currently running
+```
+
+What the library detects and goes on from (a listener's throw, a misuse in development) is a
+report with its code. One formatter prints it, and every sink receives it. The default prints
+an aligned level tag (`[ WARN ]` or `[ FAIL ]`), the code and the message, then in development a link to the code's section, which gives its fix
+(`getErrorEntry(code).fix` reads it too):
+
+```text
+[vapor-chamber] [ FAIL ] core:failed:listener: a listener threw on "cartAdd"
+  docs: https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#failed
+```
+
+```typescript
+import { configureReport, consoleSink } from 'vapor-chamber';
+configureReport({ sinks: [consoleSink, (r) => telemetry.send(r.code, r.context)] });
+configureReport({ format: (r) => [`${r.level} ${r.code} ${r.message}`] });
+configureReport({ level: 'error' }); // warnings dropped; 'silent' drops both
+configureReport(null); // the default formatter, the console, level 'warn'
 ```
 
 </details>
@@ -590,6 +623,8 @@ createReaction('cartAdd', 'inventoryCheck', {
   when: (cmd, result) => result.ok,
   map:  (cmd) => ({ itemId: cmd.payload.itemId }),
 }).install(bus);
+// It does not run on an undo, a redo or a mirrored command (origin 'sync'):
+// history replays the follow-up it recorded.
 ```
 
 </details>
@@ -612,8 +647,8 @@ bus.use(supersede({
 }));
 ```
 
-Because the HTTP bridge forwards `cmd.signal` into its outbound `fetch`, a superseded HTTP request
-is cancelled at the network layer. The batching bridge settles a superseded command at once and
+Because the HTTP transport forwards `cmd.signal` into its outbound `fetch`, a superseded HTTP request
+is cancelled at the network layer. With `batch`, it settles a superseded command at once and
 drops it from a batch not yet sent. It cancels a sent batch once every command in it has aborted.
 
 </details>
@@ -691,52 +726,47 @@ getErrorEntry('core:missing:handler')?.fix;   // "Register a handler with bus.re
 
 | Plugin | Description |
 |--------|-------------|
-| `logger(options?)` | Log commands to console |
-| `validator(rules)` | Validate commands before execution |
-| `history(options?)` | Track command history for undo/redo |
-| `debounce(actions, wait)` | Delay execution until activity stops |
-| `throttle(actions, wait)` | Limit execution frequency |
-| `authGuard(options)` | Block protected commands when unauthenticated |
-| `optimistic(handlers)` | Apply optimistic updates, rollback on failure |
-| `optimisticUndo(bus, actions, opts?)` | Auto-rollback through registered undo handlers |
-| `persist(options)` | Auto-save state to localStorage after commands |
+| `logger(options?)` | Log every settled command to the console, a refusal or a cancel included |
+| `validator(rules)` | Refuse a command a rule rejects, before every plugin and the work |
+| `history({ bus, ... })` | Undo/redo of the bus's commands. Not a bus plugin: it installs its own recorder |
+| `authGuard(options)` | Refuse protected commands when unauthenticated, before the validators |
 | `createChannel(options)` | Mirror emitted facts to other tabs. Not a bus plugin: it takes a fast lane, not the bus |
 
 Extras (same import): `cache`, `circuitBreaker`, `rateLimit`, `metrics`.
+
+Pacing is the sender's, not a plugin: `pace(send, { debounce: ms })` runs the latest call of a
+burst, `pace(send, { throttle: ms })` the first per wait. Calls are keyed by action and target, so
+search as you type passes the typed text as the payload. `useCommand({ debounce })` and
+`defineVaporCommand(action, handler, { throttle })` take the same options.
 
 <details>
 <summary><b>Usage for each plugin</b></summary>
 
 ```typescript
 // logger / validator
-bus.use(logger({ collapsed: true, filter: (cmd) => cmd.action.startsWith('cart') }));
+bus.use(logger({ collapsed: true, actions: ['cart*'] }));
 bus.use(validator({
   cartAdd: (cmd) => cmd.target?.id ? null : 'Product must have an ID',   // null = valid
 }));
 
-// history - optionally bus-backed, so undo() dispatches <action>$undo, which runs the registered inverse
-const historyPlugin = history({ maxSize: 100, bus });
-bus.use(historyPlugin);
-historyPlugin.undo();
-historyPlugin.redo();
-historyPlugin.getState();   // { past, future, canUndo, canRedo }
-// Undo is local: a command a bridge sent reads canUndo false, so the server's
+// history - records the bus's commands from the call on; undo() dispatches <action>$undo, which runs the registered inverse
+const h = history({ bus, maxSize: 100 });
+h.undo();
+h.redo();
+h.getState();   // { past, future, canUndo, canRedo }
+// Undo is local: a command a transport sent reads canUndo false, so the server's
 // write is never reversed on the client alone. Send a compensating command.
 
-// debounce / throttle
-bus.use(debounce(['searchQuery'], 300));
-bus.use(throttle(['uiScroll'], 100));
+// pacing at the sender: the typed text is the payload, so a burst shares one key
+const search = pace(bus.dispatch, { debounce: 300 });
+const r = await search('searchQuery', {}, input.value); // the latest call's real result
+const mark = pace(bus.dispatch, { throttle: 100 });     // a repeat inside 100 ms: pace:limited:dispatch
 
 // authGuard
 bus.use(authGuard({
   isAuthenticated: () => !!user.value,
-  protected: ['shopCart', 'admin*'],          // prefixes: 'admin*' is admin, '*' every action
+  protected: ['shopCart', 'admin*'],          // 'shopCart' that action, 'admin*' every admin action, '*' all
   onUnauthenticated: (cmd) => router.push('/login'),
-}));
-
-// optimistic - apply returns its own rollback
-bus.use(optimistic({
-  cartAdd: { apply: (cmd) => { cartCount.value++; return () => { cartCount.value--; }; } },
 }));
 
 // extras
@@ -765,10 +795,12 @@ const reads = createActionFilter([{ all: [{ suffix: { action: 'Get' } }, { not: 
 bus.use(cache({ ttl: 60_000, actionFilter: reads }));
 ```
 
-**optimisticUndo** - automatic rollback using registered undo handlers, on sync or async buses.
+**Optimistic actions** - `register(action, handler, { undo, optimistic: true })`, on either bus.
 The handler makes the local change and sends the write. The inverse reverses the local change
 only: an inverse never does I/O. Undoing a write the server applied is the app's compensating
-command, not an inverse.
+command, not an inverse. On the async bus the dispatch answers an `Accepted` at once. A failure
+runs the undo before `done` settles with it. A plugin's refusal runs nothing, so nothing is undone.
+For an action a transport sends, the handler is the local change and the transport the write.
 
 ```typescript
 bus.register('cartAdd', async (cmd) => {
@@ -777,21 +809,20 @@ bus.register('cartAdd', async (cmd) => {
 }, {
   // local only: the write failed, so there is nothing on the server to remove
   undo: (cmd) => { cart.items = cart.items.filter((item) => item.id !== cmd.target.id); },
+  optimistic: true,
 });
 
-bus.use(optimisticUndo(bus, ['cartAdd'], {
-  predict: (cmd) => ({ ...cart, items: [...cart.items, cmd.target] }),
-  onRollback: (cmd, error) => toast.error(`Rolled back: ${error.message}`),
-  onRollbackError: (cmd, undoErr, origErr) => console.error('Undo failed:', undoErr),
-}));
+const r = await bus.dispatch('cartAdd', item);       // an Accepted, at once
+const end = await r.value.done;                       // the write's result
+if (!end.ok) toast.error(`Rolled back: ${end.error.message}`);
 ```
 
 A failure marked `context.outcome: 'unknown'` (no reply, and nothing identifies the command)
-still rolls back, so the screen shows the last confirmed state. `onRollback` gets that error:
+still rolls back, so the screen shows the last confirmed state. `done` settles with that error:
 re-read the server, since the write may have landed.
 
 **retry** - the async bus's own, on by default. It re-sends the call that
-produced the outcome (a handler, or a bridge), so the plugins outside see one
+produced the outcome (a handler, or the transport), so the plugins outside see one
 dispatch. It makes 3 attempts with a jittered backoff. A per-bus budget stops
 retries from piling onto a backend that is down:
 
@@ -809,26 +840,21 @@ createAsyncSchemaCommandBus({ cartSet: { retry: 'idempotent' } }); // on the sch
 
 An action declared idempotent gets one `Idempotency-Key` for all its attempts.
 
-**persist** - auto-save after each successful command:
+**A store's `persist`** - saved after its writes, read back when the store is created:
 
 ```typescript
-const cartPersist = persist({ key: 'vc:cart', getState: () => cartState.value });
-bus.use(cartPersist);
+const useCart = defineChamberStore('cart', { state, reducers, persist: saveTo({ key: 'vc:cart' }) });
 
-const saved = cartPersist.load();      // rehydrate before rendering
-if (saved) cartState.value = saved;
+const cart = useCart(bus);   // the saved state is its first state
+cart.add(1);                 // saved once per microtask, whatever wrote it
+cart.$reset();               // back to state(), and saved as that
 
-cartPersist.save();    // force
-cartPersist.clear();
-bus.use(persist({ key: 'vc:cart', getState, storage: sessionStorage }));   // custom backend
-bus.use(persist({ key: 'vc:cart', getState, actions: ['cart*'] }));        // cart actions only, $reset and undo included
-
-const big = persist({ key: 'vc:cart', getState, storage: indexedDbStorage() });  // IndexedDB
-const restored = await big.hydrate();  // before the first dispatch; load() reads sync storage only
+defineChamberStore('tab', { state, reducers, persist: saveTo({ key: 'vc:tab', storage: sessionStorage }) });          // custom backend
+defineChamberStore('prefs', { state, reducers, persist: saveTo({ key: 'vc:prefs', validate }) });                       // a check of the saved shape
+defineChamberStore('rows', { state, reducers, persist: saveTo({ key: 'vc:rows', storage: indexedDbStorage() }) });   // IndexedDB: read when it answers
 ```
 
-`persist()` needs `getState`. Without it, it throws a `TypeError` at setup, since every save
-would otherwise fail and nothing would be stored.
+`saveTo` comes from `vapor-chamber` or the store entries, and throws without `key`. A store without `persist` carries none of it. Details: [docs/store.md](docs/store.md) (Saved state).
 
 **createChannel** - mirror emitted facts to other tabs through `BroadcastChannel`. What crosses
 is what a handler computed, not the command that caused it, so the receiving tab
@@ -857,38 +883,49 @@ crosses through structured clone, so it cannot carry functions.
 
 ## Transport Layer
 
-Send commands to a backend over HTTP, WebSocket, or SSE. Import from `vapor-chamber/transports`.
+Send commands to a backend over HTTP or WebSocket, and take pushes over SSE or Echo. Import from
+`vapor-chamber/transports`.
 
-| Bridge | Use for |
+A transport is declared at the async bus, `createAsyncCommandBus({ transport })`: one for every
+action, or a map by action pattern where the most specific match wins (an exact name, then the
+longest prefix, then `*`). It is the work for the actions it covers, where a local handler would
+run: every plugin wraps it, wherever it was installed, and an action no pattern covers runs its
+local handler. A `$` action is the library's and always runs locally.
+
+| Name | Use for |
 |---|---|
-| `createHttpBridge` | POST each matching command (`actions`, default all) to one endpoint. The rest stay local |
-| `createBatchingHttpBridge` | Same contract, but coalesces a tick's dispatches into one POST |
-| `createWsBridge` | WebSocket with auto-reconnect and a reactive `connected` signal |
-| `createSseBridge` | Server pushes commands to the client |
-| `createEchoBridge` | Laravel Echo / Reverb channels -> `bus.emit()` |
+| `httpTransport` | POST each command to one endpoint; `batch` coalesces a window's commands into one POST |
+| `wsTransport` | WebSocket with auto-reconnect and a reactive `connected` signal |
+| `defineTransport` | Your own `send(cmd, local)`; `{ localFallback: true }` when it falls back to the local handler |
+| `createSseBridge` | Server pushes in: store states written, events emitted |
+| `createEchoBridge` | Laravel Echo / Reverb channels -> store states, then `bus.emit()` |
 
 <details>
-<summary><b>HTTP bridge</b> - CSRF, re-sends by the bus, timeouts, scope cancellation</summary>
+<summary><b>HTTP transport</b> - CSRF, re-sends by the bus, timeouts, scope cancellation</summary>
 
 ```typescript
 import { createAsyncCommandBus } from 'vapor-chamber';
-import { createHttpBridge } from 'vapor-chamber/transports';
+import { httpTransport } from 'vapor-chamber/transports';
 
-const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-
-// The bus re-sends through the bridge, read from the answer: a 429, 503 or
+// The bus re-sends through the transport, read from the answer: a 429, 503 or
 // 408 for any action, after the Retry-After it declares - never a redirect.
+// Until a 429 or 503 wait ends, another command for that action waits it too,
+// unsent (transport:limited:held, docs/retry.md).
 // No reply, a 502, 504 or 500, or a verdict with a Retry-After (409 in
 // progress) only for an action declared idempotent or a keyed command. An
 // unkeyed command with no reply fails with context.outcome 'unknown'. The
-// plugins outside see one dispatch.
-bus.use(createHttpBridge({
-  endpoint: '/api/commands',
-  csrf: true,                                 // the meta tag, else the XSRF-TOKEN cookie
-  csrfCookieUrl: '/sanctum/csrf-cookie',      // default; '' disables the refresh fetch
-  timeout: 8000,
-  actions: ['order*'],                        // only forward these; others stay local
-}));
+// plugins see one dispatch.
+const bus = createAsyncCommandBus({
+  onMissing: 'ignore',
+  transport: {
+    'order*': httpTransport({                 // only these go to the server; others stay local
+      endpoint: '/api/commands',
+      csrf: true,                             // the meta tag, else the XSRF-TOKEN cookie
+      csrfCookieUrl: '/sanctum/csrf-cookie',  // default; '' disables the refresh fetch
+      timeout: 8000,
+    }),
+  },
+});
 
 await bus.dispatch('orderCreate', { items: cart });
 // -> POST /api/commands  { command: 'orderCreate', target: { items: ... } }
@@ -905,26 +942,28 @@ Cancel in-flight requests when a Vapor scope is disposed:
 ```typescript
 const ctrl = new AbortController();
 onScopeDispose(() => ctrl.abort());
-bus.use(createHttpBridge({ endpoint: '/api/vc', scopeController: ctrl }));
+const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', scopeController: ctrl }) });
 ```
 
 </details>
 
 <details>
-<summary><b>Batching HTTP bridge</b> - one round trip per tick</summary>
+<summary><b>Batching</b> - one round trip per tick</summary>
 
-Same backend contract as `createHttpBridge`. CSRF, timeout and session-expiry all reuse the same
-request path, and the bus re-sends per command, each into the next batch. But commands dispatched
-within a window coalesce into a single POST and are matched back to each caller by id. It is
-invisible to the call site: each `dispatch()` still resolves with its own result.
+The same transport with `batch`: the same backend contract, CSRF, timeout and session expiry, and
+the bus re-sends per command, each into the next batch. Commands sent within a window coalesce
+into a single POST and are matched back to each caller by id. It is invisible to the call site:
+each `dispatch()` still resolves with its own result.
 
 ```typescript
-bus.use(createBatchingHttpBridge({
-  endpoint: '/api/vc/batch',
-  csrf: true,
-  window: 'microtask',   // default: same-tick coalescing, zero added latency
-  // window: 20,         // or hold the queue open N ms to catch separate ticks
-}));
+const bus = createAsyncCommandBus({
+  transport: httpTransport({
+    endpoint: '/api/vc/batch',
+    csrf: true,
+    batch: { window: 'microtask' },   // default: same-tick coalescing, zero added latency
+    // batch: { window: 20 },         // or hold the queue open N ms to catch separate ticks
+  }),
+});
 
 bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' });
 bus.dispatch('cartAdd', product, { quantity: 2 });
@@ -946,24 +985,38 @@ bus.dispatch('cartAdd', product, { quantity: 2 });
 <summary><b>WebSocket, SSE, and Laravel Echo</b></summary>
 
 ```typescript
-const ws = createWsBridge({
+const ws = wsTransport({
   url: 'wss://api.example.com/commands',
-  actions: ['chat*', 'presence*'],
   timeout: 10_000,     // per-message response timeout
-  maxQueueSize: 100,   // queued messages while disconnected
   reconnect: true,
   maxReconnects: 10,
 });
-bus.use(ws);
+const bus = createAsyncCommandBus({ transport: { 'chat*': ws, 'presence*': ws } });
 ws.connect();
 
 ws.isConnected();      // imperative
 ws.connected.value;    // reactive signal - bindable in templates, no polling
+ws.outbox.pending.value; // commands held while the socket is down
 ws.disconnect();       // intentional close, suppresses reconnect
 ```
 
+While the socket is down, a dispatch answers an `Accepted` whose `done` settles with the reply
+once the socket opens and the command is sent. The transport's own outbox holds up to 100
+commands, each for at most `timeout`, in memory. `disconnect()` settles what it holds. To hold
+them durably, give the bus an outbox: `createAsyncCommandBus({ transport, outbox:
+createOutbox() })` holds a WebSocket action while the socket is down too, saved in
+`localStorage` and shared by the origin's tabs.
+
+A server's push is a name and data on every wire: an SSE event, an Echo broadcast, or a
+WebSocket frame `{ event, data }` with no `id`. Each store state under the data's `stores` is
+written to the store with that id, then the event is emitted on the bus. A push is never
+dispatched, so no plugin runs and no transport sends it back
+([docs/contract.md](docs/contract.md#4-the-wire)).
+
 ```typescript
-bus.use(createSseBridge({ url: '/api/events' }));
+// event: cartChanged, data: {"stores":{"cart":{...}}} -> the cart store, then bus.emit('cartChanged', data)
+createSseBridge({ url: '/api/events', events: ['cartChanged'] }).install(bus);
+// onEvent: (event, bus) => ... reads each event itself, in place of the push
 ```
 
 Echo / Reverb - you pass your own instance, so the library never imports `laravel-echo`:
@@ -986,8 +1039,8 @@ realtime.install(bus);   // OrderShipped -> bus.emit('OrderShipped', payload)
 
 Two levels over the same retry/timeout/CSRF machinery:
 
-- **`postCommand`** - the single-purpose POST helper `createHttpBridge` builds on. For one-off HTTP
-  control outside the transport plugin.
+- **`postCommand`** - the single-purpose POST helper `httpTransport` builds on. For one-off HTTP
+  control outside the transport.
 - **`createHttpClient`** - a full client (GET/POST/PUT/PATCH/DELETE) with interceptors, LRU
   caching, request dedup, safe mode, and file download. For any HTTP need in an app already using
   vapor-chamber, command-bus or not.
@@ -1021,12 +1074,13 @@ const adminHttp = http.create({ baseURL: '/admin/api' });   // defaults merged, 
 package root:
 
 - `isRetryableStatus(status)` - *may the HTTP client send this request again?* True for 408, 429
-  and every 5xx. The client re-sends by the bus's one rule, by default 2 retries for GET and 0
-  for mutations. 408, 429 and 503 are re-sent for any method. Every other 5xx and no reply are
+  and every 5xx. The client re-sends by the bus's one rule and its bound: `retry: { maxAttempts }`,
+  attempts in total, 3 by default. It is on for a GET and off for a write, `retry: {}` turns it on,
+  `retry: false` off. 408, 429 and 503 are re-sent for any method. Every other 5xx and no reply are
   re-sent only for an idempotent method or a request with an `Idempotency-Key`. A declared wait
   sets when, never whether: `Retry-After`, else the `RateLimit` field's `t` when `r=0`, else
   `X-RateLimit-Reset`. With none, the wait is the async bus's: random, under 200 ms doubling per
-  re-send, capped at 20 s. With `retry` above 0, an unidentified request (a POST or PATCH with no
+  re-send, capped at 20 s. While re-sends are on, an unidentified request (a POST or PATCH with no
   `Idempotency-Key`) that got no reply, a 502 or a 504 fails with `context.outcome: 'unknown'`.
   Any other 4xx is sent once, unless identified and answered with a
   wait.
@@ -1038,7 +1092,7 @@ package root:
   for a timeout, a network failure (no response) or a 5xx. It is false for every 4xx, 408 and 429
   included, so `serveStaleOnError` does not serve stale data for them.
 
-Every failure is the core's `BusError`, the one a bridge returns for the same answer. That is
+Every failure is the core's `BusError`, the one a transport returns for the same answer. That is
 `remote:<condition>:<code>`, `transport:timeout:reply`, `transport:lost:reply`, or the caller's
 `transport:aborted:request`, which is never retried.
 
@@ -1058,10 +1112,24 @@ await http.get('/dashboard/stats', { cache: { ttl: 30_000, serveStaleOnError: tr
 
 A write that succeeds (`post`, `put`, `patch`, `delete`) drops the cached entry for its URL, as
 RFC 9111 asks. It also drops the `Location` and `Content-Location` its answer names on the same
-origin, so the next `get` of any of them fetches. `invalidateCache(pattern)` and
-`clearCache()` also cover reads already on the wire. Such a read still answers its callers, but it
+origin, so the next `get` of any of them fetches. That invalidation and `clearCache()` also
+cover reads already on the wire. Such a read still answers its callers, but it
 is not stored. A read made after the invalidation fetches again instead of joining it
 (`tests/http-cache-writes.test.ts`).
+
+The server can say which reads a write made stale (RFC 9875). A read's `Cache-Groups` names its
+groups, and a write's `Cache-Group-Invalidation` names the groups it changed. The client drops its
+cached reads in those groups, and `onInvalidateGroup(listener)` hears each group (the router
+listens there). `invalidateGroups(groups)` does the same by hand. A transport given the client
+(`httpTransport({ httpClient })`, `wsTransport({ httpClient })`) passes a batched result's or a
+frame's groups to it (`tests/cache-groups.test.ts`).
+
+When a stored response has an `ETag`, its stale refresh asks `If-None-Match`. A 304 keeps the
+copy: the refresh resolves to the stored response, the same data object, for a new window. A
+response with `Cache-Control: no-store` is not stored (`tests/http-etag-refresh.test.ts`).
+`cacheMode` sets Fetch's cache mode for one request, for the browser's cache and the client's
+alike: `'no-cache'` asks the server before a stored copy is used (with its `ETag`), `'reload'`
+reads past it, `'no-store'` neither reads nor stores (`tests/http-cache-mode.test.ts`).
 
 **`silent`** - per-request opt-out for a global error handler the host installs:
 
@@ -1095,13 +1163,12 @@ await parser.stream(await fetch('/api/stream'));
 
 | Composable | Use when |
 |---|---|
-| `useCommand()` | You need reactive `loading` / `lastError` |
+| `useCommand()` | Dispatch, a key's busy state (`pending`), handlers and listeners scoped to the component |
 | `defineVaporCommand()` | Hot path - zero reactive overhead |
-| `useCommandState()` | State reduced by commands |
 | `useCommandHistory()` | Reactive undo/redo |
 | `useCommandGroup()` | Namespace isolation across feature modules |
 | `useCommandError()` | Component-scoped error boundary |
-| `useSharedCommandState()` | One loading/error state per bus, and `isLoading(action, target?)` per key |
+| `useSharedCommandState()` | The bus's command state in a component: `pending(action, target?)` per key, `anyPending`, `errors` |
 | `createFormBus()` | Forms - per-field validation, dirty tracking |
 
 `useCommand` gates on `hasInjectionContext()`, not `getCurrentInstance()`, so it is Vapor-safe: the same API works in
@@ -1148,7 +1215,7 @@ carry the bus too.
 **Import from `vapor-chamber/vue` in a Vue app.** The Gotcha above says why. The root can only
 look for Vue at runtime, and that lookup fails in a production bundle. So `untracked()` silently
 becomes a pass-through there. The static entry resolves Vue at build time, and re-exports the
-composables (`useCommand`, `useCommandState`, ...) as the same functions, not copies.
+composables (`useCommand`, `useCommandHistory`, ...) as the same functions, not copies.
 
 `untracked()` is a plain pass-through when Vue is absent. So the root import stays safe in code
 shared between Vue and non-Vue targets, though it cannot suspend tracking there. In DEV it warns
@@ -1176,12 +1243,12 @@ static entry has no such failure mode. It is a separate subpath from `vapor-cham
 the Vapor names do not exist on Vue 3.5. There, importing them by name is a build error.
 
 It wires `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`. They add
-**+<!-- vc:sizeVaporEntryRaw -->4.5<!-- /vc:sizeVaporEntryRaw --> KB** raw over hand-wiring `createVaporApp`, re-measured on every run with Vue
+**+<!-- vc:sizeVaporEntryRaw -->4.4<!-- /vc:sizeVaporEntryRaw --> KB** raw over hand-wiring `createVaporApp`, re-measured on every run with Vue
 bundled. The Vapor wiring table in [docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md) has it. The
 whitepaper's rc.6 row has the measurement on the `examples/vapor-sfc` app that decided the split.
 
-`defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.8<!-- /vc:sizeVaporCustomElementRaw --> KB raw)
-and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->92.6<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
+`defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw)
+and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->73.0<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
 purpose. A static import is retained whether your app calls it or not. If you use either, one
 line adds it, and it merges with what the entry already wired:
 
@@ -1246,14 +1313,21 @@ works with no Vue in the tree.
 
 ```vue
 <script setup vapor>
+import { ref } from 'vue';
 import { useCommand } from 'vapor-chamber/vapor';
-const { dispatch, loading, lastError } = useCommand();
+const { dispatch, pending } = useCommand();
+const saving = pending('save', doc);      // this key, bus-wide
+const failure = ref(null);                 // the dispatch's own result
+async function save() {
+  const r = await dispatch('save', doc);
+  failure.value = r.ok ? null : r.error;
+}
 </script>
 
 <template>
   <!-- aria-disabled, not :disabled: a disabled button loses keyboard focus -->
-  <button @click="!loading && dispatch('save', doc)" :aria-disabled="loading">Save</button>
-  <p role="alert">{{ lastError?.message }}</p>
+  <button @click="!saving && save()" :aria-disabled="saving">Save</button>
+  <p role="alert">{{ failure?.message }}</p>
 </template>
 ```
 
@@ -1262,7 +1336,7 @@ const { dispatch, loading, lastError } = useCommand();
 
 ```vue
 <script setup vapor>
-const { dispatch, register, on, emit, loading, lastError, dispose } = useCommand();
+const { dispatch, pending, register, on, emit, dispose } = useCommand();
 
 register('cartAdd', (cmd) => addToCart(cmd.target));   // scoped to this component
 on('cart*', (cmd, result) => console.log('Cart event:', cmd.action));
@@ -1275,9 +1349,9 @@ emit('cartChanged', { count: 1 });
 </details>
 
 <details>
-<summary><b>defineVaporCommand, useCommandState, history, groups, errors</b></summary>
+<summary><b>defineVaporCommand, history, groups, errors</b></summary>
 
-`defineVaporCommand` creates no reactive `loading`/`lastError` signals - for telemetry,
+`defineVaporCommand` registers its handler and dispatches with no state at all - for telemetry,
 scroll sampling, debounced search, autosave:
 
 ```vue
@@ -1290,17 +1364,11 @@ dispatch({ event: 'page_view', params: { page: '/shop' } });
 ```
 
 ```typescript
-// state reduced by commands
-const { state: cart } = useCommandState({ items: [], total: 0 }, {
-  cartAdd: (state, cmd) => ({
-    items: [...state.items, cmd.target],
-    total: state.total + cmd.target.price,
-  }),
-});
+// state reduced by commands is a store: defineChamberStore (vapor-chamber/store)
 
 // reactive undo/redo
 const { canUndo, canRedo, undo, redo } = useCommandHistory({
-  filter: (cmd) => cmd.action.startsWith('editor'),
+  actions: ['editor*'],
 });
 
 // namespace isolation - all calls prefixed in camelCase
@@ -1311,7 +1379,7 @@ cart.on('*', listener);          // listens to 'cart*'
 
 // component-scoped error boundary
 const { errors, latestError, clearErrors } = useCommandError({
-  filter: (cmd) => cmd.action.startsWith('cart'),
+  actions: ['cart*'],
 });
 ```
 
@@ -1320,7 +1388,7 @@ const { errors, latestError, clearErrors } = useCommandError({
 <details>
 <summary><b>createFormBus</b> - reactive forms on the bus</summary>
 
-Per-field validation, dirty tracking, and the full plugin pipeline on every form command.
+Per-field validation, dirty tracking, and every plugin's rules and steps on every form command.
 
 ```typescript
 const form = createFormBus({
@@ -1336,6 +1404,7 @@ const form = createFormBus({
 form.use(logger());   // plugins attach like any bus
 
 form.values.value; form.errors.value; form.isDirty.value; form.isValid.value; form.isSubmitting.value;
+// read-only: set(), touch(), reset() and setErrors() write them, one write per command
 
 form.set('email', 'user@example.com');   // update + re-validate
 form.touch('email');
@@ -1367,8 +1436,8 @@ Minified, comment-free, brotli q=11. Always-current per-export table:
 **[docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md)** (`npm run size:doc`). `npm run size:check` fails CI
 on any regression past budget.
 
-The two that matter: the dispatch core is **<!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB** and the import-everything barrel is
-<!-- vc:sizeBarrel -->33.1<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
+The two that matter: the dispatch core is **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB** and the import-everything barrel is
+<!-- vc:sizeBarrel -->48.5<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
 machine-stamped rather than retyped:
 
 <details>
@@ -1376,21 +1445,21 @@ machine-stamped rather than retyped:
 
 | Entry | brotli |
 |---|--:|
-| dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->33.1<!-- /vc:sizeBarrel --> KB |
-| `vapor-chamber/router` | <!-- vc:sizeRouter -->10.8<!-- /vc:sizeRouter --> KB |
+| dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB** |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->48.5<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber/router` | <!-- vc:sizeRouter -->11.3<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
-| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->5.4<!-- /vc:sizeRouterRemote --> KB |
-| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->5.8<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->33.2<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->33.2<!-- /vc:sizeVapor --> KB |
-| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->6.3<!-- /vc:sizeReactive --> KB |
-| `vapor-chamber/transports` | <!-- vc:sizeTransports -->6.0<!-- /vc:sizeTransports --> KB |
-| `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->2.9<!-- /vc:sizeOutbox --> KB |
+| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->6.6<!-- /vc:sizeRouterRemote --> KB |
+| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->6.9<!-- /vc:sizeRouterFetch --> KB |
+| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->48.6<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->48.7<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->0.5<!-- /vc:sizeReactive --> KB |
+| `vapor-chamber/transports` | <!-- vc:sizeTransports -->12.1<!-- /vc:sizeTransports --> KB |
+| `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->6.1<!-- /vc:sizeOutbox --> KB |
 | `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.8<!-- /vc:sizeMcp --> KB |
 | `vapor-chamber/ssr` | <!-- vc:sizeSsr -->1.0<!-- /vc:sizeSsr --> KB |
-| `vapor-chamber/store` | <!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB |
+| `vapor-chamber/store` | <!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB |
 
 **Rows are not additive** - every row includes the shared core, which your bundle carries once.
 The `/vue` and `/vapor` rows include the whole root they carry. An app pays only for what it
@@ -1411,9 +1480,9 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.9<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.4<!-- /vc:sizeIifeCoreGzip --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.6<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.9<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->12.0<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->47.7<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->15.0<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.5<!-- /vc:sizeIifeFullGzip --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.2<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->24.1<!-- /vc:sizeIifeCoreGzip --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->71.6<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->24.9<!-- /vc:sizeIifeElementsGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->95.6<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->33.2<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1423,14 +1492,29 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 | Bus (`createCommandBus`, `createAsyncCommandBus`) | yes | yes | yes |
 | `createApp()`, `connect()` one-liner | yes | yes | yes |
 | HTTP transport (`http`) | yes | yes | yes |
-| Light plugins (logger, validator, debounce, throttle, authGuard) | yes | yes | yes |
-| `defineVaporCustomElement`, `defineWidget()`, `emitDOMEvent()` | - | yes | yes |
-| WebSocket / SSE (`ws`, `sse`) | - | - | yes |
-| Heavy plugins (persist, history, optimistic) and `createChannel` | - | - | yes |
+| Light plugins (logger, validator, authGuard) and `pace()` | yes | yes | yes |
+| `bindCommands()`: `[data-vc-command]` on plain HTML | yes | yes | yes |
+| `bindDisplay()`: `data-vc-text`, `-show`, `-each`, `-pending` | yes | yes | yes |
+| The core store (`defineChamberStore`) and `commandState`, what the display bindings read | yes | yes | yes |
+| `defineVaporCustomElement`, `defineWidget(tag, component, { when })`, `emitDOMEvent()` | - | yes | yes |
+| WebSocket / SSE (`wsTransport`, `sse`) | - | - | yes |
+| The store's `persist: saveTo()` and `share: shareTabs()`, heavy plugins (history) and `createChannel` | - | - | yes |
 | `mount()` | - | - | yes |
 | Full Vapor (`defineVaporComponent`, async/Suspense) | - | - | yes |
 
 ```html
+<!-- core: a button and a search box that dispatch, busy and error styled by vc-loading / vc-error -->
+<button data-vc-command="cartAdd" data-vc-target='{"id":42}'>Add</button>
+<input data-vc-command="searchQuery" data-vc-debounce="300">
+<span data-vc-text="cart.count">0</span> <span data-vc-pending="cartAdd" data-vc-target='{"id":42}'>saving</span>
+<script src=".../vapor-chamber-core.iife.min.js"></script>
+<script>
+  const { bus } = VaporChamber.connect({ endpoint: '/api/vc' });
+  VaporChamber.defineChamberStore('cart', { state: () => ({ count: 0 }), reducers: { set: (s, t, count) => ({ count }) } })(bus);
+  VaporChamber.bindCommands(document.body, { bus });
+  VaporChamber.bindDisplay(document.body, { bus });
+</script>
+
 <!-- core: dispatch over HTTP, CSRF auto-wired -->
 <script src=".../vapor-chamber-core.iife.min.js"></script>
 <script>
@@ -1485,14 +1569,15 @@ vapor-chamber/router/vapor     -> RouterOutlet, Vapor-native (opts into Vapor; V
 vapor-chamber/router/remote    -> routerHttp, bladeFetcher (opts into the http client)
 vapor-chamber/router-fetch     -> in-box loader preset for plain-JSON backends
 vapor-chamber/transports       -> HTTP + WebSocket + SSE + Echo bridges
-vapor-chamber/directives       -> v-vc-command, v-vc-payload, v-vc-optimistic (both renderers)
+vapor-chamber/directives       -> v-vc-command, v-vc-payload, v-vc-optimistic (both renderers); the
+                                 same interaction on plain HTML is `bindCommands` (root)
 vapor-chamber/vite             -> Vite HMR plugin + vaporChamberWire() (build-time Vue wiring)
 vapor-chamber/vitest           -> Vitest 5 setup file: matchers, a recorded shared bus, fixtures
 vapor-chamber/vitest/pure      -> the same helpers, registering no hook and no matcher
 vapor-chamber/vitest/mcp       -> Vitest as MCP tools for an agent (behind vc-vitest-mcp)
 vapor-chamber/transitions      -> Vue <Transition> hooks -> bus dispatch bridge
 vapor-chamber/transitions/vapor -> VcTransition, a bus-driven transition (Vapor; Vue 3.6 only)
-vapor-chamber/ssr              -> SSR dehydrate/replay helpers
+vapor-chamber/ssr              -> SSR by the stores' states (storeStates, seedStores), liveStores
 vapor-chamber/devtools         -> Vue DevTools integration
 vapor-chamber/stream-parser    -> incremental JSON parser for streamed bodies
 vapor-chamber/fast-lane        -> minimal-allocation dispatcher for the real hot loops
@@ -1532,8 +1617,8 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3931<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->383<!-- /vc:testFiles --> files). Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4866<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->466<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
 ## Testing
@@ -1588,28 +1673,71 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 
 ## Examples
 
-**Runnable full-project apps:**
+Runnable demos and copy-paste snippets. Each full-project app has its own README; each
+single-file snippet is self-contained. The apps consume the library via `file:../..` and
+auto-build `dist/` on demand.
+
+Two shared helpers sit in `examples/` rather than in each example:
+
+| Helper | Role |
+|--------|------|
+| [`ensure-lib.mjs`](examples/ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the repo's `dist/` (built first only when it is missing) into it and drops Vite's pre-bundle cache, so an example never runs an older copy than that `dist/`. After a change under `src/`, run `npm run build` first. Under the root workspace install the entry is a symlink to the working tree, and there is nothing to mirror. |
+| [`static-server.mjs`](examples/static-server.mjs) | Static host for the no-build pages (serves the repo root so `../../dist/...` resolves), with `Cache-Control: no-store` and a mock `POST /api/vc` so a dispatching page actually completes. |
+
+**Full-project apps (runnable):**
 
 | App | What it shows |
 |-----|---------------|
-| [`vapor-sfc`](examples/vapor-sfc) | `<script setup vapor>` SFC tree - `useCommand` / `defineVaporCommand` / `useSharedCommandState` |
-| [`vapor-island-cart`](examples/vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus |
-| [`exo-astro`](examples/exo-astro) | Declarative directives for Astro - dispatch *before* hydration |
-| [`laravel-app`](examples/laravel-app) | Verified Laravel app (13.x): Blade + core IIFE + real CSRF (419/401) |
-| [`router-demo`](examples/router-demo) | The router end to end - outlet, loaders, typed query params, menus |
+| [`vapor-sfc/`](examples/vapor-sfc) | End-to-end `<script setup vapor>` SFC tree - three panels showing `useCommand`, `defineVaporCommand`, and `useSharedCommandState` side by side. |
+| [`vapor-island-cart/`](examples/vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + `createChannel` + `persist`). |
+| [`exo-astro/`](examples/exo-astro) | Five declarative directives for Astro pages (incl. `v-each`) - **dispatch before hydration** via `onMissing:'buffer'`. Its scanner is covered by [`tests/examples/`](tests/examples/). |
+| [`laravel-app/`](examples/laravel-app) | Real, verified Laravel app (13.x on a current skeleton): Blade page -> core IIFE -> dispatch -> session-backed actions, with real CSRF (419/401). |
+| [`laravel-backend/`](examples/laravel-backend) | Drop-in PHP controller/action files - the backend half of a dispatch. |
+| [`router-demo/`](examples/router-demo) | The router end to end - outlet, loaders, typed query params, menus. No build step: `node examples/static-server.mjs`. |
+| [`sprinkled-blade/`](examples/sprinkled-blade) | Minimal sprinkled-JS pattern - server-rendered HTML enhanced with the core IIFE. One process serves page + API; shows server-rendered state vs. the fetch-on-load alternative. |
 
-**Single-file snippets** - plus `feature-*` / `pattern-*` files. See the
-[examples index](examples):
+**Feature snippets (single-file):**
 
-| Example | Description |
-|---------|-------------|
+| File | Feature |
+|------|---------|
+| [`feature-command-group.ts`](examples/feature-command-group.ts) | `useCommandGroup` - namespace isolation |
+| [`feature-cross-tab-sync.ts`](examples/feature-cross-tab-sync.ts) | `createChannel` - a handler emits a fact, every other same-origin context applies it (BroadcastChannel) |
+| [`feature-error-boundary.ts`](examples/feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
+| [`feature-persistence.ts`](examples/feature-persistence.ts) | A store's `persist` - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
+| [`feature-outbox.ts`](examples/feature-outbox.ts) | `createOutbox` - commands queued offline, replayed in order with their idempotency key |
+| [`feature-store.ts`](examples/feature-store.ts) | `defineChamberStore` - actions as commands, undo, `$reset`, field events, `share` across tabs, `store/core` without Vue |
+| [`feature-retry.ts`](examples/feature-retry.ts) | The async bus's retry - the default by condition, per-action declarations (`'idempotent'`, `false`, a count), on a schema too |
+| [`feature-transitions.ts`](examples/feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
+| [`feature-transports.ts`](examples/feature-transports.ts) | HTTP and WebSocket transports, server pushes over SSE |
+| [`feature-vite-hmr.ts`](examples/feature-vite-hmr.ts) | `vaporChamberHMR` - Vite hot reload that keeps the bus |
+| [`feature-vite-wire.ts`](examples/feature-vite-wire.ts) | `vaporChamberWire` - build-time Vue wiring, `entry` and `profile` |
+| [`feature-directives.html`](examples/feature-directives.html) | `v-vc-command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
+
+**Framework patterns:**
+
+| File | Stack |
+|------|-------|
+| [`pattern-1-blade-cdn.html`](examples/pattern-1-blade-cdn.html) | Laravel Blade + IIFE script tag, no build step. Loads local `dist/` so it is runnable today; the CDN form is documented in-file, version-pinned. |
+| [`pattern-2-laravel-vite.ts`](examples/pattern-2-laravel-vite.ts) | Laravel + Vite + SFC (full build) |
+| [`pattern-3-inertia.ts`](examples/pattern-3-inertia.ts) | Laravel + Inertia.js (alternative to the family router) |
+| [`pattern-6-vapor-router.ts`](examples/pattern-6-vapor-router.ts) | Laravel Blade + `vapor-chamber/router` (the family stack: bus = writes, router = reads) |
+| [`pattern-4-nextjs.tsx`](examples/pattern-4-nextjs.tsx) | Next.js App Router |
+| [`pattern-5-filament.ts`](examples/pattern-5-filament.ts) | Filament panel + vapor-chamber islands |
+
+**Core usage:**
+
+| File | Topic |
+|------|-------|
 | [`shopping-cart.ts`](examples/shopping-cart.ts) | Cart with validation, history, and undo/redo |
 | [`form-validation.ts`](examples/form-validation.ts) | Form validation with error handling |
-| [`async-api.ts`](examples/async-api.ts) | Async handlers with the bus's own retry |
+| [`async-api.ts`](examples/async-api.ts) | Async handlers, an async logger plugin, and an idempotent read the bus re-sends |
 | [`realtime-search.ts`](examples/realtime-search.ts) | Debounced search queries |
-| [`custom-plugins.ts`](examples/custom-plugins.ts) | Plugins for either bus: `onSettled`, coded refusals through `fail`, a declared `retryIn` |
-| [`pattern-6-vapor-router.ts`](examples/pattern-6-vapor-router.ts) | Router + bus: reads vs writes |
+| [`custom-plugins.ts`](examples/custom-plugins.ts) | Writing plugins for either bus: reading the result through `onSettled`, refusing with a coded failure through `fail` (and an `id`), declaring `retryIn` |
 | [`vue-vapor-component.vue`](examples/vue-vapor-component.vue) | Full Vue Vapor todo app |
+
+> The command composable is `useCommand` (`dispatch` + `pending` + `register`/`on`/`emit`,
+> Vapor-safe). For fire-and-forget hot paths use `defineVaporCommand`; for cross-component aggregate
+> state use `useSharedCommandState`.
 
 ## API Reference
 
@@ -1641,12 +1769,11 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 | Method | Description |
 |--------|-------------|
 | `dispatch(action, target, payload?)` | Execute a command (write). Auto-stamps `cmd.meta` |
-| `query(action, target, payload?)` | Read-only dispatch - skips `onBefore`, runs plugins + handler + afterHooks |
+| `query(action, target, payload?)` | Read-only dispatch - its rules, steps, handler and afterHooks; not counted as pending |
 | `emit(event, data?)` | Fire a domain event - notifies `on()` listeners, needs no handler |
 | `dispatchBatch(commands[], options?)` | Execute multiple commands -> `{ successCount, failCount, results }` |
-| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, throttle?, canUndo?, answer? }` |
-| `use(plugin, options?)` | Add a plugin. `options.priority` controls order |
-| `onBefore(hook)` | Run before every command. Throw to cancel dispatch |
+| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, canUndo?, answer?, optimistic?, exclusive? }` |
+| `use(plugin)` | Add a plugin: the bus places each part it declares |
 | `onAfter(hook)` | Run after every command |
 | `on(pattern, listener)` | Subscribe to matching commands (`*`, `prefix*`, exact). Returns unsub |
 | `once(pattern, listener)` | Like `on()` but auto-unsubscribes after first match |
@@ -1657,7 +1784,7 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 | `registeredActions()` | `string[]` of all registered action names |
 | `clear()` | Remove all handlers, plugins, hooks, listeners |
 | `seal()` | Freeze configuration - rejects register/use/clear after sealing |
-| `dispose()` | Teardown - runs each plugin's `dispose()`, clears state, cancels throttle timers, settles waiting `request()`s as `core:aborted:dispatch`. The bus stays usable |
+| `dispose()` | Teardown - runs each plugin's `dispose()`, clears state, settles waiting `request()`s as `core:aborted:dispatch`. The bus stays usable |
 
 </details>
 
@@ -1666,10 +1793,10 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 
 | Composable | Description |
 |------------|-------------|
-| `useCommand(options?)` | Vapor-safe: dispatch + register/on/emit + reactive loading/error, auto-cleanup |
-| `useSharedCommandState(options?)` | Aggregate `isAnyLoading` + `errors` ring buffer, **shared** across subscribers on the same bus. For toolbars, status bars, global spinners. `isLoading(action, target?)` answers "is THIS one in flight?" per `commandKey(action, target)`, bus-wide, as its own reactive flag - a reader re-runs only on its key. Counting starts at the bus's first `isLoading()` call and stops when its last holder leaves with nothing in flight. A dispatch already in flight when counting starts reads `false` |
-| `defineVaporCommand(action, handler, options?)` | Dispatch with no loading or error state, for hot paths |
-| `useCommandState(initial, handlers, options?)` | State managed by commands |
+| `useCommand(options?)` | Vapor-safe: dispatch + `pending(action, target?)` (the bus's `commandState`) + register/on/emit, auto-cleanup. A dispatch's own failure is its result |
+| `commandState(bus, options?)` | What is in flight on a bus and what failed, for any framework or none. `pending(action, target?)` answers "is THIS one in flight?" per `commandKey(action, target)`, bus-wide, as its own signal: a reader re-runs only on its key. `anyPending` is any command in flight. `errors` is a ring buffer (`maxSize`, default 10) and `lastError` the newest. `subscribe(fn)` runs after a value moves, for a page whose signals are plain values. Counting starts at the first `pending()` call or `anyPending` read, and stops when the last handle leaves with nothing in flight. A dispatch already in flight when counting starts reads `false`. Throws `core:invalid:bus` for a bus this library did not make |
+| `useSharedCommandState(options?)` | `commandState` on the component's bus, released with its scope. For toolbars, status bars, global spinners |
+| `defineVaporCommand(action, handler, options?)` | Dispatch with no state, for hot paths |
 | `useCommandHistory(options?)` | Reactive undo/redo |
 | `useCommandGroup(namespace, options?)` | Namespace isolation - prefixes all calls in camelCase |
 | `useCommandError(options?)` | Reactive error boundary for failed dispatches |
@@ -1678,7 +1805,7 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 | `setCommandBus(bus)` / `resetCommandBus()` | Set / reset the shared bus (useful in tests). Set it before anything calls `getCommandBus()`: replacing the bus that call already created and handed out splits the app between two buses, and warns in development |
 | `configureSignal(fn)` | Inject a custom signal factory (auto-detected in Vue 3.6+) |
 | `isVaporAvailable()` | True if Vue 3.6+ Vapor mode is detected |
-| `createVaporChamberApp(component, props?)` | Create a Vapor app instance (needs Vue 3.6+) |
+| `createVaporChamberApp(component, props?)` | Create a Vapor app instance, typed so `.directive('vc-command', vcCommandVapor)` registers app-wide (`vapor-chamber/vapor`, needs Vue 3.6+) |
 | `getVaporInteropPlugin()` | `vaporInteropPlugin` for mixed trees |
 | `setupDevtools(bus, app, { facts? })` | Connect bus to Vue DevTools (`vapor-chamber/devtools`) |
 
@@ -1692,7 +1819,7 @@ Every composable above takes `bus` in its options, sync or async. Without it, it
 
 ## Design Goals
 
-1. **Minimal** - <!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli core, no runtime dependency. `alien-signals` is an optional peer the library never imports, so nothing bundles it unless you do
+1. **Minimal** - <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli core, no runtime dependency. `alien-signals` is an optional peer the library never imports, so nothing bundles it unless you do
 2. **Vapor-native** - built for signals, not vDOM
 3. **Composable** - plugins for everything
 4. **Type-safe** - full TypeScript, one schema as the source of truth

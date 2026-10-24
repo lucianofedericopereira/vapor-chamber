@@ -4,7 +4,6 @@ import {
   setCommandBus,
   resetCommandBus,
   useCommand,
-  useCommandState,
   useCommandHistory,
   useCommandGroup,
   useCommandError,
@@ -89,127 +88,31 @@ describe('useCommand', () => {
     expect(result).toSucceedWith(42);
   });
 
-  it('should track loading state', () => {
+  it('pending tracks the dispatched key, from the bus', () => {
     const bus = getCommandBus();
-    bus.register('testAction', () => 'done');
+    let during = false;
+    bus.register('testAction', () => { during = key.value; return 'done'; });
 
-    const { dispatch, loading } = useCommand();
+    const { dispatch, pending } = useCommand();
+    const key = pending('testAction', {});
 
-    expect(loading.value).toBe(false);
-
+    expect(key.value).toBe(false);
     dispatch('testAction', {});
-
-    // After sync dispatch, loading is false again
-    expect(loading.value).toBe(false);
+    expect({ during, after: key.value }).toEqual({ during: true, after: false });
   });
 
-  it('should track last error', () => {
+  it('a failure is the dispatch\'s own result', () => {
     const bus = getCommandBus();
     bus.register('testError', () => {
       throw new Error('Test error');
     });
 
-    const { dispatch, lastError } = useCommand();
+    const { dispatch } = useCommand();
+    const result = dispatch('testError', {}) as { ok: boolean; error?: Error };
 
-    expect(lastError.value).toBe(null);
-
-    dispatch('testError', {});
-
-    expect(lastError.value?.message).toBe('Test error');
+    expect({ ok: result.ok, message: result.error?.message }).toEqual({ ok: false, message: 'Test error' });
   });
 
-  it('should clear error on successful dispatch', () => {
-    const bus = getCommandBus();
-    bus.register('testError', () => {
-      throw new Error('Error');
-    });
-    bus.register('testSuccess', () => 'ok');
-
-    const { dispatch, lastError } = useCommand();
-
-    dispatch('testError', {});
-    expect(lastError.value).not.toBe(null);
-
-    dispatch('testSuccess', {});
-    expect(lastError.value).toBe(null);
-  });
-
-});
-
-describe('useCommandState', () => {
-  beforeEach(() => {
-    setCommandBus(createCommandBus());
-  });
-
-  afterEach(() => {
-    resetCommandBus();
-  });
-
-  it('should return initial state', () => {
-    const { state } = useCommandState({ count: 0 }, {});
-
-    expect(state.value).toEqual({ count: 0 });
-  });
-
-  it('should update state on command', () => {
-    const { state } = useCommandState(
-      { count: 0 },
-      {
-        'counterIncrement': (s) => ({ count: s.count + 1 }),
-        'counterDecrement': (s) => ({ count: s.count - 1 }),
-      }
-    );
-
-    const bus = getCommandBus();
-
-    bus.dispatch('counterIncrement', {});
-    expect(state.value.count).toBe(1);
-
-    bus.dispatch('counterIncrement', {});
-    expect(state.value.count).toBe(2);
-
-    bus.dispatch('counterDecrement', {});
-    expect(state.value.count).toBe(1);
-  });
-
-  it('should pass command to handler', () => {
-    const { state } = useCommandState(
-      { items: [] as number[] },
-      {
-        'itemAdd': (s, cmd) => ({
-          items: [...s.items, cmd.target as number],
-        }),
-      }
-    );
-
-    const bus = getCommandBus();
-
-    bus.dispatch('itemAdd', 1);
-    bus.dispatch('itemAdd', 2);
-    bus.dispatch('itemAdd', 3);
-
-    expect(state.value.items).toEqual([1, 2, 3]);
-  });
-
-  it('should return dispose function', () => {
-    const { state, dispose } = useCommandState(
-      { count: 0 },
-      {
-        'counterIncrement': (s) => ({ count: s.count + 1 }),
-      }
-    );
-
-    const bus = getCommandBus();
-
-    bus.dispatch('counterIncrement', {});
-    expect(state.value.count).toBe(1);
-
-    dispose();
-
-    // After dispose, handler is unregistered
-    const result = bus.dispatch('counterIncrement', {});
-    expect(result).toFailWith('core:missing:handler');
-  });
 });
 
 describe('signal() factory - shallow reactivity', () => {
@@ -223,7 +126,7 @@ describe('signal() factory - shallow reactivity', () => {
   // Regression guard: the library auto-wires Vue's shallowRef (not ref) because
   // it only ever replaces signal values wholesale. Reverting to ref() would
   // reintroduce the per-write deep-Proxy (toReactive) cost on object/array state
-  // (measurably slower on the useCommandState array path, docs/performance.md).
+  // (measurably slower on an array state written per dispatch, docs/performance.md).
   // These assertions fail if signal() goes back to a deep ref.
   it('returns a SHALLOW Vue ref once Vue is detected', async () => {
     await waitForVueDetection();
@@ -235,10 +138,8 @@ describe('signal() factory - shallow reactivity', () => {
 
   it('still drives reactivity on whole-value replacement (the library contract)', async () => {
     await waitForVueDetection();
-    const { state } = useCommandState(
-      { items: [] as number[] },
-      { itemAdd: (s, cmd) => ({ items: [...s.items, cmd.target as number] }) },
-    );
+    const state = signal({ items: [] as number[] });
+    getCommandBus().register('itemAdd', (cmd) => { state.value = { items: [...state.value.items, cmd.target as number] }; });
 
     const seen: number[] = [];
     const scope = effectScope();
@@ -399,7 +300,7 @@ describe('useCommandHistory', () => {
     bus.register('otherAction', () => 'not tracked');
 
     const { past } = useCommandHistory({
-      filter: (cmd) => cmd.action.startsWith('track'),
+      actions: ['track*'],
     });
 
     bus.dispatch('trackAction', { id: 1 });
@@ -552,16 +453,12 @@ describe('useCommandGroup', () => {
   it('query() dispatches namespaced read-only query', ({ bus }) => {
     setCommandBus(bus);
 
-    const beforeCalls: string[] = [];
-    bus.onBefore((cmd) => beforeCalls.push(cmd.action));
     bus.register('cartGetTotal', () => 99);
 
     const cart = useCommandGroup('cart');
     const result = cart.query('getTotal', {});
 
     expect(result).toSucceedWith(99);
-    // query skips onBefore - CQRS
-    expect(beforeCalls).toHaveLength(0);
   });
 
   it('emit() fires namespaced domain events', ({ bus }) => {
@@ -611,7 +508,7 @@ describe('useCommandError', () => {
     bus.register('cartFail', () => { throw new Error('cart error'); });
     bus.register('userFail', () => { throw new Error('user error'); });
 
-    const { errors } = useCommandError({ filter: (cmd) => cmd.action.startsWith('cart') });
+    const { errors } = useCommandError({ actions: ['cart*'] });
     bus.dispatch('cartFail', {});
     bus.dispatch('userFail', {});
 
@@ -637,10 +534,10 @@ describe('useCommandError', () => {
 // useCommand async loading fix
 // ---------------------------------------------------------------------------
 
-describe('useCommand async loading', () => {
+describe('useCommand async pending', () => {
   beforeEach(() => resetCommandBus());
 
-  it('loading stays true until async result resolves', async () => {
+  it('pending stays true until the async result resolves', async () => {
     const asyncBus = createAsyncCommandBus();
     setCommandBus(asyncBus as any);
 
@@ -649,21 +546,21 @@ describe('useCommand async loading', () => {
       return 'data';
     });
 
-    const { dispatch, loading, lastError } = useCommand();
+    const { dispatch, pending } = useCommand();
+    const key = pending('fetchData', {});
 
     const resultPromise = dispatch('fetchData', {});
 
-    // loading should be true while the handler is running
-    expect(loading.value).toBe(true);
+    // pending is true while the handler is running
+    expect(key.value).toBe(true);
 
     const result = await resultPromise;
 
-    expect(loading.value).toBe(false);
+    expect(key.value).toBe(false);
     expect(result).toSucceedWith('data');
-    expect(lastError.value).toBeNull();
   });
 
-  it('loading resets and error set on async failure', async () => {
+  it('pending resets on an async failure, which is the result', async () => {
     const asyncBus = createAsyncCommandBus();
     setCommandBus(asyncBus as any);
 
@@ -671,13 +568,14 @@ describe('useCommand async loading', () => {
       throw new Error('async boom');
     });
 
-    const { dispatch, loading, lastError } = useCommand();
+    const { dispatch, pending } = useCommand();
+    const key = pending('failAsync', {});
 
     const result = await dispatch('failAsync', {});
 
-    expect(loading.value).toBe(false);
+    expect(key.value).toBe(false);
     expect(result.ok).toBe(false);
-    expect(lastError.value?.message).toBe('async boom');
+    expect(result.error?.message).toBe('async boom');
   });
 });
 
@@ -692,27 +590,26 @@ describe('useCommandQuery', () => {
     setCommandBus(bus);
     bus.register('getUser', (cmd) => ({ id: cmd.target.id, name: 'Alice' }));
 
-    const { query, data, loading, lastError } = useCommandQuery();
+    const { query, data, loading } = useCommandQuery();
 
     const result = query('getUser', { id: 42 });
 
     expect((result as { ok: boolean }).ok).toBe(true);
     expect(data.value).toEqual({ id: 42, name: 'Alice' });
     expect(loading.value).toBe(false);
-    expect(lastError.value).toBeNull();
   });
 
-  it('sets lastError on query failure', ({ bus }) => {
+  it('a failed query is its result, and data stays empty', ({ bus }) => {
     setCommandBus(bus);
     bus.register('getUser', () => { throw new Error('not found'); });
 
-    const { query, data, lastError } = useCommandQuery();
+    const { query, data } = useCommandQuery();
 
-    const result = query('getUser', { id: 99 });
+    const result = query('getUser', { id: 99 }) as { ok: boolean; error?: Error };
 
-    expect((result as { ok: boolean }).ok).toBe(false);
+    expect(result.ok).toBe(false);
     expect(data.value).toBeNull();
-    expect(lastError.value?.message).toBe('not found');
+    expect(result.error?.message).toBe('not found');
   });
 
   it('handles async queries', async () => {
@@ -735,63 +632,6 @@ describe('useCommandQuery', () => {
     expect(data.value).toEqual([{ id: 1, name: 'Widget' }]);
   });
 
-  it('query skips onBefore hooks', ({ bus }) => {
-    setCommandBus(bus);
-
-    const beforeCalls: string[] = [];
-    bus.onBefore((cmd) => beforeCalls.push(cmd.action));
-    bus.register('getUser', () => ({ name: 'Bob' }));
-
-    const { query } = useCommandQuery();
-    query('getUser', { id: 1 });
-
-    // query() skips onBefore - this is the CQRS distinction
-    expect(beforeCalls).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// useCommandState - coalesce mode
-// ---------------------------------------------------------------------------
-
-describe('useCommandState - coalesce', () => {
-  beforeEach(() => { setCommandBus(createCommandBus()); });
-  afterEach(() => { resetCommandBus(); });
-
-  it('defers signal write to next microtask when coalesce:true', async () => {
-    const bus = getCommandBus();
-    const { state } = useCommandState(
-      [] as number[],
-      { append: (s, cmd) => [...s, cmd.target.v] },
-      { coalesce: true },
-    );
-
-    bus.dispatch('append', { v: 1 });
-    bus.dispatch('append', { v: 2 });
-    bus.dispatch('append', { v: 3 });
-
-    // synchronously: signal not yet updated (pending microtask)
-    expect(state.value).toEqual([]);
-
-    await Promise.resolve(); // flush microtask queue
-
-    expect(state.value).toEqual([1, 2, 3]);
-  });
-
-  it('returns the pending value as CommandResult even before flush', () => {
-    const bus = getCommandBus();
-    useCommandState(
-      0,
-      { inc: (s) => s + 1 },
-      { coalesce: true },
-    );
-
-    const r1 = bus.dispatch('inc', {});
-    const r2 = bus.dispatch('inc', {});
-
-    expect(r1.value).toBe(1);
-    expect(r2.value).toBe(2);
-  });
 });
 
 // ---------------------------------------------------------------------------

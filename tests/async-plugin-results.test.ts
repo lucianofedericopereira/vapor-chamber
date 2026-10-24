@@ -1,5 +1,5 @@
 /**
- * Five plugins, one cause: `next()` returns a PROMISE on the async bus.
+ * Four plugins, one cause: `next()` returns a PROMISE on the async bus.
  *
  * Each is declared `Plugin`, whose `next` returns a `CommandResult`, and each
  * read that return value directly. `promise.ok` is `undefined`, so every one
@@ -13,7 +13,6 @@ import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { history, logger } from '../src/plugins-core';
 import { circuitBreaker, metrics } from '../src/plugins-extra';
-import { persist } from '../src/plugins-io';
 import { it } from '../src/vitest';
 
 describe('plugins on an async bus', () => {
@@ -52,8 +51,7 @@ describe('plugins on an async bus', () => {
 
   it('history records, so undo/redo is not inert (measured: 0 of 2 recorded)', async ({ asyncBus: bus }) => {
     bus.register('add', async () => 'ok');
-    const h = history({});
-    bus.use(h);
+    const h = history({ bus });
     await bus.dispatch('add', {});
     await bus.dispatch('add', {});
     expect(h.getState().past).toHaveLength(2);
@@ -88,23 +86,12 @@ describe('plugins on an async bus', () => {
     expect(entry?.durationMs).toBeGreaterThan(SLEEP_MS / 3);
   });
 
-  it('persist saves (measured: 0 writes)', async () => {
-    const writes: string[] = [];
-    const storage = { getItem: () => null, setItem: (k: string) => { writes.push(k); }, removeItem: () => {} };
-    const bus = createAsyncCommandBus();
-    bus.register('add', async () => 'ok');
-    bus.use(persist({ key: 'k', storage: storage as never, getState: () => ({ n: 1 }), coalesce: false }));
-    await bus.dispatch('add', {});
-    expect(writes).toEqual(['k']);
-  });
-
   it('the sync bus is byte-for-byte unaffected', ({ bus }) => {
     // onSettled preserves sync-ness: a sync next() is never wrapped in a
     // promise, so a sync plugin behaves exactly as before.
     bus.register('add', () => 'ok');
-    const h = history({});
+    const h = history({ bus });
     const m = metrics({});
-    bus.use(h);
     bus.use(m);
     const result = bus.dispatch('add', {});
     expect(result).not.toHaveProperty('then');

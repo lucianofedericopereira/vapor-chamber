@@ -1,8 +1,8 @@
 /** In Chromium: an IndexedDB write settles when its transaction commits, a read when its request succeeds (log 36.14 D14). Note at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _idbStore, indexedDbStorage } from '../../src/idb';
-import { indexedDbOutbox } from '../../src/outbox';
-import { persist } from '../../src/plugins-io';
+import { createCommandBus } from '../../src/command-bus';
+import { defineChamberStore, saveTo } from '../../src/store/core';
 
 const nativeTransaction = IDBDatabase.prototype.transaction;
 afterEach(() => {
@@ -20,7 +20,7 @@ function abortAfterSuccess(mode: IDBTransactionMode): void {
     const objectStore = tx.objectStore.bind(tx);
     tx.objectStore = (name: string) => {
       const store = objectStore(name);
-      for (const m of ['get', 'put', 'delete', 'clear'] as const) {
+      for (const m of ['get', 'put'] as const) {
         const call = (store[m] as (...a: unknown[]) => IDBRequest).bind(store);
         (store as any)[m] = (...a: unknown[]) => {
           const req = call(...a);
@@ -50,17 +50,6 @@ describe('an IndexedDB write whose transaction aborts after its request succeede
     expect([answer, await store.get('k')]).toEqual(['rejected indexedDB write to "s" did not commit', undefined]);
   });
 
-  it.each([
-    ['delete()', (s: ReturnType<typeof _idbStore>) => s.delete('k')],
-    ['clear()', (s: ReturnType<typeof _idbStore>) => s.clear()],
-  ])('%s rejects, and the value is still in the store', async (_name, write) => {
-    const store = _idbStore(fresh(), 's');
-    await store.put('k', 'v');
-    abortAfterSuccess('readwrite');
-    const answer = await settled(write(store));
-    expect([answer, await store.get('k')]).toEqual(['rejected indexedDB write to "s" did not commit', 'v']);
-  });
-
   it('a read still resolves on its request, though its transaction aborts after', async () => {
     const store = _idbStore(fresh(), 's');
     await store.put('k', 'v');
@@ -68,25 +57,18 @@ describe('an IndexedDB write whose transaction aborts after its request succeede
     expect(await store.get('k')).toBe('v');
   });
 
-  it('persist warns that the save failed', async () => {
+  it("a store's persist warns that the save failed", async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const p = persist({ key: 'vc:n', getState: () => 1, storage: indexedDbStorage(fresh()) });
-    await p.hydrate(); // the database is open before the abort is armed
+    const storage = indexedDbStorage(fresh());
+    await storage.getItem('vc:n'); // the database is open before the abort is armed
+    const n = defineChamberStore('n', { state: () => ({ n: 0 }), reducers: { inc: (s: { n: number }) => ({ n: s.n + 1 }) }, persist: saveTo({ key: 'vc:n', storage }) })(createCommandBus());
+    await new Promise((r) => setTimeout(r, 20)); // its read has landed
     abortAfterSuccess('readwrite');
-    p.save();
-    await vi.waitFor(() => expect(warn.mock.calls.map((c) => String(c[0]))).toContain('[vapor-chamber] persist: failed to save key "vc:n":'));
+    n.inc();
+    await vi.waitFor(() => expect(warn.mock.calls.map((c) => String(c[0]).split('\n')[0])).toContain('[vapor-chamber] [ WARN ] persist:failed:save: failed to save key "vc:n"'));
+    n.$dispose();
   });
 
-  it('the outbox adapter warns that the save failed', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const s = indexedDbOutbox(fresh());
-    await s.load();
-    abortAfterSuccess('readwrite');
-    await s.save([{ id: 'r1', action: 'a', target: null, key: 'k', queuedAt: '1970-01-01T00:00:00.001Z' }]);
-    expect(String(warn.mock.calls[0]?.[0])).toMatch(/^\[vapor-chamber\] outbox: failed to save to indexedDB "vc-idb-commit-/);
-    IDBDatabase.prototype.transaction = nativeTransaction;
-    expect(await s.load()).toBeNull();
-  });
 });
 
 /*

@@ -1,5 +1,5 @@
 /** The root's Vue probe in consumer builds: folded when wired, absent for getCommandBus. The long note is at the end. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -50,9 +50,10 @@ async function esbuildApp(name: string, source: string, define: Record<string, s
 }
 
 describe('a wired Vue app built by esbuild', () => {
-  it('control: without the define, the probe pulls all of Vue into the build', async () => {
+  it('control: without the define the probe ships, and pulls no Vue of its own', async () => {
     const { all } = await esbuildApp('wired-plain', WIRED_APP, {});
-    expect(hasAllOfVue(all)).toBe(true);
+    expect(all.includes('__VAPOR_CHAMBER_VUE__')).toBe(true);
+    expect(hasAllOfVue(all)).toBe(false);
   });
 
   it('with __VC_WIRED_BUILD__ defined true, the probe folds and Vue is tree-shaken', async () => {
@@ -75,15 +76,28 @@ describe('a Vue-less app using the shared bus', () => {
   });
 });
 
-describe('a root-only Vue app keeps working', () => {
-  it('esbuild production, no define: signal() is a Vue ref after waitForVueDetection', async () => {
-    const out = mkdtempSync(join(tmpdir(), 'vc-rootonly-'));
-    try {
-      await esbuildApp('rootonly', `import { isRef } from 'vue';
+const ROOT_ONLY = `import { isRef } from 'vue';
 import { waitForVueDetection, signal } from '${dist('index.js')}';
 await waitForVueDetection();
 globalThis.__vcRootOnly = isRef(signal(0));
-`, {}, out);
+`;
+
+describe('a root-only Vue app built by esbuild', () => {
+  it('the probe stays a runtime name: one file, no Vue chunk made for it', async () => {
+    const out = mkdtempSync(join(tmpdir(), 'vc-rootonly-'));
+    try {
+      await esbuildApp('rootonly', ROOT_ONLY, {}, out);
+      expect(readdirSync(out)).toEqual(['rootonly.js']);
+      expect(/import\(\s*["'`]/.test(readFileSync(join(out, 'rootonly.js'), 'utf8'))).toBe(false);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it('control: run in Node, which resolves the name at runtime, it still finds Vue', async () => {
+    const out = mkdtempSync(join(tmpdir(), 'vc-rootonly-node-'));
+    try {
+      await esbuildApp('rootonly', ROOT_ONLY, {}, out);
       await import(pathToFileURL(join(out, 'rootonly.js')).href);
       expect((globalThis as { __vcRootOnly?: boolean }).__vcRootOnly).toBe(true);
     } finally {
@@ -97,8 +111,9 @@ describe('vaporChamberWire defines __VC_WIRED_BUILD__ in a Vite build', () => {
     const entry = join(dir, 'vite-main.js');
     writeFileSync(entry, `import { useCommand, getCommandBus } from 'vapor-chamber';
 getCommandBus().register('ping', () => 'pong');
-const { dispatch, loading } = useCommand();
-globalThis.go = () => { dispatch('ping', null); return loading.value; };
+const { dispatch, pending } = useCommand();
+const pinging = pending('ping', null);
+globalThis.go = () => { dispatch('ping', null); return pinging.value; };
 `);
     const r = await vite({
       configFile: false, root: dir, logLevel: 'silent', mode: 'production', plugins: plugins as never,
@@ -178,12 +193,17 @@ describe('the source guard, read as a global (as vitest and a dev server deliver
  * `__VC_WIRED_BUILD__`, which `vaporChamberWire()` defines in a Vite build and
  * which an esbuild or webpack app defines with one line. Conditions, never an
  * early return: Vite's minifier kept a function's body after a folded
- * `if (true) return` (measured in the evaluation). Without the define nothing
- * changes, which is what keeps a root-only Vue app working on esbuild and
- * webpack, where the probe resolves the bundled Vue (the fourth block; the
- * Vite dev server and webpack were checked by the evaluation's probes). The
- * IIFE builds define it false, so the guard costs them nothing. The last
- * block runs the guard in vitest, where a define arrives as a global.
+ * `if (true) return` (measured in the evaluation). The IIFE builds define it
+ * false, so the guard costs them nothing. The last block runs the guard in
+ * vitest, where a define arrives as a global.
+ *
+ * 36.F26 (owner, 2026-10-22). The probe's specifier stays a name in dist
+ * (VUE_PKG in chamber.ts), so no bundler resolves it: a literal gave a
+ * Vue-less app a 500 under the Vite dev server. esbuild and webpack no longer
+ * bundle Vue for the probe, define or not, and a root-only Vue app gets no Vue
+ * from the probe in a browser. It is warned (`vue:missing:wiring`) and wires
+ * through `vapor-chamber/vue`. The fourth block pins the esbuild output, and
+ * its control shows Node, which resolves the name at runtime, still finds Vue.
  *
  * B2. `getCommandBus` lived in `chamber.ts`, so a Vue-less app that used the
  * shared bus kept the probe module and loaded a Vue chunk at start. The shared

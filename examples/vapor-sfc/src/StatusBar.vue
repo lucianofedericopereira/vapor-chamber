@@ -1,49 +1,34 @@
 <!--
-  Cross-component aggregate state via `useSharedCommandState`.
+  The whole bus, read through `useSharedCommandState`.
 
-  Errors are observed BUS-WIDE: even though CartPanel dispatches via
-  its own per-component `useCommand`, every failed command on the shared
-  bus lands in this panel's error list. `isAnyLoading` tracks only dispatches
-  made through `useSharedCommandState().dispatch`
-  (tests/shared-state.test.ts).
-
-  Memory math: this approach allocates ~5 signal nodes total. If we instead
-  gave every panel a private `useCommand`, we'd allocate 2 signals per
-  panel x N panels.
+  Both signals are BUS-WIDE: `anyPending` is on while any command is in
+  flight, whoever sent it, and `errors` collects every failed command. One
+  state serves every caller on the bus (tests/shared-state.test.ts).
 -->
 <script setup vapor lang="ts">
-// The Vapor entry wires Vue at build time; from the root this would work only
-// because main.ts happens to import it too.
 import { useSharedCommandState } from 'vapor-chamber/vapor';
-import { asRef } from './_reactive';
 
-// asRef: signals are Vue shallowRefs at runtime - typed as such so vue-tsc
-// auto-unwraps them in the template (see _reactive.ts).
-const shared = useSharedCommandState({ maxSize: 5 });
-const isAnyLoading = asRef(shared.isAnyLoading);
-const errors = asRef(shared.errors);
-const errorCount = asRef(shared.errorCount);
-const { clear } = shared;
+// From `vapor-chamber/vapor` the command state's signals are typed as the Vue
+// shallowRefs they are, so vue-tsc unwraps them in the template with no cast.
+const { anyPending, errors, clear } = useSharedCommandState({ maxSize: 5 });
 </script>
 
 <template>
   <section class="panel" style="background: #fafafa;">
     <h2>
       Status
-      <!-- Top-level refs are auto-unwrapped in templates - no .value. -->
-      <span v-if="isAnyLoading" style="font-weight: normal; color: #08c;">
+      <span v-if="anyPending" style="font-weight: normal; color: #08c;">
         - loading...
       </span>
     </h2>
     <p>
-      Aggregate state across all components. Watch this panel react when you
-      click in Cart or type in Search.
+      The bus as a whole. It reacts when you click in Cart or type in Search.
     </p>
     <!-- The button stays in place (aria-disabled when there is nothing to
          clear): removing it while it has focus would drop keyboard focus. -->
     <p>
-      <strong>Recent errors ({{ errorCount }}):</strong>
-      <button type="button" :aria-disabled="errorCount === 0" @click="errorCount > 0 && clear()" style="margin-left: 0.5rem;">
+      <strong>Recent errors ({{ errors.length }}):</strong>
+      <button type="button" :aria-disabled="errors.length === 0" @click="errors.length > 0 && clear()" style="margin-left: 0.5rem;">
         Clear
       </button>
     </p>

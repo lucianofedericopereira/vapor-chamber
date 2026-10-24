@@ -11,12 +11,7 @@
  *      `shallowRef()` here once its async dynamic import resolves (shallow because
  *      the library replaces signal values wholesale and never mutates nested
  *      fields - skipping ref()'s deep-Proxy wrap on object/array values).
- *   2. Lazy sync probe of `globalThis.__VUE__`. It finds a Vue namespace only
- *      if one was parked there before any app was created: Vue writes `true`
- *      to that key when an app is created, and a `<script>`-tag Vue is
- *      `window.Vue` (tests/vue-detection-global-clobber.test.ts). On such a
- *      page, hand Vue over with `configureVue(Vue)`.
- *   3. Plain `{ value }` object - zero-overhead fallback for non-Vue, non-reactive
+ *   2. Plain `{ value }` object - zero-overhead fallback for non-Vue, non-reactive
  *      contexts. For push-pull reactivity without Vue, call
  *      `configureAlienSignals` from `vapor-chamber/alien-signals` once at boot.
  *
@@ -25,26 +20,18 @@
  */
 
 import { DEV } from './dev';
+import { _report } from './report';
 
-export type Signal<T> = { value: T };
+/**
+ * A cell: `value`. An interface, so an entry that wires a reactive backing
+ * extends it with its cell's type: `vapor-chamber/vapor` wires `shallowRef` at
+ * import and declares `Signal<T>` a Vue `ShallowRef<T>`, so a template
+ * unwraps it. A named interface stays `Signal<T>` in every emitted
+ * declaration, so a consumer without that entry never reads `vue`.
+ * Types only. tests/vapor-signal-types.test-d.ts.
+ */
+export interface Signal<T> { value: T }
 export type CreateSignal = <T>(initial: T) => Signal<T>;
-
-let _vueRef: ((initial: any) => any) | null = null;
-let _syncProbed = false;
-
-/** One-shot synchronous probe - looks for a Vue global. No async, no side effect on import. */
-function syncProbe(): void {
-  if (_syncProbed) return;
-  _syncProbed = true;
-  const vue = (globalThis as any).__VUE__;
-  // Prefer shallowRef - the library replaces signal values wholesale, so the
-  // deep-Proxy wrap ref() applies to objects/arrays is pure overhead here.
-  if (vue && typeof vue.shallowRef === 'function') {
-    _vueRef = vue.shallowRef;
-  } else if (vue && typeof vue.ref === 'function') {
-    _vueRef = vue.ref;
-  }
-}
 
 /** Count of signals created as plain `{ value }` objects (no reactive backing).
  *  Used to warn when a reactive backing arrives AFTER signals were already
@@ -53,10 +40,9 @@ let _plainCreations = 0;
 let _raceWarned = false;
 
 const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
-  syncProbe();
-  if (_vueRef) return _vueRef(initial) as Signal<T>;
   _plainCreations++;
-  return { value: initial };
+  // Plain until a backing is wired; typed as the backing's cell, as signal() is.
+  return { value: initial } as Signal<T>;
 };
 
 let _signalFn: CreateSignal = fallbackSignal;
@@ -83,8 +69,8 @@ export function configureSignal(fn: CreateSignal): void {
     _plainCreations > 0 && !_raceWarned && DEV
   ) {
     _raceWarned = true;
-    console.warn(
-      `[vapor-chamber] Heads-up: ${_plainCreations} signal(s) were created before a ` +
+    _report('warn', 'core:unexpected:signal',
+      `${_plainCreations} signal(s) were created before a ` +
       'reactive backing was configured (Vue detection is async). Those early signals ' +
       'are plain { value } objects - writes to them will NOT trigger reactivity, while ' +
       'signals created from now on will. If you need reactive signals at module-init ' +

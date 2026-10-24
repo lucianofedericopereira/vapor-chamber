@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 /**
  * ACCEPTANCE CRITERIA for `vapor-chamber/store`, written against the
  * composition plan that has since been deleted into the docs it fed
@@ -62,10 +61,10 @@ import { effectScope } from 'vue';
 import { createCommandBus, inspectBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
 import { getCommandBus, resetCommandBus, setCommandBus, signal } from '../src/chamber';
-import { history } from '../src/plugins-core';
-import { persist } from '../src/plugins-io';
 import { it } from '../src/vitest';
 import { requireDist } from './require-dist';
+import { saveTo } from '../src/store-persist';
+import { history } from '../src/plugins-core';
 
 /**
  * The surface the store will compose. Real assertions today: each one is a
@@ -125,33 +124,54 @@ describe('composition surface - what the store is built from', () => {
     // chamber.ts through a default argument, so importing the store executed
     // the very probe its own docblock says it exists to avoid. Nothing in the
     // behaviour suite could see that; only the built graph shows it.
-    // `process.cwd()`, NOT `import.meta.url`. This file runs under happy-dom
-    // (the persist plugin needs localStorage), and there `import.meta.url` is
-    // an http://localhost URL, so `existsSync` answered false for every run and
+    // `process.cwd()`, NOT `import.meta.url`. Under happy-dom, where this file ran,
+    // `import.meta.url` is an http://localhost URL, so `existsSync` answered false for every run and
     // the assertion below could never fail. It was written, it passed, and it
     // was inert - the exact shape this suite has a rule against.
     const built = resolve(process.cwd(), 'dist/store.js');
-    const builtBase = resolve(process.cwd(), 'dist/store-base.js');
-    requireDist(existsSync(built) && existsSync(builtBase));
+    requireDist(existsSync(built));
     const src = readFileSync(built, 'utf8');
     const imports = [...src.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
-    // `./failure.js` mints the store's coded refusals (`store:missing:bus`):
-    // the failure module alone, no bus, no probe, no Vue. chamber.js, the
-    // module with the probe, must never appear.
-    expect(imports.sort()).toEqual(['./store-base.js', 'vue']);
-    // The implementation both store entries share (log s35.130): the failure
-    // module, and one chunk holding the library's names and the set of
-    // commands a transport carried out (log s35.184), no bus, no probe.
-    const base = readFileSync(builtBase, 'utf8');
-    const baseImports = [...base.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
-    expect(baseImports.sort()).toEqual(['./applied-remotely.js', './failure.js']);
+    // The whole graph the entry reaches, chunk by chunk: the bundler regroups
+    // chunks as modules move (saveTo and shareTabs left their own chunk twice
+    // in 1.32's step 4), so the boundary is checked on the graph, not on chunk
+    // names. Its one external is `vue`; no chunk in it is chamber.js, the
+    // module with the probe, or the bus. What it holds: the store
+    // implementation both entries share (log s35.130), the failure module that
+    // mints the coded refusals, the library's names and the set of commands a
+    // transport carried out (log s35.184), the fast lane the field events ride
+    // (plan 1.32 4.2), and the store's options' values (saveTo, shareTabs).
+    expect(imports).toContain('vue');
+    const files = new Set<string>();
+    const externals = new Set<string>();
+    const walk = (file: string): void => {
+      if (files.has(file)) return;
+      files.add(file);
+      const code = readFileSync(resolve(process.cwd(), 'dist', file), 'utf8');
+      for (const m of code.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)) {
+        const dep = m[1] as string;
+        if (dep.startsWith('./')) walk(dep.slice(2));
+        else externals.add(dep);
+      }
+    };
+    walk('store.js');
+    expect([...externals]).toEqual(['vue']);
+    expect([...files].filter((f) => /^(chamber|index|command-bus)\.js$/.test(f))).toEqual([]);
+    // It reaches the store implementation, in whichever chunk the bundler put it.
+    expect([...files].some((f) => readFileSync(resolve(process.cwd(), 'dist', f), 'utf8').includes('function createStoreDefiner'))).toBe(true);
+    // Control: the same walk from the root reaches chamber.js, so its absence
+    // above is a fact of the graph, not a walker that stops early.
+    files.clear();
+    walk('index.js');
+    expect(files.has('chamber.js')).toBe(true);
   });
 
   /**
-   * The central claim of section 3's table: a store gets persistence, undo and
-   * cross-tab sync for free because its actions are COMMANDS, so the existing
-   * plugins already apply. That is testable today, without a store - if it were
-   * false, the whole premise would be.
+   * The central claim of section 3's table: a store gets undo, history and
+   * every listener for free because its actions are COMMANDS, so the existing
+   * plugins already apply. That is testable without a store - if it were
+   * false, the whole premise would be. Saving is the store's own option.
+   * (plan 1.32 4.2, tests/store-persist.test.ts).
    */
   it('applies the existing plugins to plain commands, which is why a store needs no store-specific ones', () => {
     const bus = createCommandBus();
@@ -162,16 +182,14 @@ describe('composition surface - what the store is built from', () => {
     });
 
     const hist = history({ maxSize: 10, bus });
-    bus.use(hist);
-    bus.use(persist({ key: 'vc:test-store', getState: () => state }));
 
     bus.dispatch('itemAdd', 1);
     bus.dispatch('itemAdd', 2);
     expect(state.items).toEqual([1, 2]);
-    // Undo/redo and persistence observed the mutation without knowing a store
-    // exists - because the mutation was a command.
+    // Undo/redo observed the mutation without knowing a store exists -
+    // because the mutation was a command.
     expect(hist.getState().canUndo).toBe(true);
-    expect(inspectBus(bus).pluginCount).toBe(2);
+    expect(inspectBus(bus).afterHookCount).toBe(1); // history's recorder, not a plugin
     bus.dispose();
   });
 });
@@ -282,21 +300,20 @@ describe('defineChamberStore - behaviour', () => {
     bus.dispose();
   });
 
-  it('the existing plugins apply to store actions with no store-specific code', ({ bus }) => {
-    const cart = useCart(bus);
-    const hist = history({ maxSize: 10, bus });
-    bus.use(hist);
+  it('the existing plugins apply to store actions with no store-specific code; saving is its own option', async ({ bus }) => {
     let saved: unknown = null;
-    bus.use(persist({ key: 'vc:store-test', getState: () => cart.state.value, storage: {
-      getItem: () => null,
-      setItem: (_k: string, v: string) => { saved = JSON.parse(v); },
-      removeItem: () => {},
-    } as never }));
+    const cart = defineChamberStore('cart', {
+      state: () => ({ items: [] as number[] }),
+      reducers: { add: (s, id: number) => ({ items: [...s.items, id] }) },
+      persist: saveTo({ key: 'vc:store-test', storage: { getItem: () => null, setItem: (_k: string, v: string) => { saved = JSON.parse(v); } } }),
+    })(bus);
+    const hist = history({ maxSize: 10, bus });
 
     cart.add(1);
     cart.add(2);
-    // This is section 3's whole premise: persistence and undo observed a STORE
-    // mutation without knowing a store exists, because the mutation was a command.
+    await Promise.resolve();
+    // Section 3's premise: undo observed a STORE mutation without knowing a
+    // store exists, because the mutation was a command.
     expect(saved).toEqual({ items: [1, 2] });
     expect(hist.getState().canUndo).toBe(true);
     cart.$dispose();

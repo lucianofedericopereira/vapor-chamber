@@ -17,22 +17,23 @@ import { ... } from 'vapor-chamber/vite';
 
 ### vaporChamberHMR
 
-**Function** - [src/vite-hmr.ts:118](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L118)
+**Function** - [src/vite-hmr.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L130)
 
 ```ts
 vaporChamberHMR(options?: VaporChamberHMROptions) => any
 ```
 
-vaporChamberHMR - Vite plugin that keeps the shared bus across hot reload.
+vaporChamberHMR - Vite plugin that marks each hot update and keeps the shared bus.
 
 Injects a small runtime shim that:
-1. Stores the command bus on `globalThis[HMR_GLOBAL_KEY]` after creation.
-2. On HMR accept, restores the previously stored bus instance instead of
-   creating a new one - preserving all registered handlers and plugins.
+1. Marks each update, from `vite:beforeUpdate` to `vite:afterUpdate`.
+2. Stores the shared bus on `globalThis[HMR_GLOBAL_KEY]` when the shim
+   module is disposed (never at first load: see the shim's own comment).
+3. Hands that bus to `setCommandBus()` when the shim module runs again.
 
 ### vaporChamberTest
 
-**Function** - [src/vite-hmr.ts:579](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L579)
+**Function** - [src/vite-hmr.ts:596](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L596)
 
 ```ts
 vaporChamberTest(options?: VaporChamberTestOptions) => any
@@ -69,7 +70,7 @@ export default defineConfig({
 
 ### vaporChamberWire
 
-**Function** - [src/vite-hmr.ts:424](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L424)
+**Function** - [src/vite-hmr.ts:441](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L441)
 
 ```ts
 vaporChamberWire(options?: VaporChamberWireOptions) => any
@@ -78,8 +79,8 @@ vaporChamberWire(options?: VaporChamberWireOptions) => any
 vaporChamberWire - make root imports production-correct in a Vite build.
 
 The package root must work with no Vue in the tree, so it reaches Vue
-through a runtime lookup that resolves under a dev server and cannot resolve
-in a production bundle. An app importing its composables from the root
+through a runtime lookup that only Node or an import map resolves, never a
+bundled page (log 36.F26). An app importing its composables from the root
 therefore ships them without reactivity, cleanup or the KeepAlive guard -
 which `warnUnwired()` in chamber.ts now reports once at runtime, and which
 `vapor-chamber/vue` / `vapor-chamber/vapor` fix by being imported instead.
@@ -145,7 +146,7 @@ export default defineConfig({
 
 ### VaporChamberHMROptions
 
-**Type alias** - [src/vite-hmr.ts:77](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L77)
+**Type alias** - [src/vite-hmr.ts:83](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L83)
 
 ```ts
 export type VaporChamberHMROptions = {
@@ -165,7 +166,8 @@ export type VaporChamberHMROptions = {
 vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
 
 Two plugins (the history is in CHANGELOG.md):
-  - `vaporChamberHMR()`, serve-only: keeps the bus across hot reloads.
+  - `vaporChamberHMR()`, serve-only: marks each hot update, so the stores
+    keep their states and a handler registered again raises no warning.
   - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
     specifier to a virtual module that imports 'vapor-chamber/vue' (or
     '/vapor') for its side effect and re-exports the real root, so an app
@@ -193,16 +195,17 @@ plugins: [vue(), vaporChamberHMR()]
 ```
 
 ```ts
-// main.ts - no changes required; HMR is transparent
-import { createCommandBus } from 'vapor-chamber'
-const bus = createCommandBus()
+// src/cart.ts - no HMR code in the app
+import { getCommandBus } from 'vapor-chamber'
+// The shared bus: a bus this module created would be a new one on each re-run.
+const bus = getCommandBus()
 bus.register('cartAdd', handler)
-// After HMR: the handler is still registered on the same bus
+// After an edit: the edited handler replaces the old one on the same bus, with no warning
 ```
 
 ### VaporChamberTestOptions
 
-**Type alias** - [src/vite-hmr.ts:471](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L471)
+**Type alias** - [src/vite-hmr.ts:488](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L488)
 
 ```ts
 export type VaporChamberTestOptions = {
@@ -228,7 +231,7 @@ export type VaporChamberTestOptions = {
 
 ### VaporChamberWireOptions
 
-**Type alias** - [src/vite-hmr.ts:316](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L316)
+**Type alias** - [src/vite-hmr.ts:333](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L333)
 
 ```ts
 export type VaporChamberWireOptions = {
@@ -259,7 +262,7 @@ export type VaporChamberWireOptions = {
    * at build time and costs nothing per call. An app that defines
    * `__VC_LEAN__` itself keeps its own value.
    *
-   * Trades behind it today: `isLoading()` keeps up to 256 unread keys' slots
+   * Trades behind it today: `commandState().pending()` keeps up to 256 unread keys' slots
    * per action for reuse (performance) or drops each one when it settles
    * (lean).
    */

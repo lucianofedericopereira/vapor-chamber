@@ -13,16 +13,16 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { signal as alienSignal, computed, effect } from 'alien-signals';
-import { signal, configureSignal } from '../src/signal';
+import { signal, configureSignal, type CreateSignal } from '../src/signal';
 import { alienSignalAdapter, configureAlienSignals } from '../src/alien-signals';
 
 // Reset between tests - restore the lib's default getter/setter signal so
 // other test files (which don't expect alien-signals) aren't affected.
 beforeEach(() => {
-  configureSignal(<T>(initial: T) => {
+  configureSignal((<T>(initial: T) => {
     let v = initial;
     return { get value() { return v; }, set value(next: T) { v = next; } };
-  });
+  }) as CreateSignal);
 });
 
 describe('alienSignalAdapter', () => {
@@ -125,14 +125,14 @@ describe('configureAlienSignals', () => {
     setCommandBus(bus as any);
 
     const s = useSharedCommandState();
-    expect(s.errorCount.value).toBe(0);
-    expect(s.isAnyLoading.value).toBe(false);
+    expect(s.errors.value.length).toBe(0);
+    expect(s.anyPending.value).toBe(false);
 
-    s.dispatch('boom', null);
+    bus.dispatch('boom', null);
 
     // The state was updated through alien-signals' write path; reading
     // .value pulls the latest value via the adapter's getter.
-    expect(s.errorCount.value).toBe(1);
+    expect(s.errors.value.length).toBe(1);
     expect(s.lastError.value?.message).toBe('e');
 
     s.dispose();

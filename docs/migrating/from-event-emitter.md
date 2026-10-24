@@ -94,16 +94,13 @@ bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 
-// Plugins (logger, debounce, throttle, persist, ...); the async bus retries on its own
+// Plugins (logger, authGuard, ...); the async bus retries on its own, pace() paces a sender
 bus.use(logger());
 
-// Async + AbortController
-const asyncBus = createAsyncCommandBus();
+// Async + AbortController; the HTTP transport sends every dispatch to a backend
+const asyncBus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', csrf: true }) });
 const ac = new AbortController();
 const result = await asyncBus.dispatch('orderCreate', cart, undefined, { signal: ac.signal });
-
-// HTTP transport - dispatches forward to a backend
-asyncBus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
 // Schema introspection (LLM tool-use)
 import { toAnthropicTools } from 'vapor-chamber';
@@ -143,11 +140,11 @@ lane.emit('userUpdate', { userId, name });
 ```
 
 On three-listener fan-out the fast lane's `on`/`emit` runs
-**<!-- vc:benchFastLaneVsEventEmitter3 -->0.91-0.96<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
-and **<!-- vc:benchFastLaneVsMitt -->1.88-2.32<!-- /vc:benchFastLaneVsMitt -->x mitt**.
+**<!-- vc:benchFastLaneVsEventEmitter3 -->1.01-1.16<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
+and **<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x mitt**.
 Against eventemitter3 that is level: the band falls on both sides of 1. The
 general bus's `emit` is behind eventemitter3 on the same fan-out, at
-**<!-- vc:benchEmitVsEventEmitter3Fanout -->0.76-0.78<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**.
+**<!-- vc:benchEmitVsEventEmitter3Fanout -->0.62-0.99<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**.
 So moving EventEmitter pub/sub onto the bus costs some speed on this path.
 Onto the fast lane, it costs about none.
 The fast lane figure is the default removal mode, `'live'`, which matches the
@@ -158,7 +155,7 @@ and runs somewhat faster. The check is the price of that correctness
 (the measured gap is in [performance.md](../performance.md)).
 
 Single-handler `compile()` dispatch runs
-**<!-- vc:benchCompileVsDispatch -->10.33<!-- /vc:benchCompileVsDispatch -->x** the general bus's `dispatch`,
+**<!-- vc:benchCompileVsDispatch -->14.44<!-- /vc:benchCompileVsDispatch -->x** the general bus's `dispatch`,
 and nothing above affects it. For the mode trade-off, see
 [performance.md](../performance.md).
 
@@ -169,6 +166,6 @@ and nothing above affects it. For the mode trade-off, see
 > 20-30% run to run) and a same-run ratio is not. Even a ratio moves. A ratio
 > between two libraries is a fact about one host (docs/V8-RULES.md rule 15),
 > so it is printed as the range over the runs. A ratio between two of this
-> library's own paths is the median. These: <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
+> library's own paths is the median. These: <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
 > A micro-loop emitting one name over and over flatters emitters keyed by a
 > plain object. With varying names they fall behind (docs/performance.md).

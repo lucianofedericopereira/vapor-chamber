@@ -22,9 +22,28 @@ namespace App\Actions\Cart;
 use App\Models\Cart;
 use App\Models\Product;
 use App\Models\User;
+use Illuminate\Routing\Attributes\Controllers\Middleware;
 
+/**
+ * Rate limited per user (or address) by the named limiter `cart`, which the
+ * app defines in AppServiceProvider::boot():
+ *
+ *   RateLimiter::for('cart', fn (Request $request) =>
+ *       Limit::perMinute(30)->by($request->user()?->id ?: $request->ip()));
+ *
+ * The controller runs an action's declared middleware as a route runs a
+ * controller's. A spent limit answers 429 with `Retry-After`.
+ */
+#[Middleware('throttle:cart')]
 class AddToCart
 {
+    /**
+     * The reads this command makes stale (RFC 9875): the controller answers
+     * `Cache-Group-Invalidation: "cart"`, and a client sharing one client with
+     * its router refreshes the cart on screen (routes-web.php, the cart read).
+     */
+    public const CACHE_GROUP_INVALIDATION = ['cart'];
+
     public function __invoke(?array $target, ?array $payload, ?User $user): array
     {
         // The TARGET is identity: a product that does not exist is a missing

@@ -52,7 +52,7 @@ describe('postCommand - silent on permanent failures', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
     await expect(
-      postCommand('/api/vc', { command: 'save' }, { retry: 3, silent: true }),
+      postCommand('/api/vc', { command: 'save' }, { retry: { maxAttempts: 4 }, silent: true }),
     ).rejects.toMatchObject({ context: { silent: true, status: 422 } });
 
     // A permanent 4xx must not consume the retry budget.
@@ -62,7 +62,7 @@ describe('postCommand - silent on permanent failures', () => {
   it('leaves silent unset by default on the same failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
-    const err = await postCommand('/api/vc', { command: 'save' }, { retry: 1 }).catch(e => e);
+    const err = await postCommand('/api/vc', { command: 'save' }, { retry: { maxAttempts: 2 } }).catch(e => e);
     expect(err.context.status).toBe(422);
     expect(err.context.silent).toBeUndefined();
   });
@@ -93,7 +93,7 @@ describe('createHttpClient - abort and session expiry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
+    await expect(http.get('/api/data', { retry: { maxAttempts: 3 }, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     // Attempt 0 ran; the pre-attempt guard stopped attempt 1.
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
@@ -115,7 +115,7 @@ describe('createHttpClient - abort and session expiry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
+    await expect(http.get('/api/data', { retry: { maxAttempts: 3 }, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 });
@@ -130,7 +130,7 @@ describe('createHttpClient - response interceptor onRejected', () => {
     const onRejected = vi.fn();
     const onFulfilled = vi.fn(r => r);
 
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     http.interceptors.response.use(onFulfilled, onRejected);
 
     await expect(http.get('/api/data')).rejects.toMatchObject({ context: { status: 500 } });
@@ -143,6 +143,6 @@ describe('createHttpClient - response interceptor onRejected', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const http = createHttpClient();
 
-    await expect(http.get('/api/data', { silent: true, retry: 0 })).rejects.toMatchObject({ context: { silent: true } });
+    await expect(http.get('/api/data', { silent: true, retry: false })).rejects.toMatchObject({ context: { silent: true } });
   });
 });

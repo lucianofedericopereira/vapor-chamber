@@ -105,7 +105,7 @@ describe('createHttpClient - safe fallbacks', () => {
     );
     const http = createHttpClient();
 
-    const result = await http.safe.get('/api/data', { retry: 0 });
+    const result = await http.safe.get('/api/data', { retry: false });
     expect(result.data).toBeNull();
     expect(result.error?.code).toBe('remote:failed:http');
     expect(problemOf(result.error)).toEqual({ status: 500, detail: 'HTTP 500' });
@@ -116,7 +116,7 @@ describe('createHttpClient - safe fallbacks', () => {
     (globalThis.fetch as any).mockRejectedValue(Object.assign(new TypeError('fetch failed'), { name: 'TypeError' }));
     const http = createHttpClient();
 
-    const result = await http.safe.get('/api/data', { retry: 0 });
+    const result = await http.safe.get('/api/data', { retry: false });
     expect(result.data).toBeNull();
     expect(result.status).toBe(0);
     expect(result.error?.code).toBe('transport:lost:reply');
@@ -161,7 +161,7 @@ describe('createHttpClient - interceptor arms', () => {
     const http = createHttpClient();
     http.interceptors.response.use((r) => r); // fulfilled-only - no onRejected
 
-    await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ context: { status: 500 } });
+    await expect(http.get('/api/data', { retry: false })).rejects.toMatchObject({ context: { status: 500 } });
   });
 
   it('request() without a method defaults to GET', async () => {
@@ -183,14 +183,14 @@ describe('createHttpClient - stale cache arms', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { v: 1 }));
     const http = createHttpClient();
 
-    const first = await http.get('/api/data', { retry: 0, cache: { ttl: 1000, staleTtl: 60_000 } });
+    const first = await http.get('/api/data', { retry: false, cache: { ttl: 1000, staleTtl: 60_000 } });
     expect(first.data).toEqual({ v: 1 });
 
     // Entry now stale (past ttl, within staleTtl); the revalidation fetch fails.
     vi.setSystemTime(5_002_000);
     (globalThis.fetch as any).mockRejectedValue(new TypeError('network down'));
 
-    const second = await http.get('/api/data', { retry: 0, cache: { ttl: 1000, staleTtl: 60_000 } });
+    const second = await http.get('/api/data', { retry: false, cache: { ttl: 1000, staleTtl: 60_000 } });
     expect(second.stale).toBe(true);
     expect(second.data).toEqual({ v: 1 });
     // The background failure must not become an unhandled rejection;
@@ -203,7 +203,7 @@ describe('createHttpClient - stale cache arms', () => {
     const http = createHttpClient();
 
     await expect(
-      http.get('/api/never-cached', { retry: 0, cache: { serveStaleOnError: true } }),
+      http.get('/api/never-cached', { retry: false, cache: { serveStaleOnError: true } }),
     ).rejects.toThrow();
   });
 });

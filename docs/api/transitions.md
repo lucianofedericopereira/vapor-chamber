@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transitions';
 
 ### createTransitionBridge
 
-**Function** - [src/transitions.ts:327](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L327)
+**Function** - [src/transitions.ts:328](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L328)
 
 ```ts
 createTransitionBridge(options: TransitionBridgeOptions & { bus: BaseBus; }) => TransitionBridge
@@ -47,7 +47,7 @@ reported as vuejs/core#15727, a fix proposed in vuejs/core#11824. Vapor's
 
 ### useTransitionCommand
 
-**Function** - [src/transitions.ts:372](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L372)
+**Function** - [src/transitions.ts:374](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L374)
 
 ```ts
 useTransitionCommand(options?: TransitionBridgeOptions) => TransitionBridge
@@ -78,7 +78,7 @@ Your own hooks compose with the spread: `<Transition v-bind="modal"
 
 ### TransitionBridge
 
-**Type alias** - [src/transitions.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L95)
+**Type alias** - [src/transitions.ts:96](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L96)
 
 ```ts
 export type TransitionBridge = TransitionHooks & {
@@ -91,7 +91,7 @@ export type TransitionBridge = TransitionHooks & {
 
 ### TransitionBridgeOptions
 
-**Type alias** - [src/transitions.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L49)
+**Type alias** - [src/transitions.ts:50](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L50)
 
 ```ts
 export type TransitionBridgeOptions = {
@@ -114,7 +114,7 @@ export type TransitionBridgeOptions = {
 
 ### TransitionHooks
 
-**Type alias** - [src/transitions.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L66)
+**Type alias** - [src/transitions.ts:67](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L67)
 
 ```ts
 export type TransitionHooks = {
@@ -149,7 +149,7 @@ export type TransitionHooks = {
 
 ### TransitionPhase
 
-**Type alias** - [src/transitions.ts:47](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L47)
+**Type alias** - [src/transitions.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L48)
 
 ```ts
 export type TransitionPhase = 'idle' | 'entering' | 'leaving';

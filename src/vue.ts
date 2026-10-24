@@ -110,7 +110,6 @@ export {
   signal,
   untracked,
   useCommand,
-  useCommandState,
   useSharedCommandState,
   useCommandHistory,
   useCommandGroup,

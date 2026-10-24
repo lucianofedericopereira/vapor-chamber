@@ -14,8 +14,8 @@ describe('circuitBreaker and cancels', () => {
     const bus = createAsyncCommandBus({ retry: false });
     bus.register('search', search);
     const cb = circuitBreaker({ threshold: 3, actions: ['search'] });
-    bus.use(cb, { priority: 10 });
-    bus.use(supersede({ actions: ['search'] }), { priority: 5 });
+    bus.use(cb);
+    bus.use(supersede({ actions: ['search'] }));
     await Promise.all([1, 2, 3, 4].map(() => bus.dispatch('search', { q: 'x' })));
     expect(cb.getState('search')).toBe('closed');
     expect((await bus.dispatch('search', { q: 'x' })).ok).toBe(true);
@@ -83,12 +83,12 @@ describe('controls', () => {
     expect(cb.getState('save')).toBe('open');
   });
 
-  it("a plugin's throw (a bug) still does not count", async () => {
+  it("a step's throw (a bug) still does not count", async () => {
     const bus = createAsyncCommandBus({ retry: false });
     bus.register('save', async () => 1);
     const cb = circuitBreaker({ threshold: 1, actions: ['save'] });
-    bus.use(cb, { priority: 10 });
-    bus.use(Object.assign(() => { throw new Error('plugin bug'); }, { id: 'buggy' }), { priority: 5 });
+    bus.use(cb);
+    bus.use({ id: 'buggy', begin: () => { throw new Error('plugin bug'); } });
     await bus.dispatch('save', {});
     expect(cb.getState('save')).toBe('closed');
   });

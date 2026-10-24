@@ -1,29 +1,29 @@
 /**
- * vapor-chamber - Transport plugins
+ * vapor-chamber - Transports
  *
- * Transports are AsyncPlugin factories that forward commands to a backend.
- * Use with createAsyncCommandBus() for full async dispatch support.
+ * A transport is the work for the actions it covers: declared once at the
+ * async bus (`createAsyncCommandBus({ transport })`), it sends a command to a
+ * backend where a local handler would run it. Every plugin wraps it, the
+ * bus's retry re-sends through it, and its answer is written there.
  */
 
-import type { ActionScope, Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode, MetaResponse } from './command-bus';
-import type { ActionFilter } from './action-filter';
-import { countOption, delayOption } from './bounds';
+import type { Command, CommandResult, BaseBus, BusError, FailCode, MetaResponse, SendAt, Transport } from './command-bus';
+import { _report } from './report';
+import { type Delay, countOption, delayOption, isDelay } from './bounds';
+import { Accepted } from './accepted';
 import { DEV } from './dev';
-import { abortedResult, BusError as BusErrorClass, _failures, _okResult, _errResult, _isLibraryAction } from './command-bus';
-import { _appliedRemotely } from './applied-remotely';
-import { _answered, _combineSignals, _encodeJson, _parseRetryAfter, _postJson, _remoteProblem } from './http';
-import type { CombinedSignal, HttpClient, HttpResponse } from './http';
+import { abortedResult, BusError as BusErrorClass, _failures, _groupsAt, _setHub, _okResult, _errResult, _OUTBOX, _opened, _outboxOn, _replayOf, type BusGroups } from './command-bus';
+import { createOutbox, type Outbox } from './outbox';
+import { _appliedRemotely, _pushed } from './applied-remotely';
+import { _answered, _combineSignals, _declaredWait, _encodeJson, _getJson, _headerOf, _headersOf, _postJson, _remoteProblem, _sleepMs } from './http';
+import { conditionOf, retryClass } from './failure';
+import type { CombinedSignal, GroupHub, HttpClient, HttpResponse } from './http';
 import type { ProblemDetails } from './http-errors';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
-/**
- * What each bridge declares: it answers a command itself, over a wire, so the
- * async bus's retry re-sends through it (docs/retry.md) and the plugins
- * outside see one dispatch. Its id is the owner every bridge failure already
- * carries (`transport:lost:reply`, ...), so a bridge has one owner name.
- */
-const TRANSPORT = { transport: true, id: 'transport' } as const;
+// The answer a 202 gets, for `instanceof` from this entry too.
+export { Accepted };
 
 // ---------------------------------------------------------------------------
 // Shared protocol types
@@ -32,7 +32,10 @@ const TRANSPORT = { transport: true, id: 'transport' } as const;
 /**
  * A command on every wire (docs/contract.md 4): `id` where
  * answers are multiplexed (a batch, a WebSocket), as on the answer side; `meta`
- * only with a fact a backend can use. Log s35.138.
+ * only with a fact a backend can use. Its HTTP metadata, the idempotency key,
+ * is the `Idempotency-Key` header when the request is the command, and that
+ * name in `headers` when the command is multiplexed (OData JSON 4.01 19.1).
+ * Log s35.138, 36.47.
  */
 export type CommandEnvelope = {
   id?: string;
@@ -40,18 +43,58 @@ export type CommandEnvelope = {
   target: any;
   payload?: any;
   meta?: EnvelopeMeta;
+  headers?: Record<string, string>;
 };
 
-/** The part of a command's meta that crosses the wire. */
-export type EnvelopeMeta = { idempotencyKey?: string; correlationId?: string; causationId?: string };
+/** The part of a command's meta that crosses the wire as the command's own data. */
+export type EnvelopeMeta = { correlationId?: string; causationId?: string };
 
-// One literal: JSON drops the undefined members, so the wire has only what is set.
+/**
+ * A key as the `Idempotency-Key` value: a Structured Field String, as the
+ * draft requires (RFC 9651), quoted and printable ASCII. Percent-encoding
+ * (UTF-8) yields only unreserved ASCII and %XX, never `"` or `\`, so quoting
+ * is all it needs. It is reversible, so no two keys collide, and any backend
+ * recovers the exact key (rawurldecode). Raw, a target outside Latin-1 made a
+ * value Headers refuses and the request never left. A malformed key (a lone
+ * surrogate) makes this throw, which the bus reports as transport:failed:send
+ * on every wire. A key of unreserved characters only, as every `meta.id` is,
+ * is its own encoding, so the scan skips the encode with the same bytes.
+ * tests/idempotency-header.test.ts, tests/wire-envelope.test.ts.
+ */
+const UNRESERVED = /^[\w.~-]*$/;
+const keyText = (key: string): string => (UNRESERVED.test(key) ? key : encodeURIComponent(key));
+const keyHeader = (key: string): string => `"${keyText(key)}"`;
+
+// One literal: JSON drops the undefined members, so the wire has only what is
+// set. The key is never in it: a single request sends it as a header.
 function envelopeOf(cmd: Command, id?: string): CommandEnvelope {
   const m = cmd.meta;
-  const meta = m && (m.idempotencyKey ?? m.correlationId ?? m.causationId) !== undefined
-    ? { idempotencyKey: m.idempotencyKey, correlationId: m.correlationId, causationId: m.causationId }
+  const meta = m && (m.correlationId ?? m.causationId) !== undefined
+    ? { correlationId: m.correlationId, causationId: m.causationId }
     : undefined;
   return { id, command: cmd.action, target: cmd.target, payload: cmd.payload, meta };
+}
+
+// A multiplexed command (a batch item, a frame): its envelope with its `id`,
+// and a keyed command's key in `headers`, written only then.
+function multiplexedOf(cmd: Command, id: string): CommandEnvelope {
+  const envelope = envelopeOf(cmd, id);
+  const key = cmd.meta?.idempotencyKey;
+  if (key) envelope.headers = { 'Idempotency-Key': keyHeader(key) };
+  return envelope;
+}
+
+/**
+ * A multiplexed command as JSON, or the failure that says it cannot be. A
+ * key's text (`keyText`) holds only unreserved characters, `%` and `!*'()`,
+ * none of which JSON escapes, so its `headers` member is appended as text: the
+ * bytes JSON.stringify writes for it as the last member, with no object and no
+ * escaping pass (tests/idempotency-header.test.ts).
+ */
+function encodeMultiplexed(cmd: Command, id: string, url: string): string | BusError {
+  const key = cmd.meta?.idempotencyKey;
+  const data = _encodeJson(envelopeOf(cmd, id), url, cmd.action);
+  return key && typeof data === 'string' ? `${data.slice(0, -1)},"headers":{"Idempotency-Key":"\\"${keyText(key)}\\""}}` : data;
 }
 
 /**
@@ -65,7 +108,7 @@ export type BackendResponse = {
   /**
    * Store states the server declares beside a success, by store id: each
    * store with that id on the bus takes its state, whatever the command was
-   * (docs/store.md, A store behind a bridge). Log s35.186.
+   * (docs/store.md, A store behind a transport). Log s35.186.
    */
   stores?: Record<string, unknown>;
   /** A navigation the backend hands back instead of a result - see `onRedirect`. */
@@ -73,17 +116,33 @@ export type BackendResponse = {
   problem?: ProblemDetails;
 };
 
-
+/**
+ * An app's own transport: `send` answers the command, and `local()` runs the
+ * action's local handler (or the missing-handler outcome), its fallback. A
+ * throw or a rejection fails the dispatch as `transport:failed:send`. A send
+ * that calls `local()` declares `localFallback: true`: only then may its
+ * actions have a handler, `optimistic` aside
+ * (tests/register-shadow-check.test.ts).
+ *
+ * @example
+ * const offlineFirst = defineTransport((cmd, local) => (navigator.onLine ? send(cmd) : local()), { localFallback: true })
+ * const bus = createAsyncCommandBus({ transport: offlineFirst })
+ */
+export function defineTransport(send: Transport['send'], options?: { localFallback?: boolean }): Transport {
+  return { id: ID, localFallback: options?.localFallback === true, send };
+}
 
 // The transport's own failures, and a backend's: each through its own `fail`,
 // so neither can speak as the other (docs/contract.md 5).
-const transportFail = _failures('transport');
+// Every transport's owner name.
+const ID = 'transport';
+const transportFail = _failures(ID);
 const remoteFail = _failures('remote');
 const transportError = (code: FailCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
   transportFail(code, message, { action, context });
 /**
  * Why a request produced no answer. The http client throws the core's failure
- * already read (`_answered`, log s35.131), and the bridge passes it on as it
+ * already read (`_answered`, log s35.131), and the transport passes it on as it
  * is - the failure a direct call sees. The one translation left: the caller's
  * abort of a dispatch is the bus's (`core:aborted:dispatch`). A custom client
  * that throws something else is read by its `response`, else as no reply.
@@ -94,10 +153,50 @@ function unanswered(e: unknown, action: string, signal?: AbortSignal): CommandRe
   // A custom client's failure: its `response`, else the platform's exception
   // names (`AbortSignal.timeout()` throws a TimeoutError), else no reply.
   const err = e as { name?: unknown; message?: string; response?: { status: number; data: unknown; headers?: Record<string, string> } } | null;
-  if (err?.response) return _errResult(_answered(err.response.status, err.response.data, err.response.headers));
+  if (err?.response) return _errResult(_answered(err.response.status, err.response.data, _headersOf(err.response.headers)));
   if (err?.name === 'TimeoutError') return _errResult(transportError('timeout:reply', String(err.message), action));
   if (err?.name === 'AbortError') return abortedResult(action, signal);
   return _errResult(transportFail('lost:reply', `No response for "${action}".`, { action, cause: e }));
+}
+
+/**
+ * The limits a server declared to one transport, by action: when each ends,
+ * in ms since the epoch (docs/retry.md, The hold). Held per action, never per
+ * transport: a 429 does not say what it covers (RFC 6585 4), and a whole
+ * transport held would refuse commands the server accepts. tests/hold.test.ts.
+ */
+type Holds = Map<string, number>;
+
+/**
+ * A command whose action is held: refused at once and never sent, as
+ * `transport:limited:held` with the time left as `retryIn`. It is the failure
+ * its 429 would have been, so the bus's retry and the outbox wait it as they
+ * wait a 429's (docs/retry.md). A hold past its end is forgotten here.
+ */
+function whileHeld(holds: Holds, action: string): CommandResult | undefined {
+  const end = holds.get(action);
+  if (end === undefined) return undefined;
+  const left = end - Date.now();
+  if (left > 0) return _errResult(transportError('limited:held', `"${action}" is held for ${left}ms: the server declared a limit.`, action, { retryIn: left }));
+  holds.delete(action);
+  return undefined;
+}
+
+/**
+ * `result`, after holding its action when it is a `limited` failure (429,
+ * 503) that declares a wait (`retryIn`, read by `_declaredWait`). A verdict
+ * with a wait, such as a 409 `in_progress`, is one request's state and holds
+ * nothing. A later end extends a hold and an earlier one never shortens it:
+ * Retry-After is a minimum (RFC 9110 10.2.3). Failure paths only.
+ */
+function holding(holds: Holds, action: string, result: CommandResult): CommandResult {
+  const wait = (result.error as BusError | undefined)?.context?.retryIn;
+  if (typeof wait === 'number' && conditionOf(result.error) === 'limited') {
+    const end = Date.now() + wait;
+    const held = holds.get(action);
+    if (held === undefined || held < end) holds.set(action, end);
+  }
+  return result;
 }
 
 /** A redirect the backend answered with: the command fails, carrying the url. */
@@ -113,20 +212,15 @@ const redirected = (url: string, action: string, handled: boolean): BusError =>
 const responseOf = (res: { status: number; headers?: Record<string, string>; url?: string; redirected?: boolean }): MetaResponse =>
   ({ status: res.status, headers: res.headers ?? {}, url: res.url, redirected: res.redirected });
 
-/**
- * A result's `Retry-After`, from its own headers: the response's, or the
- * `headers` a batched result or a frame carries (OData JSON batch). A name in
- * any case (RFC 9110 5.1), a string value. tests/batch-retry-after.test.ts.
- */
-function retryAfterOf(headers: unknown): string | undefined {
-  if (headers === null || typeof headers !== 'object') return undefined;
-  const name = Object.keys(headers).find((k) => k.toLowerCase() === 'retry-after');
-  const value = name === undefined ? undefined : (headers as Record<string, unknown>)[name];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function answerOf(r: BackendResponse, cmd: Command, headers?: unknown): CommandResult {
-  if (r.problem) return _errResult(_remoteProblem(r.problem, undefined, _parseRetryAfter(retryAfterOf(headers))));
+// A result's own headers are the response's, or the `headers` a batched result
+// or a frame carries (OData JSON batch), read by `_headersOf`. `status`: a
+// batched result's or a frame's own (OData 19.5), which stands for the
+// response's when the problem has none. A single answer has none here.
+function answerOf(r: BackendResponse, cmd: Command, headers?: unknown, status?: unknown): CommandResult {
+  if (r.problem) {
+    const own = _headersOf(headers);
+    return _errResult(_remoteProblem(r.problem, typeof status === 'number' ? status : undefined, own && _declaredWait(own)));
+  }
   if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, cmd.action, false));
   // The server applied it: history must not undo or redo it locally (R9).
   // The store states its reply declares travel with it to the bus.
@@ -135,43 +229,163 @@ function answerOf(r: BackendResponse, cmd: Command, headers?: unknown): CommandR
 }
 
 /**
- * One answer of an HTTP bridge's request. A redirect is a body member (a
+ * One answer of an HTTP transport's request. A redirect is a body member (a
  * browser's fetch cannot read a 3xx's Location): it goes to `navigate`
  * (typically Inertia's `router.visit`), and the command fails, carrying the
  * url. Anything else by contract (answerOf).
  */
-function readAnswer(r: BackendResponse, cmd: Command, headers: unknown, navigate: ((url: string) => void) | undefined): CommandResult {
+function readAnswer(r: BackendResponse, cmd: Command, headers: unknown, navigate: ((url: string) => void) | undefined, status?: unknown): CommandResult {
   if (typeof r.redirect === 'string' && r.redirect) {
     navigate?.(r.redirect);
     return _errResult(redirected(r.redirect, cmd.action, !!navigate));
   }
-  return answerOf(r, cmd, headers);
+  return answerOf(r, cmd, headers, status);
 }
 
 /**
- * What both HTTP bridges send through. `signal`: the bridge's own and its
- * scope's, either one cancels, combined once (its listeners live as long as
- * the bridge, never detached). `post`: one request, through the app's
- * `httpClient` with the body as an object, else postCommand's path with it
- * already JSON. Each command is sent once (`retry: 0`): the async bus
- * re-sends (docs/retry.md).
+ * An answer's own `Cache-Group-Invalidation` (RFC 9875), on a response, a
+ * batched result or a frame, for the bus's group hub: the app's client (its
+ * reads, the router), else the bus's own (cache()). tests/cache-groups.test.ts,
+ * tests/cache-groups-hub.test.ts. With no hub nothing can act on it, and
+ * development says so once per transport (`said`); production reads nothing.
  */
-function httpSender(options: HttpBridgeOptions) {
-  const { endpoint, csrf = false, csrfCookieUrl, timeout = 10_000, signal, onSessionExpired, scopeController, httpClient } = options;
+function groupsTo(hub: GroupHub | null | undefined, own: unknown, said: { warned: boolean }): void {
+  if (hub) {
+    const named = _headerOf(own, 'cache-group-invalidation');
+    if (named !== undefined) hub.invalidateGroups(named);
+  } else if (DEV && !said.warned && _headerOf(own, 'cache-group-invalidation') !== undefined) {
+    said.warned = true;
+    _report('warn', 'transport:missing:client', 'an answer named groups in Cache-Group-Invalidation, but nothing on this bus reads them. Give the transport the client the router reads, or install cache().');
+  }
+}
+
+/**
+ * A transport's bus's groups (BusGroups), its `client` the bus's hub: one
+ * hub per bus, so a second, different client keeps the first and development
+ * warns. At the bus's creation (Transport.attach).
+ */
+function joinGroups(bus: BaseBus, client: HttpClient | undefined): BusGroups {
+  const g = _groupsAt(bus);
+  if (client) {
+    if (g.hub === null) _setHub(g, client);
+    else if (DEV && g.hub.invalidateGroups !== client.invalidateGroups) {
+      _report('warn', 'transport:conflict:client', 'two transports of one bus have different httpClients: the groups their answers name reach the first client only. Give the bus one client.');
+    }
+  }
+  return g;
+}
+
+/**
+ * What both HTTP sends go through. `signal`: the transport's own and its
+ * scope's, either one cancels, combined once (its listeners live as long as
+ * the transport, never detached). `post`: one request, through the app's
+ * `httpClient` with the body as an object, else postCommand's path with it
+ * already JSON. Each command is sent once (`retry: false`): the async bus
+ * re-sends (docs/retry.md), so the two never multiply. `holds`: the limits
+ * the server declared, read before each send; `dispose` forgets them.
+ */
+function httpSender(options: HttpTransportOptions) {
+  const { endpoint, csrf = false, csrfCookieUrl, timeout = 10_000, signal, onSessionExpired, scopeController, httpClient, headers, poll } = options;
+  const scope = scopeController && signal ? _combineSignals(signal, scopeController.signal).signal : scopeController?.signal ?? signal;
+  // A NaN behaves like a missing option (bounds.ts): never a hot loop or an endless wait.
+  const interval = delayOption(poll?.interval, 1000);
+  const maxWait = countOption(poll?.maxWait, 300_000);
+  // What stops every follow: the transport's dispose, its scope, or the command's signal.
+  const stop = new AbortController();
+  const holds: Holds = new Map();
+  const said = { warned: false };
+  // The bus's groups, from its attach: where an answer's groups go without a client.
+  let groups: BusGroups | undefined;
+
+  /**
+   * A status monitor polled to the job's end: its `{ state }`, its problem, or
+   * `transport:timeout:job` past `maxWait`. A passing failure of a poll says
+   * nothing about the job, still running: a transient one by the one retry
+   * rule (failure.ts retryClass) or one declaring a wait polls again. Anything
+   * else ends it, as an abort does (tests/accepted-transient.test.ts).
+   */
+  async function follow(cmd: Command, location: string, answerHeaders: unknown, base: string | undefined): Promise<CommandResult> {
+    let url = location;
+    // A Location no URL holds is followed as sent: its failure ends `done`, never the dispatch.
+    if (base) try { url = new URL(url, base).href; } catch { /* as sent */ }
+    // Combined per follow and detached at its end: a listener left on the
+    // scope would outlive it (tests/combine-signals.test.ts).
+    const scoped = scope ? _combineSignals(stop.signal, scope) : undefined;
+    const combined = cmd.signal ? _combineSignals(scoped ? scoped.signal : stop.signal, cmd.signal) : undefined;
+    const sig = combined ? combined.signal : scoped ? scoped.signal : stop.signal;
+    const end = Date.now() + maxWait;
+    let wait = waitOf(_headersOf(answerHeaders), interval);
+    try {
+      for (;;) {
+        if (sig.aborted) return abortedResult(cmd.action, sig);
+        if (Date.now() + wait > end) return _errResult(transportError('timeout:job', `"${cmd.action}" was not done within ${maxWait}ms.`, cmd.action, { location: url, maxWait }));
+        let r: HttpResponse<Monitor>;
+        try {
+          await _sleepMs(wait, sig);
+          r = httpClient ? await httpClient.get<Monitor>(url, { signal: sig, dedupe: false }) : await _getJson<Monitor>(url, { headers, signal: sig, onSessionExpired });
+        } catch (e) {
+          if (sig.aborted) return abortedResult(cmd.action, sig);
+          const declared = (e as BusError).context?.retryIn;
+          if (retryClass(e) !== 'transient' && !isDelay(declared)) return _errResult(e as Error);
+          wait = isDelay(declared) ? declared : interval;
+          continue;
+        }
+        if (r.status !== 202) return r.data?.problem ? _errResult(_remoteProblem(r.data.problem)) : _okResult(r.data?.state);
+        wait = waitOf(_headersOf(r.headers), interval);
+      }
+    } finally {
+      combined?.detach();
+      scoped?.detach();
+    }
+  }
+
   return {
-    signal: scopeController && signal ? _combineSignals(signal, scopeController.signal).signal : scopeController?.signal ?? signal,
+    signal: scope,
+    holds,
+    /** See groupsTo. A single answer through the client is the client's own. */
+    groups: (own: unknown): void => groupsTo(httpClient ?? groups?.hub, own, said),
+    attach(bus: BaseBus): void { groups = joinGroups(bus, httpClient); },
     post<R>(json: string, body: () => unknown, headers: Record<string, string>, requestSignal: AbortSignal | undefined): Promise<HttpResponse<R>> {
-      const config = { csrf, csrfCookieUrl, headers, timeout, retry: 0, signal: requestSignal, onSessionExpired };
+      const config = { csrf, csrfCookieUrl, headers, timeout, retry: false as const, signal: requestSignal, onSessionExpired };
       return httpClient ? httpClient.post<R>(endpoint, body(), config) : _postJson<R>(endpoint, json, config);
+    },
+    /**
+     * A 202 with a `Location` (RFC 9110 15.3.3): the work goes on, and the
+     * answer is an `Accepted` whose `done` polls the monitor, its first wait
+     * the 202's. `base` resolves a relative Location, as is without one. Any
+     * other answer, a 202 without a Location included, is the result as read.
+     */
+    accepted(result: CommandResult, answerHeaders: unknown, base: string | undefined, cmd: Command): CommandResult {
+      // One name read, no copy (_headerOf). The URL and the first wait are read
+      // when `done` is: a 202 nobody follows costs neither.
+      const location = result.ok ? _headerOf(answerHeaders, 'location') : undefined;
+      if (!location) return result;
+      return _okResult(new Accepted(() => follow(cmd, location, answerHeaders, base)));
+    },
+    dispose(): void {
+      stop.abort();
+      holds.clear();
     },
   };
 }
 
+/** What a status monitor answers: `{ state }` when the job is done, a problem when it failed, a 202 while it runs. */
+type Monitor = { state?: unknown; problem?: ProblemDetails };
+
+/**
+ * The next poll's wait: the one an answer declares, read as any answer's
+ * (`_declaredWait`: Retry-After, else RateLimit `t` with no quota left, else
+ * X-RateLimit-Reset), else the interval. A poll inside a RateLimit window
+ * exceeds the quota the draft asks a client to keep (-11, 7).
+ */
+const waitOf = (own: Record<string, string> | undefined, interval: Delay): Delay =>
+  delayOption((own && _declaredWait(own)) ?? interval, interval);
+
 // ---------------------------------------------------------------------------
-// createHttpBridge
+// httpTransport
 // ---------------------------------------------------------------------------
 
-export type HttpBridgeOptions = {
+export type HttpTransportOptions = {
   /** Backend endpoint URL (e.g. '/api/vc') */
   endpoint: string;
   /**
@@ -182,7 +396,7 @@ export type HttpBridgeOptions = {
    *     that exposes a token via one of those three sources - Laravel Blade,
    *     Rails, Django, .NET MVC, custom stacks. Auto-refreshes on HTTP 419.
    *     An Inertia app on Laravel uses `true` too: with no meta tag it reads
-   *     the XSRF-TOKEN cookie Laravel sets. The bridge makes its own requests,
+   *     the XSRF-TOKEN cookie Laravel sets. The transport makes its own requests,
    *     which no Axios interceptor of the app touches.
    */
   csrf?: boolean;
@@ -216,7 +430,7 @@ export type HttpBridgeOptions = {
    * `error.context.url`.
    *
    * BODY FIELD ONLY, never a 3xx with `Location`: `fetch` defaults to
-   * `redirect: 'follow'`, so the platform resolves a 3xx and hands the bridge
+   * `redirect: 'follow'`, so the platform resolves a 3xx and hands the transport
    * the FINAL response. A backend
    * that wants this hook must say so in the body. Pinned by
    * `tests/transports-coverage.test.ts` ("does not call onRedirect for a
@@ -224,12 +438,11 @@ export type HttpBridgeOptions = {
    */
   onRedirect?: (url: string) => void;
   /**
-   * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * An {@link ActionScope}.
+   * Coalesce the commands sent within a window into one POST
+   * (`{ commands: [...] }` answered by `{ results: [...] }`). Absent: one
+   * request per command.
    */
-  actions?: ActionScope;
-  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
-  actionFilter?: ActionFilter;
+  batch?: HttpBatchOptions;
   /**
    * Abort controller whose signal cancels all in-flight requests when the
    * owning scope/component is disposed. In Vapor components, create an
@@ -240,116 +453,33 @@ export type HttpBridgeOptions = {
    * // In <script setup vapor>:
    * const ctrl = new AbortController();
    * onScopeDispose(() => ctrl.abort());
-   * bus.use(createHttpBridge({ endpoint: '/api/vc', scopeController: ctrl }));
+   * createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', scopeController: ctrl }) });
    */
   scopeController?: AbortController;
   /**
    * Custom HTTP client instance for advanced use cases (interceptors,
-   * custom baseURL, etc). When provided, the bridge uses `client.post()`
+   * custom baseURL, etc). When provided, the transport uses `client.post()`
    * instead of the built-in `postCommand()`.
    *
    * @example
    * const http = createHttpClient({ baseURL: '/api' });
    * http.interceptors.request.use((c) => { c.headers = { ...c.headers, 'X-Tenant': '42' }; return c; });
-   * bus.use(createHttpBridge({ endpoint: '/vc', httpClient: http }));
+   * createAsyncCommandBus({ transport: httpTransport({ endpoint: '/vc', httpClient: http }) });
    */
   httpClient?: HttpClient;
+  /**
+   * How a 202's status monitor is polled once its `Accepted`'s `done` is read
+   * (src/accepted.ts). `interval`: the wait when an answer declares none, in
+   * ms, default 1000. `maxWait`: then `done` is `transport:timeout:job`, in ms,
+   * default 300_000. A poll goes through `httpClient` when given.
+   */
+  poll?: { interval?: number; maxWait?: number };
 };
 
-
-/**
- * createHttpBridge - fetch-based transport plugin.
- *
- * Intercepts matching commands and forwards them to the backend as JSON.
- * The backend receives `{ command, target, payload, meta? }` and answers
- * `{ state, stores? }`, `{ stores }` or `{ redirect }` on success, and a
- * non-2xx RFC 9457 problem on failure,
- * read as `remote:<condition of its status>:<code>` (docs/contract.md 4).
- *
- * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
- * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
- * default, configurable for other frameworks), session-expiry detection on
- * 401, request timeout, per-call AbortSignal. It sends each command once and
- * declares `transport: true`: the async bus re-sends through it by the
- * failure's condition, after a declared Retry-After (docs/retry.md).
- *
- * @example
- * const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } })
- * bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
- *
- * await bus.dispatch('cartAdd', product, { quantity: 2 })
- */
-export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, headers = {}, onRedirect } = options;
-  const http = httpSender(options);
-  const effectiveSignal = http.signal;
-
-  return Object.assign(async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
-    if (_isLibraryAction(cmd.action)) return next();
-
-    const envelope = envelopeOf(cmd);
-    // Encoded here, so a command JSON cannot hold fails as transport:invalid:json
-    // with nothing sent, never as a lost reply (tests/invalid-json.test.ts).
-    const data = _encodeJson(envelope, endpoint, cmd.action);
-    if (typeof data !== 'string') return _errResult(data);
-
-    // Forward the idempotency key stamped by the `idempotent` plugin as an
-    // `Idempotency-Key` header so the backend can reject duplicate writes - the
-    // wire half of exactly-once. With neither it nor a plugin's
-    // `meta.request` headers, the bridge's own `headers` go as they are.
-    const idemKey = cmd.meta?.idempotencyKey;
-    const added = cmd.meta?.request?.headers;
-    // A Structured Field String, as the draft requires (RFC 9651): quoted and
-    // printable ASCII. Percent-encoding (UTF-8) yields only unreserved ASCII and
-    // %XX, never `"` or `\`, so quoting is all it needs; it is reversible, so no
-    // two keys collide, and any backend recovers the exact key (rawurldecode).
-    // Raw, a target outside Latin-1 made a value Headers refuses and the
-    // request never left. A malformed key (a lone surrogate) makes this throw,
-    // which the bus reports as transport:failed:plugin. tests/idempotency-header.test.ts.
-    let reqHeaders = headers;
-    if (idemKey || added) {
-      reqHeaders = { ...headers, ...added };
-      if (idemKey) reqHeaders['Idempotency-Key'] = `"${encodeURIComponent(idemKey)}"`;
-    }
-
-    // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
-    // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
-    // auto-propagated to the HTTP request - consumers don't need to wire it
-    // through the bridge options. Detached when the request settles.
-    const combined = cmd.signal && effectiveSignal ? _combineSignals(effectiveSignal, cmd.signal) : undefined;
-    const perCallSignal = combined?.signal ?? cmd.signal ?? effectiveSignal;
-
-    try {
-      const res = await http.post<BackendResponse>(data, () => envelope, reqHeaders, perCallSignal);
-
-      if (!res.ok) return _errResult(_answered(res.status, res.data, res.headers));
-      if (cmd.meta) cmd.meta.response = responseOf(res);
-      // The envelope is an object, or nothing (no state).
-      if (res.data !== null && res.data !== undefined && (typeof res.data !== 'object' || Array.isArray(res.data))) {
-        return _errResult(remoteFail('unexpected:json', `The reply for "${cmd.action}" is not the JSON envelope.`, { action: cmd.action }));
-      }
-      return readAnswer((res.data ?? {}) as BackendResponse, cmd, res.headers, onRedirect);
-    } catch (e) {
-      return unanswered(e, cmd.action, perCallSignal);
-    } finally {
-      combined?.detach();
-    }
-  }, TRANSPORT, { actions, actionFilter: options.actionFilter });
-}
-
-// ---------------------------------------------------------------------------
-// createBatchingHttpBridge
-//
-// createHttpBridge handles one dispatch per request; this variant adds
-// microtask-coalescing on top - a burst of dispatches issued in the same tick
-// is batched into one round trip - without changing that contract for anyone
-// not opting in.
-// ---------------------------------------------------------------------------
-
-export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
+export type HttpBatchOptions = {
   /**
    * How long to hold the queue open before flushing.
-   *   - `'microtask'` (default) - coalesce every dispatch issued within the
+   *   - `'microtask'` (default) - coalesce every command sent within the
    *     same JS tick (`queueMicrotask`). Zero added latency: a synchronous
    *     burst of dispatches (e.g. a `formSet` immediately followed by a
    *     `submit`) becomes one HTTP round trip.
@@ -360,54 +490,133 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
   window?: 'microtask' | number;
 };
 
+/**
+ * httpTransport - commands sent over fetch, as JSON.
+ *
+ * The backend receives `{ command, target, payload, meta? }`, with
+ * `Accept: application/json, application/problem+json` and a keyed command's
+ * `Idempotency-Key`, and answers
+ * `{ state, stores? }`, `{ stores }` or `{ redirect }` on success, and a
+ * non-2xx RFC 9457 problem on failure,
+ * read as `remote:<condition of its status>:<code>` (docs/contract.md 4).
+ *
+ * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
+ * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
+ * default, configurable for other frameworks), session-expiry detection on
+ * 401, request timeout, per-call AbortSignal. It sends each command once: the
+ * async bus re-sends through it by the failure's condition, after a declared
+ * Retry-After (docs/retry.md). After a 429 or 503 that declares a wait, it
+ * sends no command for that action until the wait ends: each fails at once as
+ * `transport:limited:held`, which the bus waits out (docs/retry.md, The hold).
+ *
+ * With `batch`, every command sent within the window goes as ONE POST:
+ *
+ *   { commands: [{ id, command, target, payload, meta?, headers? }, ...] }
+ *
+ * a keyed command's `Idempotency-Key` in its `headers`, matched back against:
+ *
+ *   { results: [{ id, status, headers, state, stores? }, { id, status, headers, redirect }, { id, status, headers, problem }, ...] }
+ *
+ * Each result carries the command's own `status` and `headers` (OData JSON
+ * batch): a problem with no status reads the result's, and its
+ * `Retry-After` sets the wait as a single response's does. Each dispatch
+ * settles on its own result: the coalescing is invisible to the call site.
+ *
+ * @example
+ * const bus = createAsyncCommandBus({
+ *   transport: httpTransport({ endpoint: '/api/vc', csrf: true }),
+ *   retry: { actionPolicies: { 'cart*': 'idempotent' } },
+ * })
+ * await bus.dispatch('cartAdd', product, { quantity: 2 })
+ */
+export function httpTransport(options: HttpTransportOptions): Transport {
+  const http = httpSender(options);
+  return { id: ID, localFallback: false, send: options.batch ? sendBatched(options, options.batch, http) : sendOne(options, http), dispose: http.dispose, attach: http.attach };
+}
+
+type HttpSender = ReturnType<typeof httpSender>;
+
+// One request per command.
+function sendOne(options: HttpTransportOptions, http: HttpSender): Transport['send'] {
+  const { endpoint, headers = {}, onRedirect, httpClient } = options;
+  const effectiveSignal = http.signal;
+  const holds = http.holds;
+
+  return async (cmd: Command): Promise<CommandResult> => {
+    if (holds.size !== 0) {
+      const held = whileHeld(holds, cmd.action);
+      if (held) return held;
+    }
+    const envelope = envelopeOf(cmd);
+    // Encoded here, so a command JSON cannot hold fails as transport:invalid:json
+    // with nothing sent, never as a lost reply (tests/invalid-json.test.ts).
+    const data = _encodeJson(envelope, endpoint, cmd.action);
+    if (typeof data !== 'string') return _errResult(data);
+
+    // Forward the idempotency key stamped by the `idempotent` plugin as an
+    // `Idempotency-Key` header so the backend can reject duplicate writes - the
+    // wire half of exactly-once. With neither it nor a plugin's
+    // `meta.request` headers, the transport's own `headers` go as they are.
+    const idemKey = cmd.meta?.idempotencyKey;
+    const added = cmd.meta?.request?.headers;
+    let reqHeaders = headers;
+    if (idemKey || added) {
+      reqHeaders = { ...headers, ...added };
+      if (idemKey) reqHeaders['Idempotency-Key'] = keyHeader(idemKey);
+    }
+
+    // Merge the transport's effectiveSignal with per-dispatch cmd.signal. The
+    // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
+    // auto-propagated to the HTTP request - consumers don't need to wire it
+    // through the transport's options. Detached when the request settles.
+    const combined = cmd.signal && effectiveSignal ? _combineSignals(effectiveSignal, cmd.signal) : undefined;
+    const perCallSignal = combined?.signal ?? cmd.signal ?? effectiveSignal;
+
+    try {
+      const res = await http.post<BackendResponse>(data, () => envelope, reqHeaders, perCallSignal);
+
+      // Only an app's own client returns a non-2xx (ours throws it): its names in any case.
+      if (!res.ok) return holding(holds, cmd.action, _errResult(_answered(res.status, res.data, _headersOf(res.headers))));
+      if (cmd.meta) cmd.meta.response = responseOf(res);
+      // Through the client, the client read its groups. Without one, the bus's hub.
+      if (!httpClient) http.groups(res.headers);
+      // The envelope is an object, or nothing (no state).
+      if (res.data !== null && res.data !== undefined && (typeof res.data !== 'object' || Array.isArray(res.data))) {
+        return _errResult(remoteFail('unexpected:json', `The reply for "${cmd.action}" is not the JSON envelope.`, { action: cmd.action }));
+      }
+      const result = readAnswer((res.data ?? {}) as BackendResponse, cmd, res.headers, onRedirect);
+      return res.status === 202 ? http.accepted(result, res.headers, res.url, cmd) : result;
+    } catch (e) {
+      return holding(holds, cmd.action, unanswered(e, cmd.action, perCallSignal));
+    } finally {
+      combined?.detach();
+    }
+  };
+}
+
 // `{ id } & BackendResponse`, not a restatement of it. Spelled out by hand
 // until now, which is why `code` had to be added in two places instead of one
 // - and how the two shapes would have drifted again at the next field. A WS
-// frame is one too. `headers`: the result's own response headers, as an OData
-// JSON batch response carries them; it has no HTTP response of its own.
-type BatchedResult = { id: string; headers?: Record<string, string> } & BackendResponse;
+// frame is one too. `status` and `headers`: the result's own response status
+// and headers, as an OData JSON batch response carries them; it has no HTTP
+// response of its own.
+type BatchedResult = { id: string; status?: number; headers?: Record<string, string> } & BackendResponse;
+/** A WebSocket push: a frame with no `id`, the SSE event's name and data (docs/contract.md 4). */
+type PushFrame = { event?: unknown; data?: unknown };
 type BatchResponse = { results?: BatchedResult[] };
 
 // `data`: the command's envelope as JSON, encoded at dispatch. `leave`: set at
 // the flush for a command that carries a signal; its abort counts it out of the request.
 type QueuedBatchEntry = { id: string; cmd: Command; data: string; resolve: (result: CommandResult) => void; leave?: () => void };
 
-/**
- * createBatchingHttpBridge - coalescing fetch-based transport plugin.
- *
- * Same per-dispatch call shape and backend options as {@link createHttpBridge}
- * (CSRF, timeout and session expiry through the same `postCommand` /
- * `httpClient` path, each command sent once), but every command dispatched
- * within the batching window is queued and sent as ONE POST:
- *
- *   { commands: [{ id, command, target, payload, meta? }, ...] }
- *
- * matched back against:
- *
- *   { results: [{ id, state, stores? }, { id, redirect }, { id, problem, headers? }, ...] }
- *
- * A failed result carries its problem with the command's own `status`. A
- * result may carry its own `headers` (OData JSON batch): its `Retry-After`
- * sets the wait as a single response's does.
- *
- * Each queued command's own dispatch promise resolves independently - a
- * caller dispatches exactly as it would against createHttpBridge; the
- * coalescing is invisible to the call site.
- *
- * @example
- * const bus = createAsyncCommandBus()
- * bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: true }))
- * // two dispatches issued in the same tick -> one HTTP round trip:
- * bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' })
- * bus.dispatch('cartAdd', product, { quantity: 2 })
- */
-export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, headers = {}, onRedirect, window: flushWindow = 'microtask' } = options;
-  const http = httpSender(options);
+// The commands of one window, one request.
+function sendBatched(options: HttpTransportOptions, batchOptions: HttpBatchOptions, http: HttpSender): Transport['send'] {
+  const { endpoint, headers = {}, onRedirect, httpClient } = options;
   const effectiveSignal = http.signal;
+  const holds = http.holds;
   // A number window by the timer rule; 'microtask', a missing or a NaN window
   // is the default, the microtask (tests/timer-delays.test.ts).
-  const flushMs = delayOption(flushWindow, undefined);
+  const flushMs = delayOption(batchOptions.window ?? 'microtask', undefined);
 
   let queue: QueuedBatchEntry[] = [];
   let scheduled = false;
@@ -429,7 +638,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
 
     // A command that carries a signal settles on its abort; the request is
     // cancelled once every command in it has aborted (the HTTP client's rule).
-    // With the bridge's signal too, either one cancels; detached when it settles.
+    // With the transport's signal too, either one cancels; detached when it settles.
     let requestSignal = effectiveSignal;
     let combined: CombinedSignal | undefined;
     if (batch.some((entry) => entry.cmd.signal)) {
@@ -450,19 +659,20 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     try {
       const res = await http.post<BatchResponse>(
         `{"commands":[${batch.map((entry) => entry.data).join(',')}]}`,
-        () => ({ commands: batch.map(({ id, cmd }) => envelopeOf(cmd, id)) }),
+        () => ({ commands: batch.map(({ id, cmd }) => multiplexedOf(cmd, id)) }),
         batchHeaders,
         requestSignal,
       );
 
       if (!res.ok) {
-        const err = _answered(res.status, res.data, res.headers);
-        for (const entry of batch) entry.resolve(_errResult(err));
+        const err = _answered(res.status, res.data, _headersOf(res.headers));
+        for (const entry of batch) entry.resolve(holding(holds, entry.cmd.action, _errResult(err)));
         return;
       }
 
       const response = responseOf(res);
       for (const entry of batch) if (entry.cmd.meta) entry.cmd.meta.response = response;
+      if (!httpClient) http.groups(res.headers);
       const byId = new Map((res.data?.results ?? []).map((r) => [r.id, r]));
       // `onRedirect` navigates, so it fires once per batch - two navigations
       // in one tick race. Every redirected command still fails on its own,
@@ -476,25 +686,34 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       });
       for (const entry of batch) {
         const r = byId.get(entry.id);
-        entry.resolve(r
-          ? readAnswer(r, entry.cmd, r.headers, navigate)
-          : _errResult(transportError('lost:result', `The batch answer is missing a result for "${entry.cmd.action}".`, entry.cmd.action, { id: entry.id })));
+        if (!r) {
+          entry.resolve(_errResult(transportError('lost:result', `The batch answer is missing a result for "${entry.cmd.action}".`, entry.cmd.action, { id: entry.id })));
+          continue;
+        }
+        // A batched result's own 202 (OData JSON batch), its Location against the batch's response.
+        const result = readAnswer(r, entry.cmd, r.headers, navigate, r.status);
+        if (result.ok) http.groups(r.headers);
+        entry.resolve(r.status === 202 ? http.accepted(result, r.headers, res.url, entry.cmd) : result.ok ? result : holding(holds, entry.cmd.action, result));
       }
     } catch (e) {
-      for (const entry of batch) entry.resolve(unanswered(e, entry.cmd.action, effectiveSignal));
+      for (const entry of batch) entry.resolve(holding(holds, entry.cmd.action, unanswered(e, entry.cmd.action, effectiveSignal)));
     } finally {
       combined?.detach();
     }
   }
 
-  return Object.assign((cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
-    if (_isLibraryAction(cmd.action)) return next();
+  return (cmd: Command): Promise<CommandResult> => {
     if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
+    // A held command never joins a window: the others in it are sent.
+    if (holds.size !== 0) {
+      const held = whileHeld(holds, cmd.action);
+      if (held) return Promise.resolve(held);
+    }
 
     const id = `${Date.now()}-${++seq}`;
     // Encoded now, so a command JSON cannot hold fails alone, before it is
     // queued, and never fails the batch it would have joined.
-    const data = _encodeJson(envelopeOf(cmd, id), endpoint, cmd.action);
+    const data = encodeMultiplexed(cmd, id, endpoint);
     if (typeof data !== 'string') return Promise.resolve(_errResult(data));
 
     return new Promise<CommandResult>((resolve) => {
@@ -515,23 +734,16 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       queue.push(entry);
       scheduleFlush();
     });
-  }, TRANSPORT, { actions, actionFilter: options.actionFilter });
+  };
 }
 
 // ---------------------------------------------------------------------------
-// createWsBridge
+// wsTransport
 // ---------------------------------------------------------------------------
 
-export type WsBridgeOptions = {
+export type WsTransportOptions = {
   /** WebSocket server URL */
   url: string;
-  /**
-   * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * An {@link ActionScope}.
-   */
-  actions?: ActionScope;
-  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
-  actionFilter?: ActionFilter;
   /** Automatically reconnect on disconnect. Default: true */
   reconnect?: boolean;
   /** Base reconnect delay in ms. Default: 1000 */
@@ -544,14 +756,18 @@ export type WsBridgeOptions = {
   onDisconnect?: (event: CloseEvent) => void;
   /** Called on WebSocket error */
   onError?: (event: Event) => void;
-  /** Per-message response timeout in ms. Default: 10_000 */
+  /**
+   * Per-message response timeout in ms, from the send. Also the longest a
+   * command waits in the transport's own outbox while the socket is down.
+   * Default: 10_000
+   */
   timeout?: number;
   /**
-   * Maximum number of messages to queue while disconnected.
-   * When exceeded, the oldest queued message is dropped with an error.
-   * Default: 100
+   * The app's client: a frame's own `Cache-Group-Invalidation` (RFC 9875) drops
+   * its reads in those groups and reaches the router (`invalidateGroups`).
+   * Without it nothing acts on the groups. tests/cache-groups.test.ts.
    */
-  maxQueueSize?: number;
+  httpClient?: HttpClient;
 };
 
 type PendingRequest = {
@@ -562,27 +778,35 @@ type PendingRequest = {
 };
 
 /**
- * createWsBridge - WebSocket transport plugin with reconnect and message queuing.
+ * wsTransport - commands over one WebSocket, with reconnect and an outbox.
  *
  * Commands are sent as JSON frames over a persistent WebSocket connection.
- * Pending messages are queued during disconnects and flushed on reconnect.
+ * While the socket is not open, a command is held in the transport's own
+ * outbox (`outbox`, in memory: at most 100, each for at most `timeout`) and
+ * answers an `Accepted` whose `done` settles with the reply once sent. An
+ * app outbox (`createAsyncCommandBus({ outbox })`) that covers the action
+ * holds it instead, durably when it has storage. `disconnect()`, and a close
+ * with no reconnect left, settle the transport's own held callers.
+ * A frame with no `id`, `{ event, data }`, is the server's push: the store
+ * states under `data.stores` written, then the event emitted on the bus that
+ * declares this transport, never dispatched (docs/contract.md 4).
  *
  * @example
- * const bus = createAsyncCommandBus()
- * const ws = createWsBridge({ url: 'wss://api.example.com/vc' })
- * bus.use(ws)
+ * const ws = wsTransport({ url: 'wss://api.example.com/vc' })
+ * const bus = createAsyncCommandBus({ transport: ws })
  * ws.connect()
  */
-export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
+export function wsTransport(options: WsTransportOptions): Transport & {
   connect(): void;
   disconnect(): void;
   isConnected(): boolean;
   /** Reactive connection state - bindable in Vapor/VDOM templates without polling. */
   connected: Signal<boolean>;
+  /** The commands held while the socket is down: `pending`, `rejected`, `flush()`, `clear()`. */
+  outbox: Outbox;
 } {
   const {
     url,
-    actions,
     reconnect = true,
     reconnectDelay: rawReconnectDelay = 1000,
     maxReconnects: rawMaxReconnects = 10,
@@ -590,21 +814,20 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     onDisconnect,
     onError,
     timeout: rawWsTimeout = 10_000,
-    maxQueueSize: rawMaxQueueSize = 100,
+    httpClient,
   } = options;
+  const said = { warned: false };
 
-  // Two refusal gates and a delay, all three defeated by the same bad number.
+  // A refusal gate and a delay, both defeated by the same bad number.
   // `reconnectCount >= maxReconnects` never refuses, so the socket retries
   // forever; `reconnectDelay * reconnectCount` is then NaN, which setTimeout
   // treats as 0, so "forever" is also "as fast as the event loop allows" -
-  // a hot loop against the server it is meant to be backing off from. And
-  // `queue.length >= maxQueueSize` never drops, so the offline queue grows
-  // without bound the whole time. The reply timeout is a delay too: a timer
-  // fires at once on NaN or past MAX_TIMEOUT_MS, which failed every command
-  // after 1 ms (tests/nan-options.test.ts).
+  // a hot loop against the server it is meant to be backing off from. The
+  // reply timeout is a delay too: a timer fires at once on NaN or past
+  // MAX_TIMEOUT_MS, which failed every command after 1 ms
+  // (tests/nan-options.test.ts).
   const maxReconnects = countOption(rawMaxReconnects, 10);
   const reconnectDelay = delayOption(rawReconnectDelay, 1000);
-  const maxQueueSize = countOption(rawMaxQueueSize, 100);
   const wsTimeout = delayOption(rawWsTimeout, 10_000);
 
   let ws: WebSocket | null = null;
@@ -616,71 +839,27 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   const connected = signal(false);
 
   const pending = new Map<string, PendingRequest>();
-  const queue: Array<{ id: string; envelope: CommandEnvelope; data: string; timeout: number; queuedAt: number }> = [];
+  const holds: Holds = new Map();
+  // The bus that declares this transport (Transport.attach): where its pushes go.
+  let bus: BaseBus | null = null;
+  // Its groups (joinGroups): where a frame's groups go without a client.
+  let groups: BusGroups | undefined;
 
   function genId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function send(id: string, envelope: CommandEnvelope, data: string, timeout: number): void {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    } else {
-      if (queue.length >= maxQueueSize) {
-        const dropped = queue.shift()!;
-        // `!` on the pending lookup, not a guard: `settle()` removes an entry
-        // from BOTH `pending` and `queue`, and `failAllPending()` clears both
-        // together - so a queued id always has a pending record. A miss would
-        // mean the invariant broke, and throwing says so instead of silently
-        // dropping a caller's promise (it would hang until its own timeout).
-        const req = pending.get(dropped.id)!;
-        clearTimeout(req.timeoutId);
-        pending.delete(dropped.id);
-        req.resolve(_errResult(transportError('lost:command', `WS queue overflow: "${dropped.envelope.command}" dropped`, dropped.envelope.command, { dropped: dropped.envelope })));
-      }
-      queue.push({ id, envelope, data, timeout, queuedAt: Date.now() });
-    }
-  }
-
-  function flushQueue(): void {
-    const items = queue.splice(0);
-    const now = Date.now();
-    for (let i = 0; i < items.length; i++) {
-      const { id, envelope, data, timeout, queuedAt } = items[i];
-      const elapsed = now - queuedAt;
-      if (elapsed >= timeout) {
-        // Message expired while queued - reject it instead of sending stale
-        // commands. Same invariant as the overflow path above: a queued id
-        // always has a pending record, so this is `!` rather than a guard.
-        const req = pending.get(id)!;
-        clearTimeout(req.timeoutId);
-        pending.delete(id);
-        req.resolve(_errResult(transportError('timeout:reply', `WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`, envelope.command, { elapsed, timeout })));
-        continue;
-      }
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      } else {
-        // Socket closed mid-flush - re-queue the remainder so they either go
-        // out on reconnect or settle via failAllPending/expiry, instead of
-        // silently hanging until each per-request timeout.
-        queue.unshift(...items.slice(i));
-        return;
-      }
-    }
-  }
-
   /**
-   * Settle every in-flight request immediately with a failure result, and drop
-   * any unsent queued messages. Called on terminal teardown - an explicit
-   * `disconnect()`, or a socket close with no reconnect pending - so a caller
-   * awaiting a response doesn't hang until its per-request timeout fires.
+   * Settle every in-flight request immediately with a failure result, and the
+   * callers the transport's own outbox holds. Called on terminal teardown - an
+   * explicit `disconnect()`, or a socket close with no reconnect pending - so a
+   * caller awaiting a response doesn't hang until its per-request timeout fires.
    * Uses `resolve({ ok:false })`, matching every other settle path: the bus
    * never rejects a dispatch promise; failures are `CommandResult` values.
    */
   function failAllPending(reason: string): void {
-    if (pending.size === 0 && queue.length === 0) return;
-    queue.length = 0;
+    void outbox.clear();
+    if (pending.size === 0) return;
     const reqs = Array.from(pending.values());
     pending.clear();
     for (const req of reqs) {
@@ -707,23 +886,33 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       reconnectCount = 0;
       // Here, in onclose and in disconnect(): the bookkeeping is in the
       // `finally`, so a sync subscriber of `connected` that throws cannot skip
-      // it (pinned by tests/ws-bridge-throwing-subscriber.test.ts).
+      // it (pinned by tests/ws-transport-throwing-subscriber.test.ts).
       try {
         connected.value = true;
       } finally {
-        flushQueue();
+        // What waits goes out: the transport's own held commands, and an
+        // app outbox's that cover this transport's actions.
+        outbox[_OUTBOX].opened();
+        if (bus !== null) _opened(bus);
         onConnect?.();
       }
     };
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data as string) as BatchedResult;
+        const data = JSON.parse(event.data as string) as BatchedResult & PushFrame;
+        // A frame with no `id` answers no command: it is the server's push.
+        if (data.id === undefined) {
+          if (bus !== null && typeof data.event === 'string') _pushed(bus, data.event, data.data);
+          return;
+        }
         const req = pending.get(data.id);
         if (req) {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
-          req.resolve(answerOf(data, req.cmd, data.headers));
+          const result = answerOf(data, req.cmd, data.headers, data.status);
+          if (result.ok) groupsTo(httpClient ?? groups?.hub, data.headers, said);
+          req.resolve(result.ok ? result : holding(holds, req.action, result));
         }
       } catch {
         // ignore malformed frames
@@ -732,8 +921,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onclose = (event) => {
       // A socket already replaced (`disconnect()` then `connect()`) closing
-      // late is not the bridge's close: the bridge's state is the new
-      // socket's. tests/ws-bridge-stale-close.test.ts.
+      // late is not the transport's close: the transport's state is the new
+      // socket's. tests/ws-transport-stale-close.test.ts.
       if (ws !== null && ws !== socket) {
         onDisconnect?.(event);
         return;
@@ -781,25 +970,30 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
 
-  const plugin: AsyncPlugin = async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
-    if (_isLibraryAction(cmd.action)) {
-      return next();
-    }
-
+  const sendCommand = async (cmd: Command): Promise<CommandResult> => {
     // Pre-flight abort - don't enqueue if signal is already tripped.
     if (cmd.signal?.aborted) return abortedResult(cmd.action, cmd.signal);
+    if (holds.size !== 0) {
+      const held = whileHeld(holds, cmd.action);
+      if (held) return held;
+    }
 
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
-      const envelope = envelopeOf(cmd, id);
-      // Encoded before anything is armed or queued: an envelope JSON cannot
-      // hold (a BigInt in the payload) fails this dispatch alone, as
-      // transport:invalid:json. Encoded at flush time, its throw left the
-      // commands queued behind it unsent and skipped onConnect
-      // (tests/ws-bridge-unencodable-queued.test.ts, tests/invalid-json.test.ts).
-      const data = _encodeJson(envelope, url, cmd.action);
+      // Encoded before anything is armed: an envelope JSON cannot hold (a
+      // BigInt in the payload) fails this dispatch alone, as
+      // transport:invalid:json (tests/ws-transport-unencodable-queued.test.ts,
+      // tests/invalid-json.test.ts).
+      const data = encodeMultiplexed(cmd, id, url);
       if (typeof data !== 'string') {
         resolve(_errResult(data));
+        return;
+      }
+      // Not open: refused unsent, before anything is armed. Only a replay or
+      // a send racing a close reaches here; the outbox holds the rest.
+      const socket = ws;
+      if (socket === null || socket.readyState !== WebSocket.OPEN) {
+        resolve(_errResult(transportError('limited:socket', `The socket is not open: "${cmd.action}" was not sent.`, cmd.action)));
         return;
       }
       let abortHandler: (() => void) | null = null;
@@ -811,16 +1005,6 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       const settle = (result: CommandResult): void => {
         clearTimeout(timeoutId);
         pending.delete(id);
-        // Drop any queued copy too. The per-request timer is armed BEFORE
-        // send(), so a request can settle (timeout, abort, disconnect) while
-        // still sitting in `queue` waiting for a socket. Leaving it there meant
-        // a dead entry occupied a maxQueueSize slot and had to be recognised
-        // again later - once by the overflow path's `pending.get(...)` miss,
-        // once by flushQueue's elapsed check. Two mechanisms responsible for
-        // one fact. Removing it here makes settle() the single source of truth
-        // for "this request is over", so maxQueueSize counts LIVE requests only.
-        const queuedIndex = queue.findIndex((q) => q.id === id);
-        if (queuedIndex !== -1) queue.splice(queuedIndex, 1);
         if (abortHandler && cmd.signal) {
           cmd.signal.removeEventListener('abort', abortHandler);
         }
@@ -846,11 +1030,31 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         cmd.signal.addEventListener('abort', abortHandler);
       }
 
-      send(id, envelope, data, wsTimeout);
+      socket.send(data);
     });
   };
 
-  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT, { actions, actionFilter: options.actionFilter });
+  // The transport's own outbox, in this tab's memory: it holds a send while the socket is not open,
+  // with the released bound (100) and expiry (the reply timeout). Its replays
+  // go to `sendCommand` itself, at the work step of the bus that declares it.
+  const outbox = createOutbox({ storage: null, maxSize: 100, ttl: wsTimeout, isOnline: isConnected });
+  const own = outbox[_OUTBOX].adapt('*', { id: ID, localFallback: false, send: sendCommand });
+
+  // Disposing the bus closes the socket, as disconnect() does, and forgets the
+  // server's limits. A disconnect() alone keeps them: the server is the same.
+  const dispose = (): void => {
+    holds.clear();
+    disconnect();
+    outbox.dispose();
+  };
+  const attach = (b: BaseBus): void => {
+    bus = b;
+    groups = joinGroups(b, httpClient);
+    // Off an async bus (the test bus) a replay is this transport's own send.
+    const direct: SendAt = (_unwrap, action, target, payload, key) => sendCommand(_replayOf(action, target, payload, key));
+    if (!_outboxOn(b, outbox[_OUTBOX])) outbox[_OUTBOX].attach(direct);
+  };
+  return { id: ID, localFallback: false, send: own.send, dispose, attach, connect, disconnect, isConnected, connected, outbox };
 }
 
 // ---------------------------------------------------------------------------
@@ -861,8 +1065,9 @@ export type SseBridgeOptions = {
   /** SSE endpoint URL */
   url: string;
   /**
-   * Called for each server-sent event. Use this to dispatch incoming
-   * server events back into the command bus.
+   * Called for each server-sent event, in place of the push. It may
+   * dispatch a command, which then runs every plugin and the action's
+   * transport.
    *
    * @example
    * createSseBridge({
@@ -873,7 +1078,13 @@ export type SseBridgeOptions = {
    *   }
    * })
    */
-  onEvent: (event: MessageEvent, bus: BaseBus) => void;
+  onEvent?: (event: MessageEvent, bus: BaseBus) => void;
+  /**
+   * The event types read, each the `event:` line a server writes. Default:
+   * an event with none (`message`). Laravel's `eventStream()` names every
+   * event, `update` unless a `StreamedEvent` names it.
+   */
+  events?: string[];
   /** Send credentials with the SSE request. Default: false */
   withCredentials?: boolean;
   /** Reconnect automatically (EventSource does this natively). Default: true */
@@ -883,17 +1094,15 @@ export type SseBridgeOptions = {
 /**
  * createSseBridge - server-sent events bridge for unidirectional server push.
  *
- * SSE is receive-only: the server pushes events to the client.
- * Use `onEvent` to map incoming server events to bus dispatches.
+ * SSE is receive-only: the server pushes events to the client. Without
+ * `onEvent`, each event is a push: its `data` read as JSON, each store state
+ * under `stores` written by that store, then the event emitted on the bus by
+ * its type, never dispatched (docs/contract.md 4). Data that is not JSON,
+ * such as the `</stream>` that ends Laravel's event stream, is ignored.
  *
  * @example
- * const sse = createSseBridge({
- *   url: '/api/vc/stream',
- *   onEvent: (event, bus) => {
- *     const { command, target } = JSON.parse(event.data)
- *     bus.dispatch(command, target)
- *   }
- * })
+ * const sse = createSseBridge({ url: '/api/vc/stream', events: ['update'] })
+ * // event: update, data: {"stores":{"cart":{...}}} -> the cart store's state
  * sse.install(bus)
  *
  * // Later, on component unmount:
@@ -904,7 +1113,7 @@ export function createSseBridge(options: SseBridgeOptions): {
   dispose(): void;
   isConnected(): boolean;
 } {
-  const { url, onEvent, withCredentials = false, reconnect = true } = options;
+  const { url, onEvent, events, withCredentials = false, reconnect = true } = options;
 
   let source: EventSource | null = null;
 
@@ -915,13 +1124,21 @@ export function createSseBridge(options: SseBridgeOptions): {
     dispose();
     source = new EventSource(url, { withCredentials });
 
-    source.onmessage = (event) => {
+    const read = (event: MessageEvent): void => {
+      if (onEvent === undefined) {
+        let data: unknown;
+        try { data = JSON.parse(event.data as string); } catch { return; }
+        _pushed(bus, event.type, data);
+        return;
+      }
       try {
         onEvent(event, bus);
       } catch (e) {
-        console.error('[vapor-chamber] SSE onEvent error:', e);
+        _report('error', 'transport:failed:onEvent', `the SSE bridge's onEvent threw on "${event.type}"`, e, { event: event.type });
       }
     };
+    if (events === undefined) source.onmessage = read;
+    else for (const type of events) source.addEventListener(type, read);
 
     source.onerror = () => {
       // EventSource reconnects on its own, so `reconnect: true` needs no code.
@@ -971,9 +1188,10 @@ export type EchoBridgeOptions = {
   /** Channels + events to subscribe on install. */
   channels: EchoSubscription[];
   /**
-   * Map an incoming broadcast to the bus. Default: `bus.emit(event, payload)` so
-   * `on(event)` listeners fire. Provide this to dispatch a command instead, or
-   * to rename/drop events.
+   * Map an incoming broadcast to the bus. Default: a push, each store state
+   * under the payload's `stores` written by that store, then
+   * `bus.emit(event, payload)` so `on(event)` listeners fire. Provide this to
+   * dispatch a command instead, or to rename/drop events.
    */
   onBroadcast?: (info: { channel: string; event: string; payload: any }, bus: BaseBus) => void;
   /**
@@ -986,8 +1204,9 @@ export type EchoBridgeOptions = {
 /**
  * createEchoBridge - wire Laravel Echo / Reverb realtime channels to the bus.
  *
- * Protocol-aware over the generic WS bridge: subscribes public / private /
- * presence channels and routes each broadcast to `bus.emit()` (or a command via
+ * Protocol-aware over the generic WS transport: subscribes public / private /
+ * presence channels and routes each broadcast to `bus.emit()`, after writing
+ * the store states its payload declares under `stores` (or a command via
  * `onBroadcast`). Presence membership (`here` / `joining` / `leaving`) is emitted
  * too. Receive-only by design - outbound commands still go through the HTTP
  * bridge. Pass your own Echo instance; the bridge never imports laravel-echo, so
@@ -1026,9 +1245,9 @@ export function createEchoBridge(options: EchoBridgeOptions): {
         ch.listen(event, (payload: any) => {
           try {
             if (onBroadcast) onBroadcast({ channel: sub.name, event, payload }, bus);
-            else bus.emit(event, payload);
+            else _pushed(bus, event, payload);
           } catch (e) {
-            console.error('[vapor-chamber] Echo broadcast error:', e);
+            _report('error', 'transport:failed:onBroadcast', `the Echo bridge's broadcast handler threw on "${event}"`, e, { channel: sub.name, event });
           }
         });
       }

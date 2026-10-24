@@ -1,0 +1,191 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "accepted-1",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractAccepted",
+            "target": {},
+            "payload": {
+              "location": "/api/vc/contract/jobs/running",
+              "retryAfter": 2
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Location": [
+            "/api/vc/contract/jobs/running"
+          ],
+          "Retry-After": [
+            "2"
+          ]
+        },
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "accepted-2",
+      "request": {
+        "method": "GET",
+        "path": "/api/vc/contract/jobs/running"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Retry-After": [
+            "2"
+          ]
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "accepted-3",
+      "request": {
+        "method": "GET",
+        "path": "/api/vc/contract/jobs/done"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "state": {
+              "n": 1
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "accepted-4",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractAccepted",
+            "target": {},
+            "payload": {
+              "location": "/api/vc/contract/jobs/done",
+              "retryAfter": 2
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Location": [
+            "/api/vc/contract/jobs/done"
+          ],
+          "Retry-After": [
+            "2"
+          ]
+        },
+        "body": {
+          "content": {},
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "accepted-5",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc/batch",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "commands": [
+              {
+                "id": "1",
+                "command": "vcContractAccepted",
+                "target": {},
+                "payload": {
+                  "location": "/api/vc/contract/jobs/done",
+                  "retryAfter": 2
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "results": [
+              {
+                "id": "1",
+                "status": 202,
+                "headers": {
+                  "Location": "/api/vc/contract/jobs/done",
+                  "Retry-After": "2"
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

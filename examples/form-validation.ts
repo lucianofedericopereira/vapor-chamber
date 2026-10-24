@@ -1,111 +1,46 @@
 /**
  * Form Validation Example
  *
- * Demonstrates: validator plugin, error handling. The form is the command's
- * PAYLOAD (its input); a rule's failure is `validator:invalid:payload`.
+ * Shows a login and a register form refused with a message before the handler
+ * runs. The form is the command's PAYLOAD (its input). A `validator` rule is
+ * the first message that fails, and a refusal answers
+ * `result.error.code === 'validator:invalid:payload'`.
  */
 
-import { createCommandBus, validator, logger } from 'vapor-chamber';
+import { createCommandBus, logger, validator, type Command } from 'vapor-chamber';
 
-// Types
-interface LoginForm {
-  email: string;
-  password: string;
-}
+interface LoginForm { email: string; password: string }
+interface RegisterForm extends LoginForm { confirmPassword: string; username: string }
 
-interface RegisterForm extends LoginForm {
-  confirmPassword: string;
-  username: string;
-}
+// One check per field, each a message or null; a form's rule is the first message.
+const email = (value?: string) => (value?.includes('@') ? null : 'Invalid email address');
+const password = (value?: string) => (value && value.length >= 8 ? null : 'Password must be at least 8 characters');
+const username = (value?: string) => (value && value.length >= 3 ? null : 'Username must be at least 3 characters');
+const first = (...messages: (string | null)[]) => messages.find((message) => message !== null) ?? null;
+// A rule reads the payload as the form it validates.
+const onForm = <F>(rule: (form: F) => string | null) => (cmd: Command) => rule(cmd.payload as F);
 
-// Create bus
 const bus = createCommandBus();
 
 bus.use(logger());
-
 bus.use(validator({
-  'formLogin': (cmd) => {
-    const { email, password } = cmd.payload as LoginForm;
-
-    if (!email?.includes('@')) {
-      return 'Invalid email address';
-    }
-    if (!password || password.length < 8) {
-      return 'Password must be at least 8 characters';
-    }
-    return null;
-  },
-
-  'formRegister': (cmd) => {
-    const { email, password, confirmPassword, username } = cmd.payload as RegisterForm;
-
-    if (!username || username.length < 3) {
-      return 'Username must be at least 3 characters';
-    }
-    if (!email?.includes('@')) {
-      return 'Invalid email address';
-    }
-    if (!password || password.length < 8) {
-      return 'Password must be at least 8 characters';
-    }
-    if (password !== confirmPassword) {
-      return 'Passwords do not match';
-    }
-    return null;
-  }
+  formLogin: onForm((f: LoginForm) => first(email(f.email), password(f.password))),
+  formRegister: onForm((f: RegisterForm) =>
+    first(username(f.username), email(f.email), password(f.password), f.password === f.confirmPassword ? null : 'Passwords do not match')),
 }));
 
-// Handlers
-bus.register('formLogin', (cmd) => {
-  const { email } = cmd.payload as LoginForm;
-  // In real app: call API
-  return { success: true, user: { email } };
-});
+bus.register('formLogin', ({ payload }) => ({ success: true, user: { email: payload.email } }));
+bus.register('formRegister', ({ payload }) => ({ success: true, user: { email: payload.email, username: payload.username } }));
 
-bus.register('formRegister', (cmd) => {
-  const { email, username } = cmd.payload as RegisterForm;
-  // In real app: call API
-  return { success: true, user: { email, username } };
-});
+const attempts: [title: string, action: string, form: LoginForm | RegisterForm][] = [
+  ['Valid login', 'formLogin', { email: 'user@example.com', password: 'securepassword123' }],
+  ['Invalid login (bad email)', 'formLogin', { email: 'not-an-email', password: 'securepassword123' }],
+  ['Invalid login (short password)', 'formLogin', { email: 'user@example.com', password: '123' }],
+  ['Valid registration', 'formRegister', { username: 'johndoe', email: 'john@example.com', password: 'securepassword123', confirmPassword: 'securepassword123' }],
+  ['Invalid registration (password mismatch)', 'formRegister', { username: 'johndoe', email: 'john@example.com', password: 'securepassword123', confirmPassword: 'differentpassword' }],
+];
 
-// Usage
-console.log('--- Valid login ---');
-const loginResult = bus.dispatch('formLogin', {}, {
-  email: 'user@example.com',
-  password: 'securepassword123'
+attempts.forEach(([title, action, form], i) => {
+  console.log(`${i ? '\n' : ''}--- ${title} ---`);
+  console.log('Result:', bus.dispatch(action, {}, form));
 });
-console.log('Result:', loginResult);
-
-console.log('\n--- Invalid login (bad email) ---');
-const badEmailResult = bus.dispatch('formLogin', {}, {
-  email: 'not-an-email',
-  password: 'securepassword123'
-});
-console.log('Result:', badEmailResult);
-
-console.log('\n--- Invalid login (short password) ---');
-const shortPwResult = bus.dispatch('formLogin', {}, {
-  email: 'user@example.com',
-  password: '123'
-});
-console.log('Result:', shortPwResult);
-
-console.log('\n--- Valid registration ---');
-const registerResult = bus.dispatch('formRegister', {}, {
-  username: 'johndoe',
-  email: 'john@example.com',
-  password: 'securepassword123',
-  confirmPassword: 'securepassword123'
-});
-console.log('Result:', registerResult);
-
-console.log('\n--- Invalid registration (password mismatch) ---');
-const mismatchResult = bus.dispatch('formRegister', {}, {
-  username: 'johndoe',
-  email: 'john@example.com',
-  password: 'securepassword123',
-  confirmPassword: 'differentpassword'
-});
-console.log('Result:', mismatchResult);
-
-export { bus };

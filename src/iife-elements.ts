@@ -7,209 +7,62 @@
  * build pipeline.
  *
  * Surface:
- *   - Everything in CORE (bus + HTTP + light plugins + connect/createApp)
+ *   - Everything in CORE (bus + HTTP + light plugins + pace + bindCommands + bindDisplay + connect/createApp)
  *   - defineVaporCustomElement - the headline API
  *   - defineWidget() - one-line custom-element registration helper
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
  *   - WebSocket / SSE - most widgets poll or use server-side push to HTTP
- *   - persist / createChannel / history / optimistic - stateful; widgets
- *     usually keep state in their own custom-element instance
+ *   - createChannel / history, the store's persist and tab sync
  *   - Vapor sync/async composables - these target SFC-based apps, not
  *     custom-element widgets
  *
  * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
  */
 
-import {
-  createCommandBus,
-  createAsyncCommandBus,
-  type CommandBusOptions,
-  type AsyncCommandBusOptions,
-} from './command-bus';
+import { createCommandBus, createAsyncCommandBus } from './command-bus';
 import {
   logger,
   validator,
-  debounce,
-  throttle,
   authGuard,
 } from './plugins';
-import { createHttpBridge, type HttpBridgeOptions } from './transports';
+import { httpTransport } from './transports';
+import { pace } from './pace';
+import { bindCommands } from './command-binding';
+import { bindDisplay } from './page-bindings';
+import { defineChamberStore } from './store/core';
+import { commandState } from './command-state';
+import { Accepted } from './accepted';
+import { createApp, connect } from './iife-app';
+import { createBuffer } from './buffer';
 import { defineVaporCustomElement } from './chamber-vapor';
+import { defineWidget, emitDOMEvent } from './widget';
 import { configureVue } from './chamber';
-import type { AsyncPlugin } from './command-bus';
-
-export type CreateAppOptions = {
-  transport?: AsyncPlugin;
-  plugins?: AsyncPlugin[];
-  onMissing?: CommandBusOptions['onMissing'];
-  /** The bus's retry, on by default. `{ actionPolicies: { cartAdd: 'idempotent' } }` declares a policy, `false` turns it off. */
-  retry?: AsyncCommandBusOptions['retry'];
-};
-
-function createApp(options: CreateAppOptions = {}) {
-  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error', retry: options.retry });
-  if (options.plugins) for (const p of options.plugins) bus.use(p);
-  if (options.transport) bus.use(options.transport);
-  return { bus, dispatch: bus.dispatch };
-}
-
-function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'>) {
-  const { plugins, onMissing, retry, ...httpOptions } = options;
-  return createApp({ transport: createHttpBridge({ csrf: true, ...httpOptions }), plugins, onMissing, retry });
-}
-
-/**
- * defineWidget - one-line custom-element registration for embeddable widgets.
- *
- * Wraps `defineVaporCustomElement(options)` + `customElements.define(tag, ...)`.
- * No-ops gracefully if Vue 3.6+ Vapor is not detected on the page (returns
- * `false`); inspect the return value to fall back to a non-Vapor renderer.
- *
- * ## Naming convention - use the `vc-` prefix
- *
- * Recommended: prefix every vapor-chamber widget tag with `vc-`.
- *
- *   `<vc-title/>`, `<vc-cart/>`, `<vc-search/>`, `<vc-counter/>`
- *
- * Reasons it's the right convention here:
- *
- *   - Reads cleanly in server-rendered HTML next to Blade / Twig / ERB
- *     components - a Laravel dev sees `<vc-cart/>` in a `.blade.php` file
- *     and immediately recognizes it as a vapor-chamber widget, not a
- *     framework directive.
- *   - Avoids collisions with host-page elements when the widget is
- *     embedded into a third-party site.
- *   - Searchable: `grep -r "<vc-"` finds every widget instance in one shot.
- *   - Short - two characters of overhead.
- *
- * The HTML spec requires custom-element names contain a hyphen;
- * `customElements.define()` enforces that. `vc-` satisfies it.
- *
- * If your project already has a brand prefix (`<acme-cart/>`,
- * `<myapp-checkout/>`), keep yours - the brand convention wins. The
- * `vc-` recommendation is for projects without an existing convention.
- *
- * ## What `setup()` returns
- *
- * A Vapor component returns a BLOCK - real DOM nodes - not a vnode. On a page
- * with no build step there is no compiler to turn a template into one, so build
- * the nodes directly: `h()` is not on the `VaporChamber` global in any variant,
- * and it produces a vnode, the vDOM shape Vapor replaced. Pinned by
- * `tests/vapor/widget-shape.test.ts`, which mounts a real widget.
- *
- * ## A function set on a property
- *
- * `el.onSave = fn` hands `setup(props)` the function itself, from Vue
- * 3.6.0-rc.10. rc.9 called it as a prop getter and delivered what it returned.
- * Pinned by the same file.
- *
- * @example
- * <script src=".../vapor-chamber-elements.iife.min.js"></script>
- * <script type="module">
- *   // REQUIRED, and the whole example is inert without it. Vue ships Vapor as
- *   // esm-browser only, so a classic `<script src>` page cannot obtain it and
- *   // the runtime probe's bare `import('vue')` cannot resolve in a browser.
- *   // Without this, `defineVaporCustomElement` is absent, `defineWidget`
- *   // returns FALSE, and you get an unregistered element with nothing thrown.
- *   const Vue = await import('https://.../vue.runtime-with-vapor.esm-browser.prod.js');
- *   VaporChamber.configureVue(Vue);
- *
- *   VaporChamber.defineWidget('vc-cart', {
- *     props: { sku: String },
- *     setup(props) {
- *       const span = document.createElement('span');
- *       span.textContent = `SKU ${props.sku}`;
- *       return span;
- *     }
- *   });
- * </script>
- * <vc-cart sku="ABC-123"></vc-cart>
- */
-function defineWidget(tagName: string, options: any, extraOptions?: any): boolean {
-  const El = extraOptions !== undefined
-    ? defineVaporCustomElement(options, extraOptions)
-    : defineVaporCustomElement(options);
-  if (!El) return false;
-  if (typeof customElements === 'undefined') return false;
-  if (customElements.get(tagName)) return true;
-  customElements.define(tagName, El);
-  return true;
-}
-
-/**
- * Emit a real DOM `CustomEvent` from inside a widget so host pages can
- * subscribe with `addEventListener`.
- *
- * A custom element's own `emit(...)` reaches its host as a `CustomEvent`
- * that neither bubbles nor crosses a shadow root (rc.11, VueElementBase), so
- * a listener on the host hears it while `document`, `window` and the
- * containers around it do not. An `emit` from a component nested inside the
- * widget stays in Vue's event system. For widgets that need to reach the
- * surrounding page (a `<vc-cart>` notifying its container that a product was
- * added), use this to dispatch a bubbling, composed `CustomEvent`.
- *
- * Pattern adapted from
- * [vue-custom-element](https://github.com/karol-f/vue-custom-element)'s
- * `customEmit` helper (Karol-F, MIT), which predates Vue 3.6's Vapor.
- *
- * @example Widget side
- * VaporChamber.defineWidget('vc-cart', {
- *   setup() {
- *     const button = document.createElement('button');
- *     button.textContent = 'Add';
- *     button.addEventListener('click', (e) => {
- *       const host = e.target.getRootNode().host;   // escape the shadow root
- *       VaporChamber.emitDOMEvent(host, 'cart-added', { sku: 'X' });
- *     });
- *     return button;   // a BLOCK - see defineWidget above
- *   }
- * });
- *
- * @example Host page
- * document.querySelector('vc-cart').addEventListener('cart-added', (e) => {
- *   console.log(e.detail.sku);   // 'X'
- * });
- *
- * @param el - the custom element instance (host element)
- * @param eventName - DOM event name (kebab-case is conventional for custom events)
- * @param detail - payload attached to event.detail
- * @param options - bubbles/composed/cancelable. Defaults: bubbles=true, composed=true
- *                  (composed=true escapes shadow-DOM boundaries by default - required
- *                  for events to reach light-DOM listeners on the host page).
- * @returns `false` if `event.preventDefault()` was called by a listener, `true` otherwise.
- */
-function emitDOMEvent(
-  el: Element,
-  eventName: string,
-  detail?: any,
-  options: { bubbles?: boolean; composed?: boolean; cancelable?: boolean } = {},
-): boolean {
-  if (typeof CustomEvent !== 'function' || !el) return true;
-  const event = new CustomEvent(eventName, {
-    detail,
-    bubbles: options.bubbles ?? true,
-    composed: options.composed ?? true,
-    cancelable: options.cancelable ?? false,
-  });
-  return el.dispatchEvent(event);
-}
 
 const VaporChamber = {
   // Bus
   createCommandBus,
   createAsyncCommandBus,
+  createBuffer,
   // Convenience
   createApp,
   connect,
   // Transport (HTTP only)
-  http: createHttpBridge,
+  httpTransport,
   // Plugins (lightweight)
   logger,
   validator,
-  debounce,
-  throttle,
   authGuard,
+  // Pacing at the sender
+  pace,
+  // The command binding on plain HTML: [data-vc-command]
+  bindCommands,
+  bindDisplay,
+  // What its display bindings read: a store (core, no Vue) and the command state
+  defineChamberStore,
+  commandState,
+  // A reply whose work goes on: `r.value instanceof Accepted`
+  Accepted,
   // Widget surface (the variant's identity)
   defineVaporCustomElement,
   defineWidget,

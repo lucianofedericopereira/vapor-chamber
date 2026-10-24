@@ -73,7 +73,7 @@ class AlienSignalWrapper<T> {
  * configureSignal(alienSignalAdapter(alienSignal));
  */
 export function alienSignalAdapter(alienSignal: AlienSignalFn): CreateSignal {
-  return <T>(initial: T): Signal<T> => new AlienSignalWrapper<T>(alienSignal<T>(initial));
+  return <T>(initial: T): Signal<T> => new AlienSignalWrapper<T>(alienSignal<T>(initial)) as unknown as Signal<T>;
 }
 
 /**

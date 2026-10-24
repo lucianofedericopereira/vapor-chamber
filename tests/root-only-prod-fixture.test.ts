@@ -19,7 +19,7 @@
  * straight into it: the README Vapor samples imported `useCommand` from the root.
  *
  * WHAT IT PINS:
- *   1. The degradation itself, so it is evidence rather than prose: `loading`
+ *   1. The degradation itself, so it is evidence rather than prose: `pending()`
  *      is not a Vue ref, and a listener from `on()` outlives `app.unmount()`.
  *   2. The fix: a warning, NOT dev-gated (production is the only place this
  *      state exists), fired exactly once, naming the remedy.
@@ -93,7 +93,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
         vueFlagInSetup = g.__VUE__;
         api = chamber.useCommand();
         api.on('ping', (cmd: any) => { seen.push(cmd.action); });
-        second = chamber.useCommandState(0, { ping: (s: number) => s + 1 });
+        second = chamber.useCommandHistory();
         return v.template('<div>root</div>', true)();
       },
     });
@@ -111,8 +111,8 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
     expect(vueFlagInSetup).toBe(true);
 
     // 1. The degradation, measured against the same dist the app runs on.
-    expect(v.isRef(api.loading)).toBe(false);
-    expect(v.isRef(second.state)).toBe(false);
+    expect(v.isRef(api.pending('probe'))).toBe(false);
+    expect(v.isRef(second.past)).toBe(false);
     bus.register('noop', () => 'ok');
     app.unmount();
     host.remove();
@@ -130,7 +130,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
   it('CONTROL: the namespace handed over - real ref, cleanup on unmount, no warning', async () => {
     const { v, bus, api, seen, warn, app, host } = await mountRootOnly(true);
 
-    expect(v.isRef(api.loading)).toBe(true);
+    expect(v.isRef(api.pending('probe'))).toBe(true);
     app.unmount();
     host.remove();
     bus.dispatch('ping', null);
@@ -214,8 +214,9 @@ describe('probe-path hint on a server (no window)', () => {
     await chamber.waitForVueDetection();
     const { isRef } = await import('vue');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { loading, dispose } = chamber.useCommand();
-    dispose();
+    const c = chamber.useCommand();
+    const loading = c.pending('probe');
+    c.dispose();
     const hints = warn.mock.calls.map((c) => String(c[0])).filter((m) => HINT.test(m));
     return { hints, loadingIsRef: isRef(loading) };
   }

@@ -93,3 +93,45 @@ describe('a store module hot update', () => {
     bus.dispose();
   });
 });
+
+// The mark vaporChamberHMR's shim sets from `vite:beforeUpdate` to `vite:afterUpdate`.
+const HOT = '__VAPOR_CHAMBER_HOT__';
+
+describe('a hot update carries the state (the plugin marks it)', () => {
+  it('a component holding the store: the reloaded setup keeps the state', async () => {
+    const hmr = (globalThis as { __VUE_HMR_RUNTIME__?: Hmr }).__VUE_HMR_RUNTIME__!;
+    expect(hmr).toBeTruthy();
+    const bus = createCommandBus();
+    let held: ReturnType<ReturnType<typeof edit>> | undefined;
+    const useV1 = edit(1);
+    const id = 'fixture-store-hmr-carry';
+    const C1 = defineVaporComponent({
+      __hmrId: id,
+      setup() { held = useV1(bus); return (template('<i>v1</i>', 1) as () => Element)(); },
+    } as never);
+    hmr.createRecord(id, C1);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createVaporApp(C1 as never);
+    app.mount(host);
+    held!.add(1);
+
+    (globalThis as Record<string, unknown>)[HOT] = new WeakMap();
+    const useV2 = edit(10);
+    const C2 = defineVaporComponent({
+      __hmrId: id,
+      setup() { held = useV2(bus); return (template('<i>v2</i>', 1) as () => Element)(); },
+    } as never);
+    hmr.reload(id, C2);
+    await nextTick();
+    delete (globalThis as Record<string, unknown>)[HOT];
+
+    expect(host.textContent).toBe('v2');
+    expect(held!.state.value.items).toEqual([1]);
+    held!.add(3);
+    expect(held!.state.value.items).toEqual([1, 30]);
+    app.unmount();
+    host.remove();
+    bus.dispose();
+  });
+});

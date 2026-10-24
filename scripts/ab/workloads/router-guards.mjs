@@ -22,7 +22,7 @@ const make = async (hooked) => {
   if (hooked) {
     let seen = 0;
     router.beforeEach((to) => { seen += to.path.length; });
-    router.beforeEach((to, from) => (to.path === from.path ? false : true));
+    router.beforeEach((to, from) => to.path !== from.path);
     router.afterEach((to) => { seen ^= to.path.length; });
     router.afterEach(() => { seen++; });
   }

@@ -70,7 +70,17 @@ import {
   defineVaporAsyncComponent as vueDefineVaporAsyncComponent,
   defineVaporComponent as vueDefineVaporComponent,
 } from 'vue';
+import type { App, Directive, ShallowRef, VaporComponent, VaporDirective } from 'vue';
 import { configureVue } from './chamber';
+import { createVaporChamberApp as vaporApp } from './chamber-vapor';
+
+// Types only: the backing wired at import (`./vue`, `shallowRef`) makes every
+// signal a ShallowRef at run time, so it is typed as one, and a template
+// unwraps a signal, `pending()` or `anyPending` with no cast.
+// tests/vapor-signal-types.test-d.ts.
+declare module './signal' {
+  interface Signal<T> extends ShallowRef<T> {}
+}
 
 /**
  * `true` in a Vite build wired by `vaporChamberWire({ entry: 'vapor' })`
@@ -144,13 +154,38 @@ configureVue({
 // `untracked`.
 export * from './vue';
 
+/**
+ * A Vapor app: Vue's `App` whose `directive()` also takes a Vapor directive,
+ * `(el, value, argument, modifiers) => cleanup`. Vue's own `App.directive`
+ * takes the vDOM shape only (rc.12), so `createVaporApp(App).directive(
+ * 'vc-command', vcCommandVapor)` fails the type check. A Vapor app runs a
+ * function directive and skips an object one. Extending the interface keeps
+ * `this` the Vapor app after `use()`. tests/vapor-app-types.test.ts.
+ */
+export interface VaporChamberApp extends App<ParentNode> {
+  directive(name: string, directive: VaporDirective): this;
+  directive<HostElement = any, Value = any, Modifiers extends string = string, Arg = any>(name: string): Directive<HostElement, Value, Modifiers, Arg> | undefined;
+  directive<HostElement = any, Value = any, Modifiers extends string = string, Arg = any>(name: string, directive: Directive<HostElement, Value, Modifiers, Arg>): this;
+}
+
+/**
+ * createVaporChamberApp - Vue's `createVaporApp`, typed as a
+ * {@link VaporChamberApp}, so the Vapor directives register app-wide:
+ *
+ * @example
+ * import { createVaporChamberApp } from 'vapor-chamber/vapor';
+ * import { vcCommandVapor } from 'vapor-chamber/directives';
+ * createVaporChamberApp(App).directive('vc-command', vcCommandVapor).mount('#app');
+ */
+export const createVaporChamberApp = vaporApp as (rootComponent: VaporComponent, rootProps?: Record<string, unknown>) => VaporChamberApp;
+
 // The Vapor surface. These are this library's wrappers - the same functions the
 // root exports, not copies, so a mixed codebase cannot end up with two
 // registries. Their `null`-returning path is unreachable for anyone importing
 // through this module, since the registry is seeded above before any of them
-// can be called.
+// can be called. `createVaporChamberApp` above is the one the root does not
+// export: only here can it carry Vue's types.
 export {
-  createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
   defineVaporCustomElement,

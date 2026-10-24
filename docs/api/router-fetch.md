@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/router-fetch';
 
 ### fetchLoaders
 
-**Function** - [src/router-fetch/index.ts:57](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L57)
+**Function** - [src/router-fetch/index.ts:60](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L60)
 
 ```ts
 fetchLoaders(options?: FetchLoadersOptions) => LoaderHandlers
@@ -27,13 +27,17 @@ fetchLoaders(options?: FetchLoadersOptions) => LoaderHandlers
 
 ### FetchLoadersOptions
 
-**Type alias** - [src/router-fetch/index.ts:22](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L22)
+**Type alias** - [src/router-fetch/index.ts:21](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L21)
 
 ```ts
 export type FetchLoadersOptions = {
   /** Extra headers on every loader request. */
   headers?: Record<string, string>;
-  /** vapor-chamber http client override (tests, a pre-configured instance). Default: fresh client. */
+  /**
+   * The client loader reads go through. Default: the router's (its `http`
+   * option), so they share the app's one client, else a fresh client when the
+   * router has none.
+   */
   http?: HttpClient;
   /**
    * Cache loader reads through the http client's LRU. Default: **false** -
@@ -58,7 +62,7 @@ export type FetchLoadersOptions = {
 
 ### LoaderCache
 
-**Type alias** - [src/router-fetch/index.ts:20](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L20)
+**Type alias** - [src/router-fetch/index.ts:19](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L19)
 
 ```ts
 export type LoaderCache = { ttl?: number; staleTtl?: number; serveStaleOnError?: boolean };

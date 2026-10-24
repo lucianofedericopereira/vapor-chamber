@@ -19,10 +19,10 @@ import { ... } from 'vapor-chamber/standard-schema';
 
 ### validateSchemas
 
-**Function** - [src/plugins-schema.ts:142](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L142)
+**Function** - [src/plugins-schema.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L143)
 
 ```ts
-validateSchemas(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => Plugin
+validateSchemas(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => PluginParts
 ```
 
 Sync schema validator plugin. Use with `createCommandBus()`.
@@ -32,10 +32,10 @@ use {@link validateSchemasAsync} on `createAsyncCommandBus()` instead.
 
 ### validateSchemasAsync
 
-**Function** - [src/plugins-schema.ts:183](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L183)
+**Function** - [src/plugins-schema.ts:173](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L173)
 
 ```ts
-validateSchemasAsync(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => AsyncPlugin
+validateSchemasAsync(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => PluginParts
 ```
 
 Async variant - supports schemas whose `validate` returns a Promise.
@@ -45,7 +45,7 @@ Use with `createAsyncCommandBus()`.
 
 ### StandardSchemaV1
 
-**Interface** - [src/plugins-schema.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L48)
+**Interface** - [src/plugins-schema.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L49)
 
 ```ts
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
@@ -64,7 +64,7 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
 
 ### StandardSchemaV1Issue
 
-**Interface** - [src/plugins-schema.ts:65](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L65)
+**Interface** - [src/plugins-schema.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L66)
 
 ```ts
 export interface StandardSchemaV1Issue {
@@ -77,7 +77,7 @@ export interface StandardSchemaV1Issue {
 
 ### SchemaValidatorOptions
 
-**Type alias** - [src/plugins-schema.ts:74](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L74)
+**Type alias** - [src/plugins-schema.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L75)
 
 ```ts
 export type SchemaValidatorOptions = {
@@ -106,7 +106,7 @@ export type SchemaValidatorOptions = {
 
 ### StandardSchemaV1Result
 
-**Type alias** - [src/plugins-schema.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L61)
+**Type alias** - [src/plugins-schema.ts:62](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L62)
 
 ```ts
 export type StandardSchemaV1Result<Output> =

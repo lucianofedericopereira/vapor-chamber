@@ -1,34 +1,31 @@
 # Vapor island cart example
 
 A runnable demo of **light-DOM Vapor custom-element islands** coordinating through one
-vapor-chamber command bus. The hand-rolled `client:load` / `client:visible` / `client:idle`
-hydration mirrors Astro's client directives - for real Astro pages, see the
+vapor-chamber command bus. The `client:load` / `client:visible` / `client:idle` hydration,
+`defineWidget`'s `when`, mirrors Astro's client directives - for real Astro pages, see the
 [exo-astro example](../exo-astro) instead.
 
 Everything on the page is real, server-rendered HTML - visible with JavaScript off. JS only
 *upgrades* `<vc-products>` and `<vc-cart>` in place into Vapor custom elements
 (`defineVaporCustomElement(..., { shadowRoot: false })`, so page CSS still applies) and wires their
 interactivity. The two islands never talk to each other directly: the products island dispatches
-`cartAdd` onto the bus, the cart island reads reactive `cart` state the handler mutates.
+`cartAdd` onto the bus, the cart island reads the `cart` store's state.
 
 | Island         | Role     | Bus usage                                                  |
 |----------------|----------|------------------------------------------------------------|
-| `<vc-products>`| Emitter  | `bus.dispatch('cartAdd', product)` from `@click`          |
-| `<vc-cart>`    | Consumer | reads reactive `cart`; dispatches `cartClear/Undo/Redo`   |
+| `<vc-products>`| Emitter  | `dispatch('cartAdd', product)` from `@click`           |
+| `<vc-cart>`    | Consumer | reads `cart.state`; `cart.$reset()`, `history.undo()` and `redo()` |
 
-The bus (`src/store.ts`) is wired with three plugins:
+The cart is one store (`src/store.ts`), and what the page needs of it are options on it:
 
-- **`logger`** - logs `cart.*` commands.
-- **`history`** - bus-backed undo/redo for `cartAdd` (`cartUndo` / `cartRedo`).
-- **`persist`** - restores the cart from `localStorage` on reload.
+- **`undo: true`** - each action's inverse is the state it replaced. `useCommandHistory` records `cartAdd` and gives
+  reactive `canUndo` and `canRedo`. Clear (`cart.$reset()`) is not undone.
+- **`persist: saveTo({ key })`** - the cart comes back after a reload.
+- **`share: shareTabs()`** - the cart is the same in every open tab. Each write crosses as the command that made it,
+  and every tab runs the store's own reducer. An undo crosses as the id of the command it reverses, so Undo in
+  either tab removes the last add in both. A tab that opens asks the others for the state.
 
-Cross-tab mirroring is **not** a fourth plugin. `createChannel` is not on the bus at all: it bridges a `createFastLane()`
-event channel to a `BroadcastChannel`, so no dispatch passes through it. What
-crosses between tabs is a FACT the handler emits - `lane.emit('cartChanged', ...)`
-with the values already computed - and the receiving tab applies those values
-rather than re-running the handler. That is why the same lane listener is the
-single writer for a local change and a remote one, which `src/store.ts` says at
-the listener. Open two tabs and watch them stay in step.
+A `logger` on the bus prints the `cart*` commands. Open two tabs and watch them stay in step.
 
 ## Run
 
@@ -58,19 +55,20 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 
 - **HTML-first** - view source (or disable JS): the menu and cart are already there. Hydration only
   adds behaviour.
-- **Island hydration strategies** - `src/main.ts` builds a `tag -> loader` map from
-  `src/islands/*.vue` and hydrates on `client:load`, `client:visible` (IntersectionObserver), or
-  `client:idle` (`requestIdleCallback`). The demo markup uses `client:load`.
+- **Island hydration strategies** - `src/main.ts` defines one widget per `src/islands/*.vue`
+  with `defineWidget(tag, loader, { when })`: `client:load`, `client:visible` (one shared
+  IntersectionObserver) or `client:idle` (`requestIdleCallback`) on the tag's first element. The demo markup uses `client:load`.
 - **Light-DOM custom elements** - the `.vue` islands have no `<style>`; with `shadowRoot: false`
   the page stylesheet (`src/style.css`) styles them directly.
-- **Undo/redo** - add a few items, then use <-/->. The buttons go `aria-disabled` via reactive
-  `cantUndo`/`cantRedo` (not `disabled`, which would drop keyboard focus on the last undo).
+- **Undo/redo** - add a few items, then use <-/->. The buttons go `aria-disabled` from `canUndo`/`canRedo` (not
+  `disabled`, which would drop keyboard focus on the last undo). A tab that opened after the add holds no
+  command to undo, so its Undo reads disabled until it adds something itself.
 - **Heard, not only seen** - each add is announced through the library's `announce()`.
-- **Cross-tab sync** - open the URL in two tabs and add items in one.
+- **Cross-tab sync** - open the URL in two tabs, add items in one, then press Undo in the other.
 
 ## Notes on the Vite config
 
 `vite.config.ts` has no `vue` alias: `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`
-itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps the bus, with its handlers and plugins, across HMR.
+itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` marks a hot update, so the cart store keeps its state. After rebuilding the library, delete `node_modules/.vite`: Vite otherwise serves the old pre-bundled copy.
 
-Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

@@ -4,69 +4,72 @@
  * Vapor Chamber is not a Laravel tool.
  * This example uses a Next.js frontend with API routes as the backend.
  *
+ * The bus is plain JS and its command state (`commandState`) is a plain
+ * subscribe-and-read store, so React reads it with `useSyncExternalStore`:
+ * every component sees the same busy flag and the same failure, with no
+ * `useState` kept by hand.
+ *
  * app/providers.tsx - configure the bus once at the app root
  */
 
 'use client'
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
-import { createHttpBridge } from 'vapor-chamber/transports'
+import { useSyncExternalStore } from 'react'
+import { commandState, createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
+import { httpTransport } from 'vapor-chamber/transports'
 
 // Singleton bus - shared across all 'use client' components. Its retry is on
-// by default: the bridge's transient failures are re-sent.
+// by default: the transport's transient failures are re-sent.
 // Log via onAfter: it observes settled results on the async bus. The logger()
 // plugin would print the settled result here too.
-const bus = createAsyncCommandBus()
+const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }) })
 bus.onAfter((cmd, result) => {
   console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
 })
-bus.use(createHttpBridge({ endpoint: '/api/vc' }))
+
 // Installed as the shared bus here, at module scope, before any component
 // renders: a child that calls getCommandBus() in its first render would
 // otherwise get a default bus, and setting one after it was used is the DEV
 // warning's case. (A useEffect runs after the children's first render.)
 setCommandBus(bus) // accepts either bus flavor
 
-export function VaporChamberProvider({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+// One handle for the app's life: what is in flight on the bus, and what failed.
+const state = commandState(bus)
+const subscribe = (notify: () => void) => state.subscribe(notify)
+
+/** Is `action` in flight on the bus (from any caller), and the bus's latest failure of any action. */
+export function useCommandState(action: string, target: unknown = {}) {
+  const busy = useSyncExternalStore(subscribe, () => state.pending(action, target).value)
+  const error = useSyncExternalStore(subscribe, () => state.lastError.value)
+  return { busy, error }
 }
 
-export { bus }
+export { bus, state }
 
 /*
  * app/components/CheckoutButton.tsx
  * ----------------------------------
- * React state, not vapor-chamber's composables: `useCommand()` is a Vue
- * composable, and its signals do not re-render a React component. The bus is
- * plain JS, so a React component dispatches on it and keeps its own state.
- *
- * 'use client'
- * import { useState } from 'react'
- * import { bus } from '../providers'
- * import type { CartItem } from '../types'
- *
- * export function CheckoutButton({ items }: { items: CartItem[] }) {
- *   const [busy, setBusy] = useState(false)
- *   const [error, setError] = useState<string | null>(null)
- *
- *   async function checkout() {
- *     if (busy) return                       // a press in flight is ignored
- *     setBusy(true)
- *     const result = await bus.dispatch('orderCreate', {}, { items })
- *     setBusy(false)
- *     setError(result.ok ? null : result.error.message)
- *   }
- *
- *   return (
- *     <>
- *       {/* aria-disabled, not disabled: keyboard focus stays on the button *\/}
- *       <button type="button" onClick={checkout} aria-disabled={busy}>
- *         {busy ? 'Processing...' : 'Complete purchase'}
- *       </button>
- *       <p role="status" className="error">{error}</p>
- *     </>
- *   )
- * }
  */
+type CartItem = { id: number; qty?: number }
+
+export function CheckoutButton({ items }: { items: CartItem[] }) {
+  const { busy, error } = useCommandState('orderCreate')
+
+  async function checkout() {
+    if (busy) return // a press in flight is ignored
+    state.clear() // the last failure is not this press's
+    await bus.dispatch('orderCreate', {}, { items })
+  }
+
+  return (
+    <>
+      {/* aria-disabled, not disabled: keyboard focus stays on the button */}
+      <button type="button" onClick={checkout} aria-disabled={busy}>
+        {busy ? 'Processing...' : 'Complete purchase'}
+      </button>
+      <p role="status" className="error">{error?.message}</p>
+    </>
+  )
+}
 
 /*
  * app/api/vc/route.ts - Next.js API Route handler
@@ -98,4 +101,3 @@ export { bus }
  *
  * Same protocol as Laravel. Different runtime, identical contract.
  */
-

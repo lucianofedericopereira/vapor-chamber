@@ -1,20 +1,20 @@
 /**
- * Tests for the transport layer: createHttpBridge, createWsBridge, createSseBridge
+ * Tests for the transport layer: httpTransport, wsTransport, createSseBridge
  */
 
 import { describe, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, invalidateCsrfCache } from '../src/index';
-import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge } from '../src/transports';
+import { httpTransport, wsTransport, createSseBridge } from '../src/transports';
 import { it } from '../src/vitest';
 import { MockWebSocket } from './backend-stubs';
 
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// createHttpBridge
+// httpTransport
 // ---------------------------------------------------------------------------
 
-describe('createHttpBridge', () => {
+describe('httpTransport', () => {
   it('sends command envelope to endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -22,8 +22,7 @@ describe('createHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, { quantity: 2 });
 
@@ -46,8 +45,7 @@ describe('createHttpBridge', () => {
       text: async () => 'Unprocessable',
     }));
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
 
     const result = await bus.dispatch('fail', {});
     expect(result.ok).toBe(false);
@@ -66,8 +64,7 @@ describe('createHttpBridge', () => {
       querySelector: () => null,
     });
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', csrf: true }) });
     await bus.dispatch('test', {});
 
     const init = (fetch as any).mock.calls[0][1];
@@ -77,15 +74,14 @@ describe('createHttpBridge', () => {
     vi.unstubAllGlobals();
   });
 
-  it('actions filter skips non-matching commands', async () => {
+  it('a pattern map leaves the commands it does not cover local', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({}), text: async () => JSON.stringify(({})),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', actions: ['cart*'] }));
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: { 'cart*': httpTransport({ endpoint: '/api/vc' }) } });
 
     await bus.dispatch('userLogin', {});
     expect(fetchMock).not.toHaveBeenCalled();
@@ -97,10 +93,10 @@ describe('createHttpBridge', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createBatchingHttpBridge
+// httpTransport with batch
 // ---------------------------------------------------------------------------
 
-describe('createBatchingHttpBridge', () => {
+describe('httpTransport with batch', () => {
   it('coalesces same-tick dispatches into one POST with commands[], matched back by id', async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
@@ -123,8 +119,7 @@ describe('createBatchingHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', batch: {} }) });
 
     const [a, b] = await Promise.all([
       bus.dispatch('cartAdd', { id: 1 }, { quantity: 2 }),
@@ -151,8 +146,7 @@ describe('createBatchingHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', batch: {} }) });
 
     await bus.dispatch('a', {});
     await bus.dispatch('b', {});
@@ -163,20 +157,18 @@ describe('createBatchingHttpBridge', () => {
   it('fails a command with a clear error if the backend response omits its result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) , text: async () => JSON.stringify(({ results: [] }))}));
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', batch: {} }) });
 
     const result = await bus.dispatch('cartAdd', {});
     expect(result.ok).toBe(false);
     expect(result.error?.message).toContain('missing a result');
   });
 
-  it('actions filter skips non-matching commands (falls through to next)', async () => {
+  it('a pattern map leaves the commands it does not cover local, with batch', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) , text: async () => JSON.stringify(({ results: [] }))});
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'] }));
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: { 'cart*': httpTransport({ endpoint: '/api/vc/batch', batch: {} }) } });
 
     await bus.dispatch('userLogin', {});
     expect(fetchMock).not.toHaveBeenCalled();
@@ -190,8 +182,7 @@ describe('createBatchingHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', window: 20 }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', batch: { window: 20 } }) });
 
     const p1 = bus.dispatch('a', {});
     await vi.advanceTimersByTimeAsync(10);
@@ -205,10 +196,10 @@ describe('createBatchingHttpBridge', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createWsBridge
+// wsTransport
 // ---------------------------------------------------------------------------
 
-describe('createWsBridge', () => {
+describe('wsTransport', () => {
   let MockWS: typeof MockWebSocket;
   let lastWs: MockWebSocket;
 
@@ -227,26 +218,23 @@ describe('createWsBridge', () => {
     vi.useRealTimers();
   });
 
-  it('skips non-matching actions (actions filter)', async () => {
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    const ws = createWsBridge({ url: 'ws://localhost', actions: ['cart*'] });
-    bus.use(ws);
+  it('leaves the actions its pattern does not cover local', async () => {
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: { 'cart*': ws } });
     ws.connect();
 
     // Wait for open
     await Promise.resolve();
 
     const result = await bus.dispatch('userLogin', {});
-    expect(result.ok).toBe(true); // fell through to onMissing: ignore
+    expect(result.ok).toBe(true); // no pattern covers it: onMissing: ignore
     expect(lastWs.sent).toHaveLength(0);
   });
 
   it('sends command envelope and resolves on server response', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
-    bus.register('cartAdd', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
 
     await vi.runAllTimersAsync(); // let onopen fire
@@ -266,10 +254,8 @@ describe('createWsBridge', () => {
 
   it('times out if server never responds', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
-    bus.register('slow', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
 
     await vi.runAllTimersAsync();
@@ -284,9 +270,8 @@ describe('createWsBridge', () => {
 
   it('queues commands while disconnected and sends on reconnect', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: ws });
     ws.connect();
 
     // Don't await open - WS is not yet OPEN; stub readyState
@@ -313,7 +298,7 @@ describe('createWsBridge', () => {
     vi.useFakeTimers();
     const onConnect = vi.fn();
     const onDisconnect = vi.fn();
-    const ws = createWsBridge({ url: 'ws://localhost', onConnect, onDisconnect });
+    const ws = wsTransport({ url: 'ws://localhost', onConnect, onDisconnect });
     ws.connect();
 
     await vi.runAllTimersAsync();
@@ -325,7 +310,7 @@ describe('createWsBridge', () => {
 
   it('isConnected() reflects WebSocket state', async () => {
     vi.useFakeTimers();
-    const ws = createWsBridge({ url: 'ws://localhost' });
+    const ws = wsTransport({ url: 'ws://localhost' });
     ws.connect();
 
     await vi.runAllTimersAsync();
@@ -337,7 +322,7 @@ describe('createWsBridge', () => {
 
   it('connected signal reflects WebSocket state reactively', async () => {
     vi.useFakeTimers();
-    const ws = createWsBridge({ url: 'ws://localhost' });
+    const ws = wsTransport({ url: 'ws://localhost' });
 
     expect(ws.connected.value).toBe(false);
 
@@ -351,10 +336,8 @@ describe('createWsBridge', () => {
 
   it('disconnect() fails in-flight requests immediately (no timeout wait)', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
-    bus.register('save', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync(); // socket opens
 
@@ -368,10 +351,8 @@ describe('createWsBridge', () => {
 
   it('a terminal close (reconnect disabled) fails in-flight requests', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
-    bus.use(ws);
-    bus.register('save', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -385,10 +366,8 @@ describe('createWsBridge', () => {
 
   it('a recoverable close (reconnect enabled) does NOT prematurely fail in-flight requests', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: true });
-    bus.use(ws);
-    bus.register('save', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: true });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -409,10 +388,8 @@ describe('createWsBridge', () => {
 
   it('ignores malformed JSON frames without crashing', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
-    bus.register('ping', async () => null);
+    const ws = wsTransport({ url: 'ws://localhost' });
+    const bus = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
 
     await vi.runAllTimersAsync();
@@ -431,7 +408,7 @@ describe('createWsBridge', () => {
 
   it('does nothing when WebSocket is unavailable', () => {
     vi.unstubAllGlobals(); // remove WebSocket global
-    const ws = createWsBridge({ url: 'ws://localhost' });
+    const ws = wsTransport({ url: 'ws://localhost' });
     expect(() => ws.connect()).not.toThrow();
     expect(ws.isConnected()).toBe(false);
   });

@@ -1,11 +1,12 @@
 // Workload for scripts/ab/ab.mjs (D2, decisions 2026-10-13): signal() on shallowRef against ref, on
-// the real useCommandState dispatch path, the cases of tests/signal-shallow-ab.test.ts. Arm A is the
+// the real dispatch path, a handler writing a signal() per dispatch, the cases of
+// tests/signal-shallow-ab.test.ts. Arm A is the
 // shipped build; arm B the same source with `configureSignal(vue.ref ?? vue.shallowRef)` in
 // src/chamber.ts and `vue.ref` preferred in src/signal.ts, built with `npm run build`.
 // One iteration is one dispatch; a fresh state every `per` dispatches.
 // `raw_dispatch` never touches a signal: the known control, expected 1.000.
 import { effectScope } from 'vue';
-import { createCommandBus, setCommandBus, useCommandState } from '__DIST__/vue.js';
+import { createCommandBus, setCommandBus, signal } from '__DIST__/vue.js';
 
 const bus = createCommandBus();
 setCommandBus(bus);
@@ -17,10 +18,11 @@ function run(n, per, initial, handlers, action) {
   while (i < n) {
     const scope = effectScope();
     scope.run(() => {
-      const { state, dispose } = useCommandState(initial, handlers);
+      const state = signal(initial);
+      const off = bus.register(action, (cmd) => (state.value = handlers[action](state.value, cmd)));
       for (let j = 0; j < per && i < n; j++, i++) bus.dispatch(action, i);
       s += typeof state.value === 'number' ? state.value : state.value.length;
-      dispose();
+      off();
     });
     scope.stop();
   }

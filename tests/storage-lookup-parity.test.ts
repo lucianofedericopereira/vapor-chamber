@@ -1,8 +1,10 @@
 /** persist and the outbox against the same four storage failures. The long note is at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { createOutbox, localStorageOutbox } from '../src/outbox';
-import { persist } from '../src/plugins-io';
+import { createOutbox } from '../src/outbox';
+import { defineTransport } from '../src/transports';
+import { defineChamberStore } from '../src/store/core';
+import { saveTo } from '../src/store-persist';
 
 const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 afterEach(() => {
@@ -38,38 +40,35 @@ function install(c: Case) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: s, writable: true });
 }
 
-const settle = async (f: () => unknown) => { try { return { value: await f() }; } catch (e) { return { threw: (e as Error).name }; } };
-
-/** What an app sees from persist: a dispatch's result, then load(). */
+/** What an app sees from a store's persist: a write's result, then the state a new store reads. */
 async function persistSees(c: Case) {
   install(c);
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const bus = createCommandBus();
-  const p = persist({ key: 'vc:p', getState: () => ({ n: 1 }) });
-  bus.use(p);
-  bus.register('set', () => 1);
-  const r = c === 'corrupt' ? { ok: true } : bus.dispatch('set', {});
-  const loaded = await settle(() => p.load());
+  const useP = defineChamberStore('p', { state: () => ({ n: 0 }), reducers: { set: () => ({ n: 1 }) }, persist: saveTo({ key: 'vc:p' }) });
+  const first = useP(createCommandBus());
+  const r = c === 'corrupt' ? { ok: true } : (first.set() as { ok: boolean });
+  await Promise.resolve();
+  first.$dispose();
+  const read = useP(createCommandBus());
+  const loaded = { value: read.state.value.n === 1 ? read.state.value : null };
+  read.$dispose();
   const out = { dispatchOk: r.ok, code: (r as { error?: { code?: string } }).error?.code, loaded, warned: warn.mock.calls.length > 0 };
   warn.mockRestore();
   return out;
 }
 
-/** What an app sees from the outbox: an offline dispatch's result, then a fresh outbox's hydrate. */
+/** What an app sees from the outbox: an offline dispatch's result, then what a fresh outbox loads at creation. */
 async function outboxSees(c: Case) {
   install(c);
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   let r: { ok: boolean; error?: unknown } = { ok: true };
   if (c !== 'corrupt') {
-    const outbox = createOutbox({ storage: localStorageOutbox('vc:o'), isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('set', async () => 1);
+    const outbox = createOutbox({ name: 'vc:o', isOnline: () => false, autoFlush: false });
+    const bus = createAsyncCommandBus({ transport: defineTransport(async () => ({ ok: true, value: 1, error: undefined })), outbox });
     r = await bus.dispatch('set', {});
   }
-  const fresh = createOutbox({ storage: localStorageOutbox('vc:o'), autoFlush: false });
-  const hydrated = await settle(() => fresh.hydrate());
-  const out = { dispatchOk: r.ok, code: (r.error as { code?: string } | undefined)?.code, loaded: 'threw' in hydrated ? hydrated : { value: fresh.pending.value }, warned: warn.mock.calls.length > 0 };
+  const fresh = createOutbox({ name: 'vc:o', autoFlush: false });
+  const out = { dispatchOk: r.ok, code: (r.error as { code?: string } | undefined)?.code, loaded: { value: fresh.pending.value }, warned: warn.mock.calls.length > 0 };
   warn.mockRestore();
   return out;
 }
@@ -92,9 +91,9 @@ describe('the same failure, both side by side', () => {
     expect(await outboxSees('quota')).toEqual({ dispatchOk: true, code: undefined, loaded: { value: 0 }, warned: true });
   });
 
-  it('corrupt JSON on load: both load nothing; the outbox warns, persist is silent', async () => {
+  it('corrupt JSON on load: both load nothing, silently', async () => {
     expect(await persistSees('corrupt')).toEqual({ dispatchOk: true, code: undefined, loaded: { value: null }, warned: false });
-    expect(await outboxSees('corrupt')).toEqual({ dispatchOk: true, code: undefined, loaded: { value: 0 }, warned: true });
+    expect(await outboxSees('corrupt')).toEqual({ dispatchOk: true, code: undefined, loaded: { value: 0 }, warned: false });
   });
 
   it('blocked storage (the getter throws): both warn and carry on', async () => {
@@ -102,27 +101,24 @@ describe('the same failure, both side by side', () => {
     expect(await outboxSees('blocked')).toEqual({ dispatchOk: true, code: undefined, loaded: { value: 0 }, warned: true });
   });
 
-  it('blocked storage: persist clear() warns, never throws', async () => {
-    install('blocked');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const p = persist({ key: 'vc:p', getState: () => 1 });
-    expect({ cleared: await settle(() => p.clear()), warned: warn.mock.calls.length }).toEqual({ cleared: { value: undefined }, warned: 1 });
-  });
 });
 
 /*
- * Plan 1.28 item 7 (log s35.207). `persist` (src/plugins-io.ts) and the
- * outbox's `localStorageOutbox` (src/outbox.ts) each look up `localStorage`
- * with `typeof globalThis.localStorage`. The probe gives both the same four
+ * Plan 1.28 item 7 (log s35.207). `persist` (a store's option since 1.32,
+ * src/store-persist.ts) and the
+ * outbox (src/outbox.ts) each looked up `localStorage` with
+ * `typeof globalThis.localStorage`. Since the 1-7 fix-up (log 36.F5) the
+ * outbox's queue is saved by persist itself, so the parity holds by
+ * construction and this test pins it. The probe gives both the same four
  * failures and records what an app sees: the dispatch's result, what a later
  * load returns, and whether the console was warned.
  *
  * No storage, a quota error: the same answer. Corrupt JSON: both load
- * nothing, and only the outbox warns (persist's default `deserialize`
- * swallows the parse error). Blocked storage, where reading `localStorage`
+ * nothing, silently (persist's default `deserialize` swallows the parse
+ * error). Blocked storage, where reading `localStorage`
  * itself throws a SecurityError (a browser with site data blocked): `typeof`
  * guards an undeclared name, not a getter that throws, so the lookup throws.
- * The outbox calls its storage inside a try (`saveQueue`, `hydrate`) and
+ * The outbox calls its storage inside a try (`saveQueue`, the load at creation) and
  * carries on with a warning. `persist` looked up before its try, in `save()`,
  * `load()` and `clear()`: the save after every successful dispatch threw
  * inside the plugin, so every dispatch answered `persist:failed:plugin`

@@ -1,14 +1,15 @@
 /**
  * The async bus's retry policy (docs/retry.md): the runner re-sends the
- * call that produced the outcome - a handler's execute, or a plugin declaring
- * `transport: true` - by the class rule, bounded, jittered and budgeted per
+ * call that produced the outcome - a handler's execute, or the bus's
+ * transport - by the class rule, bounded, jittered and budgeted per
  * bus, and the plugins outside see one dispatch.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BusError, createAsyncCommandBus, createCommandBus, createAsyncSchemaCommandBus,
-  type AsyncPlugin, type CommandResult,
+  type CommandResult,
 } from '../src/index';
+import { defineTransport } from '../src/transports';
 
 const limited = (retryIn?: number): CommandResult => ({
   ok: false, value: undefined,
@@ -77,7 +78,7 @@ describe('the class rule', () => {
   it('never re-sends a library bug', async () => {
     const bus = createAsyncCommandBus();
     let calls = 0;
-    bus.use(((cmd, next) => { calls++; throw new Error('plugin bug'); }) as AsyncPlugin);
+    bus.use({ admit: () => { calls++; throw new Error('plugin bug'); } });
     bus.register('save', async () => 'done');
     const result = await settle(bus.dispatch('save', {}));
     expect(result.error).toMatchObject({ code: 'plugin:failed:plugin' });
@@ -121,7 +122,7 @@ describe('the class rule', () => {
 
   it('re-sends an uncertain failure of a command carrying an idempotency key', async () => {
     const bus = createAsyncCommandBus();
-    bus.use(((cmd, next) => { cmd.meta!.idempotencyKey = 'k1'; return next(); }) as AsyncPlugin);
+    bus.use({ started: (cmd) => { cmd.meta!.idempotencyKey = 'k1'; } });
     const { handler, calls } = scripted(['lost', 'ok']);
     bus.register('save', handler);
     expect((await settle(bus.dispatch('save', {}))).ok).toBe(true);
@@ -148,10 +149,9 @@ describe('the waits', () => {
   });
 
   it('honours a declared retryIn; one longer than the cap is returned, never sent early', async () => {
-    const bus = createAsyncCommandBus({ retry: { maxDelay: 5_000 } });
     const answers = [limited(1_500), limited(60_000), { ok: true, value: 1 } as CommandResult];
     const at: number[] = [];
-    bus.use(Object.assign((() => { at.push(Date.now()); return answers.shift()!; }) as AsyncPlugin, { transport: true as const }));
+    const bus = createAsyncCommandBus({ retry: { maxDelay: 5_000 }, transport: defineTransport(() => { at.push(Date.now()); return answers.shift()!; }) });
     // 60 s declared against a 5 s cap: returned, not re-sent at 5 s
     // (Retry-After is a minimum). tests/retry-after-long.test.ts.
     expect((await settle(bus.dispatch('save', {}))).ok).toBe(false);
@@ -209,6 +209,26 @@ describe('the budget', () => {
     expect(calls).toBe(2); // 6 left after the first failure, 5 after the second
   });
 
+  it('a failure of an action declared false spends a token, though it is never re-sent', async () => {
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { check: false } } });
+    let checks = 0;
+    bus.register('check', async () => { checks++; throw new BusError('limited:action', 'Held back.'); });
+    const s = scripted(['limited']);
+    bus.register('save', s.handler);
+    for (let i = 0; i < 3; i++) await settle(bus.dispatch('check', {})); // 7 tokens
+    expect(checks).toBe(3);
+    await settle(bus.dispatch('save', {})); // 6, 5: half spent
+    expect(s.calls).toHaveLength(2);
+  });
+
+  it('control: on a fresh bus the same failure is sent 3 times', async () => {
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { check: false } } });
+    const s = scripted(['limited']);
+    bus.register('save', s.handler);
+    await settle(bus.dispatch('save', {}));
+    expect(s.calls).toHaveLength(3);
+  });
+
   it('keeps one budget per bus', async () => {
     const a = createAsyncCommandBus();
     const b = createAsyncCommandBus();
@@ -226,7 +246,7 @@ describe('the boundary', () => {
   it('shows the plugins outside one dispatch', async () => {
     const bus = createAsyncCommandBus();
     let seen = 0;
-    bus.use((async (cmd, next) => { seen++; return next(); }) as AsyncPlugin);
+    bus.use({ started: (cmd) => { seen++; } });
     const { handler, calls } = scripted(['limited', 'limited', 'ok']);
     bus.register('save', handler);
     const outcomes: boolean[] = [];
@@ -237,56 +257,43 @@ describe('the boundary', () => {
     expect(outcomes).toEqual([true]);
   });
 
-  it('re-sends through a plugin declaring transport: true', async () => {
-    const bus = createAsyncCommandBus();
+  it("re-sends through the bus's transport", async () => {
     const sent: number[] = [];
     let outside = 0;
-    bus.use((async (cmd, next) => { outside++; return next(); }) as AsyncPlugin, { priority: 1 });
-    bus.use(Object.assign(((cmd) => { sent.push(1); return sent.length < 3 ? limited() : { ok: true, value: 'wire' } as CommandResult; }) as AsyncPlugin, { transport: true as const }));
+    const bus = createAsyncCommandBus({ transport: defineTransport(() => { sent.push(1); return sent.length < 3 ? limited() : { ok: true, value: 'wire' } as CommandResult; }) });
+    bus.use({ started: (cmd) => { outside++; } });
     const result = await settle(bus.dispatch('save', {}));
     expect(result).toMatchObject({ ok: true, value: 'wire' });
     expect(sent).toHaveLength(3);
     expect(outside).toBe(1);
   });
 
-  it('does not re-send at a transport that passed the command on', async () => {
-    const bus = createAsyncCommandBus();
+  it('re-sends the whole send of a transport that answers with its local handler', async () => {
     let transportCalls = 0;
-    bus.use(Object.assign(((cmd, next) => { transportCalls++; return next(); }) as AsyncPlugin, { transport: true as const }));
+    const bus = createAsyncCommandBus({ transport: defineTransport((cmd, local) => { transportCalls++; return local(); }, { localFallback: true }) });
     const { handler, calls } = scripted(['limited']);
     bus.register('local', handler);
     await settle(bus.dispatch('local', {}));
-    // The handler's own execute is re-sent; the transport is not asked again.
-    expect(transportCalls).toBe(1);
+    // The transport is the work: each attempt asks it again, and it runs the handler.
+    expect(transportCalls).toBe(3);
     expect(calls).toHaveLength(3);
   });
 
-  it('turns a transport throw into its failed:plugin result, not re-sent', async () => {
-    const bus = createAsyncCommandBus();
+  it('turns a transport throw into its failed:send result, not re-sent', async () => {
     let calls = 0;
-    bus.use(Object.assign((() => { calls++; throw new Error('bridge bug'); }) as AsyncPlugin, { transport: true as const, id: 'bridge' }));
+    const bus = createAsyncCommandBus({ transport: defineTransport(() => { calls++; throw new Error('transport bug'); }) });
     const result = await settle(bus.dispatch('save', {}));
-    expect(result.error).toMatchObject({ code: 'bridge:failed:plugin' });
+    expect(result.error).toMatchObject({ code: 'transport:failed:send' });
     expect(calls).toBe(1);
   });
 
   it("leaves a replay to its scheduler (the outbox's)", async () => {
     const bus = createAsyncCommandBus({ retry: { baseDelay: 0 } });
-    bus.use(((cmd, next) => { (cmd.meta as { origin?: string }).origin = 'replay'; return next(); }) as AsyncPlugin);
+    bus.use({ started: (cmd) => { (cmd.meta as { origin?: string }).origin = 'replay'; } });
     const { handler, calls } = scripted(['limited']);
     bus.register('save', handler);
     await settle(bus.dispatch('save', {}));
     expect(calls).toHaveLength(1);
-  });
-
-  it('does not re-send a register({ throttle }) refusal: a throttle drops repeats', async () => {
-    const bus = createAsyncCommandBus();
-    let calls = 0;
-    bus.register('tap', async () => { calls++; return 'ok'; }, { throttle: 1_000 });
-    await bus.dispatch('tap', {});
-    const refused = await bus.dispatch('tap', {}); // inside the window: no timer runs
-    expect(refused.error).toMatchObject({ code: 'core:limited:handler' });
-    expect(calls).toBe(1);
   });
 
   it('does not retry on the sync bus', () => {

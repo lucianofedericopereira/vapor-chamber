@@ -1,5 +1,5 @@
 /** isLoading's unread slots under the build profile: performance keeps up to 256 per action, lean prunes at 0. The long note is at the end. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { build as vite } from 'vite';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -42,7 +42,7 @@ const bucketWith = (buckets: Bucket[], key: string) => buckets.find((b) => b.has
 function armed(): { bus: CommandBus; s: ReturnType<typeof useSharedCommandState> } {
   const bus = createCommandBus();
   const s = useSharedCommandState({ bus });
-  s.isLoading('other');
+  s.pending('other');
   return { bus, s };
 }
 
@@ -53,7 +53,7 @@ describe('performance (the default): unread slots kept, bounded per action', () 
     bus.register('x', () => probe?.());
     const [b] = bucketsDuring(() => bus.dispatch('x', 'a'));
     expect([b.size, b.has('a')]).toEqual([1, true]);
-    const flag = s.isLoading('x', 'a');
+    const flag = s.pending('x', 'a');
     expect(flag.value).toBe(false);
     let during: boolean | undefined;
     probe = () => { during = flag.value; };
@@ -86,7 +86,7 @@ describe('lean (`__VC_LEAN__` true): every unread slot pruned at 0', () => {
     expect(b.size).toBe(0);
     for (let i = 0; i < 300; i++) bus.dispatch('x', `t${i}`);
     expect(b.size).toBe(0);
-    expect(s.isLoading('x', 'a').value).toBe(false);
+    expect(s.pending('x', 'a').value).toBe(false);
     s.dispose();
   });
 
@@ -107,8 +107,8 @@ describe.each([
   it('its slot and signal survive 300 unread targets and a settle while the bucket is over the bound', () => {
     if (lean) g.__VC_LEAN__ = true;
     const { bus, s } = armed();
-    let flag!: ReturnType<typeof s.isLoading>;
-    const buckets = bucketsDuring(() => { flag = s.isLoading('x', 'r'); });
+    let flag!: ReturnType<typeof s.pending>;
+    const buckets = bucketsDuring(() => { flag = s.pending('x', 'r'); });
     const b = bucketWith(buckets, 'r');
     let during: boolean | undefined;
     bus.register('x', (cmd) => {
@@ -122,7 +122,7 @@ describe.each([
     bus.dispatch('x', 'fresh', 'nest');
     expect(during).toBe(true);
     expect(b.has('r')).toBe(true);
-    expect(s.isLoading('x', 'r')).toBe(flag);
+    expect(s.pending('x', 'r')).toBe(flag);
     expect(flag.value).toBe(false);
     expect(b.size).toBe(lean ? 1 : 256);
     s.dispose();
@@ -150,7 +150,7 @@ describe('the profile in builds', () => {
     writeFileSync(entry, `import { useSharedCommandState, getCommandBus } from 'vapor-chamber';
 getCommandBus().register('ping', () => 'pong');
 const s = useSharedCommandState();
-globalThis.go = () => { getCommandBus().dispatch('ping', 1); return s.isLoading('ping', 1).value; };
+globalThis.go = () => { getCommandBus().dispatch('ping', 1); return s.pending('ping', 1).value; };
 `);
     const r = await vite({
       configFile: false, root: dir, logLevel: 'silent', mode: 'production', plugins: plugins as never, define,
@@ -185,7 +185,11 @@ globalThis.go = () => { getCommandBus().dispatch('ping', 1); return s.isLoading(
   });
 
   it('the shipped files: ESM carries the guard, the IIFEs define it false and fold it', () => {
-    expect(readFileSync(dist('chamber.js'), 'utf8')).toContain('typeof __VC_LEAN__');
+    // The chunk that holds the command state's pruning, wherever the bundler put it.
+    const esm = readdirSync(dist('.')).filter((f) => f.endsWith('.js') && !f.includes('.iife.'));
+    const holders = esm.filter((f) => readFileSync(dist(f), 'utf8').includes('pruneAbove'));
+    expect(holders.length).toBeGreaterThan(0);
+    for (const f of holders) expect([f, readFileSync(dist(f), 'utf8').includes('typeof __VC_LEAN__')]).toEqual([f, true]);
     for (const f of ['vapor-chamber.iife.min.js', 'vapor-chamber-core.iife.min.js', 'vapor-chamber-elements.iife.min.js']) {
       const code = readFileSync(dist(f), 'utf8');
       expect([f, code.includes('__VC_LEAN__'), /\.pruneAbove=0/.test(code)]).toEqual([f, false, false]);

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, problemOf } from '../src/index';
 import { createHttpClient } from '../src/http';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { fetchLoaders } from '../src/router-fetch/index';
 import { it } from '../src/vitest';
 import { ROWS, makeRouter } from './router/fixture';
@@ -19,7 +19,7 @@ describe('problemOf', () => {
   it("reads a loader failure's backend problem through the router failure's cause", async () => {
     vi.stubGlobal('fetch', vi.fn(async () => problemResponse(404, { status: 404, code: 'order_not_found', detail: 'No such order', id: 7 })));
     const routes = [...ROWS, { name: 'order', path: '/order', parent: 'shell', component: 'Home', load: '/api/order' }];
-    const router = makeRouter({ routes, loaders: fetchLoaders({ http: createHttpClient({ retry: 0 }) }), links: false, announce: false, onError: () => {} });
+    const router = makeRouter({ routes, loaders: fetchLoaders({ http: createHttpClient({ retry: false }) }), links: false, announce: false, onError: () => {} });
     await router.start();
     const error = await router.push('/order');
     expect(error?.code).toBe('router:failed:loader');
@@ -29,15 +29,14 @@ describe('problemOf', () => {
 
   it("reads a bridge's remote failure", async () => {
     vi.stubGlobal('fetch', vi.fn(async () => problemResponse(409, { status: 409, code: 'stale', detail: 'Changed meanwhile', version: 3 })));
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     const result = await bus.dispatch('orderSave', {});
     expect(problemOf(result.error)).toEqual({ status: 409, code: 'stale', detail: 'Changed meanwhile', version: 3 });
   });
 
   it('a non-problem body is the status and HTTP <status>, as the safe helpers read it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => problemResponse(502, 'bad gateway')));
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const error = await http.get('/x').then(() => null, (e: unknown) => e);
     expect(problemOf(error)).toEqual({ status: 502, detail: 'HTTP 502' });
     expect(problemOf((await http.safe.get('/x')).error)).toEqual(problemOf(error));
@@ -46,8 +45,7 @@ describe('problemOf', () => {
   it("a bridge's 2xx reply that is not the envelope gives its detail, and does not throw", async () => {
     // remote:unexpected:json carries no context (transports.ts); the reader destructured it.
     vi.stubGlobal('fetch', vi.fn(async () => ({ ...problemResponse(200, [1]), ok: true, headers: new Headers({ 'content-type': 'application/json' }) })));
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     const result = await bus.dispatch('orderSave', {});
     expect(result.error).toMatchObject({ code: 'remote:unexpected:json' });
     expect(problemOf(result.error)).toEqual({ detail: 'The reply for "orderSave" is not the JSON envelope.' });

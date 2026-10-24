@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  useCommandState,
+  useCommandHistory,
   waitForVueDetection,
   setCommandBus,
   resetCommandBus,
@@ -23,11 +23,11 @@ describe('tryAutoCleanup - dev warning dedup', () => {
 
     // Three composable calls outside any effectScope - each hits the no-scope path.
     for (let i = 0; i < 3; i++) {
-      useCommandState(0, { noop: (s) => s }).dispose();
+      useCommandHistory().dispose();
     }
 
     const scopeWarnings = warn.mock.calls.filter((c) =>
-      String(c[0]).includes('Heads-up (not an error)') &&
+      String(c[0]).startsWith('[vapor-chamber] [ WARN ] vue:missing:scope: ') &&
       String(c[0]).includes('ran outside a Vue'),
     );
 

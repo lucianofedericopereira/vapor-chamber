@@ -2,7 +2,8 @@
  * vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
  *
  * Two plugins (the history is in CHANGELOG.md):
- *   - `vaporChamberHMR()`, serve-only: keeps the bus across hot reloads.
+ *   - `vaporChamberHMR()`, serve-only: marks each hot update, so the stores
+ *     keep their states and a handler registered again raises no warning.
  *   - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
  *     specifier to a virtual module that imports 'vapor-chamber/vue' (or
  *     '/vapor') for its side effect and re-exports the real root, so an app
@@ -39,12 +40,16 @@
  *     without it one dispatch fired a listener once per generation ever
  *     rendered (tests/hmr-render-scope-fixture.test.ts).
  *
- * Preserves the shared command bus (handlers, plugins, hooks) across Vite HMR
- * updates. State a re-run module creates, such as a `useCommandState` signal,
- * is built again from its initial value.
- *
- * Without this plugin, each HMR update re-creates the bus from scratch,
- * clearing all registered handlers and registered state.
+ * The shared bus lives in the library's module, which a hot update of the
+ * app's modules does not re-run, so it keeps its handlers with or without
+ * this plugin. A module that builds its own bus gets a new one on each re-run.
+ * The plugin marks each update, so a store a re-run module replaces keeps its
+ * state (store-base.ts) and the handlers it registers again raise no
+ * overwrite warning (command-bus.ts register()). Without the plugin, the store
+ * starts from `state()` and each action registered again warns. Other state a
+ * re-run module creates, such as a `signal()`, is built again from its
+ * initial value. tests/examples/feature-vite-hmr.test.ts,
+ * tests/register-hot-update.test.ts.
  *
  * Tested against:
  *   - Vite >= 7.0.0 (programmatic build API + library mode)
@@ -67,11 +72,12 @@
  * })
  *
  * @example
- * // main.ts - no changes required; HMR is transparent
- * import { createCommandBus } from 'vapor-chamber'
- * const bus = createCommandBus()
+ * // src/cart.ts - no HMR code in the app
+ * import { getCommandBus } from 'vapor-chamber'
+ * // The shared bus: a bus this module created would be a new one on each re-run.
+ * const bus = getCommandBus()
  * bus.register('cartAdd', handler)
- * // After HMR: the handler is still registered on the same bus
+ * // After an edit: the edited handler replaces the old one on the same bus, with no warning
  */
 
 export type VaporChamberHMROptions = {
@@ -97,6 +103,11 @@ const HMR_GLOBAL_KEY = '__VAPOR_CHAMBER_BUS__';
 const VUE_GLOBAL_KEY = '__VAPOR_CHAMBER_VUE__';
 // Track whether the last active component was Vapor or VDOM - used for mode switch detection.
 const HMR_MODE_KEY = '__VAPOR_CHAMBER_MODE__';
+// Set while a hot update runs: a store replaced in it carries its state, and
+// register() does not warn over a handler (applied-remotely.ts HOT_KEY,
+// duplicated for the reason above).
+// tests/vite-hmr.test.ts and tests/vapor/store-hmr.test.ts name it.
+const HMR_HOT_KEY = '__VAPOR_CHAMBER_HOT__';
 
 /**
  * Matches an actual `import`/`export ... from 'vapor-chamber...'` (or a
@@ -108,12 +119,13 @@ const IMPORTS_VAPOR_CHAMBER =
   /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]vapor-chamber(?:\/[^'"]*)?['"]/;
 
 /**
- * vaporChamberHMR - Vite plugin that keeps the shared bus across hot reload.
+ * vaporChamberHMR - Vite plugin that marks each hot update and keeps the shared bus.
  *
  * Injects a small runtime shim that:
- * 1. Stores the command bus on `globalThis[HMR_GLOBAL_KEY]` after creation.
- * 2. On HMR accept, restores the previously stored bus instance instead of
- *    creating a new one - preserving all registered handlers and plugins.
+ * 1. Marks each update, from `vite:beforeUpdate` to `vite:afterUpdate`.
+ * 2. Stores the shared bus on `globalThis[HMR_GLOBAL_KEY]` when the shim
+ *    module is disposed (never at first load: see the shim's own comment).
+ * 3. Hands that bus to `setCommandBus()` when the shim module runs again.
  */
 export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
   const { verbose = false } = options;
@@ -201,8 +213,8 @@ export {};
 
       if (id !== resolvedVirtualModuleId) return;
 
-      // This module is injected into the app bundle.
-      // It patches setCommandBus/getCommandBus to persist across HMR.
+      // This module is injected into the app bundle. It marks each update and
+      // hands a stored bus back to setCommandBus() when it runs again.
       return `
 // vapor-chamber HMR shim - injected by vaporChamberHMR() Vite plugin
 import '${primeModuleId}';
@@ -233,6 +245,11 @@ if (typeof globalThis[KEY] === 'undefined') {
 
 // Accept HMR updates for the entire app module tree without full reload
 if (import.meta.hot) {
+  // Mark the update, from before its modules re-run to after their accept
+  // callbacks: a store replaced inside the mark carries its state.
+  import.meta.hot.on('vite:beforeUpdate', () => { globalThis['${HMR_HOT_KEY}'] = new WeakMap(); });
+  import.meta.hot.on('vite:afterUpdate', () => { globalThis['${HMR_HOT_KEY}'] = undefined; });
+
   import.meta.hot.accept(() => {
     // Beta.14: clear the per-cycle dedup flag so dispose can run on the next update.
     import.meta.hot.data.__vc_disposed = false;
@@ -341,7 +358,7 @@ export type VaporChamberWireOptions = {
    * at build time and costs nothing per call. An app that defines
    * `__VC_LEAN__` itself keeps its own value.
    *
-   * Trades behind it today: `isLoading()` keeps up to 256 unread keys' slots
+   * Trades behind it today: `commandState().pending()` keeps up to 256 unread keys' slots
    * per action for reuse (performance) or drops each one when it settles
    * (lean).
    */
@@ -359,8 +376,8 @@ const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
  * vaporChamberWire - make root imports production-correct in a Vite build.
  *
  * The package root must work with no Vue in the tree, so it reaches Vue
- * through a runtime lookup that resolves under a dev server and cannot resolve
- * in a production bundle. An app importing its composables from the root
+ * through a runtime lookup that only Node or an import map resolves, never a
+ * bundled page (log 36.F26). An app importing its composables from the root
  * therefore ships them without reactivity, cleanup or the KeepAlive guard -
  * which `warnUnwired()` in chamber.ts now reports once at runtime, and which
  * `vapor-chamber/vue` / `vapor-chamber/vapor` fix by being imported instead.

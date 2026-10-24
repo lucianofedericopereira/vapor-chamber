@@ -40,7 +40,6 @@ import {
   useCommandError,
   useCommandGroup,
   useCommandQuery,
-  useCommandState,
   useSharedCommandState,
 } from '../src/chamber';
 import { defineVaporCommand } from '../src/chamber-vapor';
@@ -81,7 +80,7 @@ describe('composables inside a real Vapor component', () => {
     setCommandBus(createCommandBus());
   });
 
-  it('useCommand - dispatches, tracks loading/error, and unsubscribes on unmount', async () => {
+  it('useCommand - dispatches, tracks its key, and unsubscribes on unmount', async () => {
     const bus = getCommandBus();
     let api!: ReturnType<typeof useCommand>;
     const seen: string[] = [];
@@ -92,33 +91,16 @@ describe('composables inside a real Vapor component', () => {
     });
 
     bus.register('cartAdd', () => 'ok');
+    const key = api.pending('cartAdd', 'a');
     const res = api.dispatch('cartAdd', 'a');
     expect((res as any).ok).toBe(true);
-    expect(api.lastError.value).toBeNull();
+    expect(key.value).toBe(false);
     expect(seen).toEqual(['cartAdd']);
 
     // The Vapor-sensitive half: tryAutoCleanup must have armed on this scope.
     unmount();
     bus.dispatch('cartAdd', 'b');
     expect(seen).toEqual(['cartAdd']); // no growth - listener really went away
-  });
-
-  it('useCommandState - state updates from a dispatch and stops on unmount', async () => {
-    const bus = getCommandBus();
-    let state!: { value: { count: number } };
-
-    const { unmount } = await mountVapor(() => {
-      ({ state } = useCommandState({ count: 0 }, {
-        counterSet: (_s: any, cmd: any) => ({ count: cmd.target as number }),
-      }) as any);
-    });
-
-    bus.dispatch('counterSet', 7);
-    expect(state.value).toEqual({ count: 7 });
-
-    unmount();
-    bus.dispatch('counterSet', 99);
-    expect(state.value).toEqual({ count: 7 }); // subscription disposed with the component
   });
 
   it('useSharedCommandState - two Vapor components observe the same bus-wide error state', async () => {
@@ -135,13 +117,13 @@ describe('composables inside a real Vapor component', () => {
     // One shared entry per bus - both Vapor components read the same node.
     expect(a.lastError.value?.message).toBe('shared-boom');
     expect(b.lastError.value?.message).toBe('shared-boom');
-    expect(a.errorCount.value).toBe(1);
+    expect(a.errors.value.length).toBe(1);
 
     // Refcounted: the first unmount must not tear the entry out from under the
     // component still using it.
     first.unmount();
     bus.dispatch('boom', null);
-    expect(b.errorCount.value).toBe(2);
+    expect(b.errors.value.length).toBe(2);
     second.unmount();
   });
 

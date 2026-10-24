@@ -5,11 +5,18 @@ import { createAsyncCommandBus } from '__DIST__/index.js';
 
 export const ASYNC = true;
 
+// A before-hook on the base arm; from 1.32 step 8e its replacement: an observer is a
+// `started` part, a gate an `authorize` rule.
+const observe = (bus, fn) => (bus.onBefore ? bus.onBefore(fn) : bus.use({ started: fn }));
+const gate = (bus, refuses) => (bus.onBefore
+  ? bus.onBefore((cmd) => { if (refuses(cmd)) throw new Error('never'); })
+  : bus.use({ authorize: () => (cmd) => (refuses(cmd) ? { ok: false, value: undefined, error: new Error('never') } : undefined) }));
+
 let seen = 0;
 const hooked = createAsyncCommandBus({ retry: false });
 hooked.register('x', async (cmd) => cmd.target + 1);
-hooked.onBefore((cmd) => { seen += cmd.target & 1; });
-hooked.onBefore((cmd) => { if (cmd.target < 0) throw new Error('never'); });
+observe(hooked, (cmd) => { seen += cmd.target & 1; });
+gate(hooked, (cmd) => cmd.target < 0);
 hooked.onAfter((_cmd, r) => { seen += r.ok ? 1 : 0; });
 hooked.onAfter((cmd) => { seen ^= cmd.target; });
 

@@ -1,75 +1,86 @@
 /**
- * Tests for the offline outbox: createOutbox, localStorageOutbox, indexedDbOutbox
+ * Tests for the offline outbox: createOutbox on the bus, its queue saved by persist
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createAsyncCommandBus, commandKey } from '../src/index';
-import { createOutbox, localStorageOutbox, indexedDbOutbox } from '../src/outbox';
-import type { OutboxRecord, OutboxStorage } from '../src/outbox';
-import { authGuard, validator } from '../src/plugins-core';
+import { Accepted, createAsyncCommandBus, type Command, type CommandResult } from '../src/index';
+import { createOutbox } from '../src/outbox';
+import type { Outbox, OutboxOptions, OutboxRecord } from '../src/outbox';
+import type { PersistStorage } from '../src/store-persist';
+import { queueStorage, storedRecord } from './outbox-storage';
+import { defineTransport } from '../src/transports';
+import { indexedDbStorage } from '../src/idb';
+import { _failures } from '../src/command-bus';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-/** In-memory OutboxStorage with spy-able methods and inspectable data. */
-function memoryStorage(initial: OutboxRecord[] | null = null) {
-  let data: OutboxRecord[] | null = initial ? initial.slice() : null;
-  return {
-    load: vi.fn((): OutboxRecord[] | null => (data ? data.slice() : null)),
-    save: vi.fn((records: OutboxRecord[]): void => { data = records.slice(); }),
-    clear: vi.fn((): void => { data = null; }),
-    get data() { return data; },
-  };
+/** The queue's storage: its saves counted, its last saved records readable. */
+// Its own name: an outbox in a page opens tabs, and Node shares BroadcastChannel and locks across vitest's workers.
+const NAME = 'vc:outbox:outbox-test';
+const memoryStorage = (initial: OutboxRecord[] | null = null) => queueStorage(initial, { key: NAME });
+/** A microtask: persist saves once per microtask after a write. */
+const saved = () => Promise.resolve();
+
+/**
+ * A bus whose every action goes out through one transport that records what it sent; `fail`
+ * answers in its place for a command it names. `online` is read by the outbox per send.
+ */
+function world(opts: Partial<OutboxOptions> & { storage?: PersistStorage } = {}) {
+  const sent: Command[] = [];
+  const state = { online: false, fail: (_cmd: Command): CommandResult | undefined => undefined };
+  const transport = defineTransport(async (cmd) => {
+    const failed = state.fail(cmd);
+    if (failed) return failed;
+    sent.push(cmd);
+    return { ok: true, value: `r-${cmd.action}`, error: undefined };
+  });
+  const storage = opts.storage ?? null;
+  const outbox: Outbox = createOutbox({ name: NAME, isOnline: () => state.online, autoFlush: false, ...opts, storage });
+  const bus = createAsyncCommandBus({ retry: false, transport, outbox });
+  return { bus, outbox, storage, sent, state, actions: () => sent.map((c) => c.action) };
 }
+const doneOf = (r: CommandResult): Promise<CommandResult> => (r.value as Accepted).done;
+/** A failure as its owner raises it, a real `BusError`. */
+const coded = (code: string): CommandResult => {
+  const [owner, ...rest] = code.split(':');
+  return { ok: false, value: undefined, error: _failures(owner)(rest.join(':') as never, code) };
+};
+const remote422 = (): CommandResult => coded('remote:invalid:payload');
 
 // ---------------------------------------------------------------------------
-// createOutbox - queueing
+// createOutbox - holding
 // ---------------------------------------------------------------------------
 
-describe('createOutbox - queueing', () => {
-  it('queues matching commands while offline, returns { queued: true }, bumps pending, persists', async () => {
+describe('createOutbox - holding', () => {
+  it('holds a covered command while offline: an Accepted, pending bumped, the record saved', async () => {
     const storage = memoryStorage();
-    const outbox = createOutbox({ actions: ['cart*'], storage, isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
-
-    const queuedEvents: any[] = [];
-    bus.on('outboxQueued', (cmd) => queuedEvents.push(cmd.target));
+    const { bus, outbox, sent } = world({ actions: ['cart*'], storage });
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
 
     expect(result.ok).toBe(true);
-    expect(result.value).toMatchObject({ queued: true });
-    expect(result.value.id).toBeTruthy();
+    expect(result.value).toBeInstanceOf(Accepted);
     expect(outbox.pending.value).toBe(1);
-
-    expect(storage.save).toHaveBeenCalledOnce();
-    expect(storage.data).toHaveLength(1);
-    expect(storage.data![0]).toMatchObject({
-      action: 'cartAdd',
-      target: { id: 1 },
-      payload: { qty: 2 },
-      key: `${commandKey('cartAdd', { id: 1 })}:${result.value.id}`, // one key per record (s35.166)
-    });
-
-    // 'outboxQueued' fires with the record
-    expect(queuedEvents).toHaveLength(1);
-    expect(queuedEvents[0].action).toBe('cartAdd');
+    expect(sent).toEqual([]);
+    await saved();
+    expect(storage.saves).toBe(1);
+    expect(storage.rows()[0]).toMatchObject({ action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 } });
+    expect(storage.rows()[0]!.key).toBe(storage.rows()[0]!.id); // the record's id alone (log 36.48)
   });
 
   it('stamps queuedAt as an RFC 3339 UTC string that round-trips through Date.parse', async () => {
     const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
+    const { bus } = world({ storage });
 
     const before = Date.now();
     await bus.dispatch('cartAdd', { id: 1 });
     const after = Date.now();
 
-    const queuedAt = storage.data![0].queuedAt;
-    expect(typeof queuedAt).toBe('string');
+    await saved();
+    const queuedAt = storage.rows()[0]!.queuedAt;
     expect(queuedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     const ms = Date.parse(queuedAt);
     expect(ms).toBeGreaterThanOrEqual(before);
@@ -77,142 +88,71 @@ describe('createOutbox - queueing', () => {
     expect(new Date(ms).toISOString()).toBe(queuedAt);
   });
 
-  it('non-matching actions pass through untouched', async () => {
+  it('an action outside `actions` is sent at once, unkeyed by the outbox', async () => {
     const storage = memoryStorage();
-    const outbox = createOutbox({ actions: ['cart*'], storage, isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-
-    const handler = vi.fn(async (cmd: any) => {
-      // no idempotency key stamped on pass-through commands
-      expect(cmd.meta?.idempotencyKey).toBeUndefined();
-      return 'logged-in';
-    });
-    bus.register('userLogin', handler);
+    const { bus, outbox, sent } = world({ actions: ['cart*'], storage });
 
     const result = await bus.dispatch('userLogin', { user: 'a' });
 
-    expect(result).toSucceedWith('logged-in');
-    expect(handler).toHaveBeenCalledOnce();
+    expect(result).toSucceedWith('r-userLogin');
+    expect(sent).toHaveLength(1);
     expect(outbox.pending.value).toBe(0);
-    expect(storage.save).not.toHaveBeenCalled();
+    await saved();
+    expect(storage.saves).toBe(0);
   });
 
-  it('passes matching commands through when online with an empty queue', async () => {
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('cartAdd', async () => 'handled');
-
-    const result = await bus.dispatch('cartAdd', { id: 1 });
-
-    expect(result).toSucceedWith('handled');
+  it('`actionFilter` narrows what is held', async () => {
+    const { bus, outbox } = world({ actionFilter: (a) => a !== 'cartPeek' });
+    await bus.dispatch('cartPeek', {});
     expect(outbox.pending.value).toBe(0);
-  });
-
-  it('uses navigator.onLine as the default connectivity probe', async () => {
-    vi.stubGlobal('navigator', { onLine: false });
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
-
-    const result = await bus.dispatch('cartAdd', { id: 1 });
-    expect(result.value).toMatchObject({ queued: true });
+    await bus.dispatch('cartAdd', {});
     expect(outbox.pending.value).toBe(1);
   });
 
-  it('ignores an "online" event when no bus has been installed yet', async () => {
-    // `if (busRef) void flush()` inside the online handler - the false arm.
-    // The listener is attached at CREATION, but install() is a separate call,
-    // so a reconnect between the two arrives with nothing to flush into. It
-    // must no-op rather than throw.
-    const listeners: Record<string, Array<() => void>> = {};
-    vi.stubGlobal('window', {
-      addEventListener: (ev: string, fn: () => void) => { (listeners[ev] ??= []).push(fn); },
-      removeEventListener: () => {},
-    });
-
-    const storage = memoryStorage([
-      { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: '1970-01-01T00:00:00.001Z' },
-    ]);
-    const outbox = createOutbox({ storage, isOnline: () => true }); // autoFlush on, NOT installed
-    expect(listeners.online).toHaveLength(1);
-
-    expect(() => listeners.online![0]!()).not.toThrow();
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Nothing was replayed - there is no bus to replay into.
-    expect(storage.data).toHaveLength(1);
-  });
-
-  it('flushes on the window "online" event when autoFlush is on', async () => {
-    // The `autoFlush && typeof window !== 'undefined' && addEventListener`
-    // chain. Every other outbox test passes `autoFlush: false` and runs under
-    // `node`, so the listener was never attached - meaning the feature that
-    // makes the outbox self-healing had no coverage at all.
-    const listeners: Record<string, Array<() => void>> = {};
-    vi.stubGlobal('window', {
-      addEventListener: (ev: string, fn: () => void) => { (listeners[ev] ??= []).push(fn); },
-      removeEventListener: (ev: string, fn: () => void) => {
-        listeners[ev] = (listeners[ev] ?? []).filter((f) => f !== fn);
-      },
-    });
-
-    const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online }); // autoFlush defaults true
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('a', async () => 'ra');
-
-    await bus.dispatch('a', { n: 1 });
-    expect(outbox.pending.value).toBe(1); // queued while offline
-    expect(listeners.online).toHaveLength(1);
-
-    online = true;
-    listeners.online![0]!(); // the browser fires this on reconnect
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(outbox.pending.value).toBe(0); // drained without anyone calling flush()
-
-    // ...and dispose() detaches it, so a torn-down outbox cannot be revived.
-    outbox.dispose();
-    expect(listeners.online).toHaveLength(0);
-  });
-
-  it('assumes online when there is no navigator at all', async () => {
-    // `typeof navigator !== 'undefined' ? navigator.onLine : true` - the `true`
-    // arm. The default probe has to work under SSR/Node, where assuming OFFLINE
-    // would queue every command on the server and never flush them.
-    vi.stubGlobal('navigator', undefined);
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, autoFlush: false }); // default isOnline
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
+  it('a local handler is never held', async () => {
+    const outbox = createOutbox({ name: NAME, storage: memoryStorage(), isOnline: () => false, autoFlush: false });
+    const bus = createAsyncCommandBus({ outbox });
     bus.register('cartAdd', async () => 'handled');
-
-    const result = await bus.dispatch('cartAdd', { id: 1 });
-
-    expect(result).toSucceedWith('handled'); // passed through, not queued
+    expect(await bus.dispatch('cartAdd', {})).toSucceedWith('handled');
     expect(outbox.pending.value).toBe(0);
   });
 
-  it('maxSize drops the oldest record with a warning', async () => {
+  it('sends a covered command when online with nothing held', async () => {
+    const { bus, outbox, state } = world();
+    state.online = true;
+    expect(await bus.dispatch('cartAdd', { id: 1 })).toSucceedWith('r-cartAdd');
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('reads navigator.onLine once at creation when no isOnline is given', async () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    const { bus, outbox } = world({ isOnline: undefined });
+    const result = await bus.dispatch('cartAdd', { id: 1 });
+    expect(result.value).toBeInstanceOf(Accepted);
+    expect(outbox.pending.value).toBe(1);
+  });
+
+  it('assumes online when there is no navigator at all', async () => {
+    vi.stubGlobal('navigator', undefined);
+    const { bus, outbox } = world({ isOnline: undefined });
+    expect(await bus.dispatch('cartAdd', { id: 1 })).toSucceedWith('r-cartAdd');
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('maxSize drops the oldest record with a warning, and its caller hears it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 2 });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
+    const { bus, outbox } = world({ storage, maxSize: 2 });
 
-    await bus.dispatch('a', { n: 1 });
+    const first = await bus.dispatch('a', { n: 1 });
     await bus.dispatch('b', { n: 2 });
     await bus.dispatch('c', { n: 3 });
 
     expect(outbox.pending.value).toBe(2);
-    expect(storage.data!.map(r => r.action)).toEqual(['b', 'c']); // oldest ('a') dropped
+    await saved();
+    expect(storage.rows().map((r) => r.action)).toEqual(['b', 'c']); // oldest ('a') dropped
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxSize'));
+    expect(await doneOf(first)).toFailWith('outbox:exceeded:queue');
   });
 
   // Same class as `cache({ maxSize: -1 })`, which hung its eviction loop. Here
@@ -221,87 +161,108 @@ describe('createOutbox - queueing', () => {
   // undefined, and the warning dereferenced it.
   it('a negative maxSize is clamped instead of throwing', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: -1 });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
-
+    const { bus, outbox } = world({ maxSize: -1 });
     const result = await bus.dispatch('a', { n: 1 });
-
-    // Clamped to 0: the record is queued, then immediately dropped by the
-    // bound, which is what maxSize 0 means.
+    // Clamped to 0: held, then dropped at once by the bound, which is what maxSize 0 means.
     expect(result.ok).toBe(true);
     expect(outbox.pending.value).toBe(0);
   });
 
   // NaN propagates through Math.trunc/Math.max and loses every comparison, so
   // `queue.length > maxSize` never fired and the bound vanished - measured at
-  // 300 records queued before this guard, which is the unbounded growth the
-  // option exists to prevent.
-  it('a NaN maxSize queues nothing instead of unbounding', async () => {
+  // 300 records queued before this guard. ../bounds falls back to the
+  // documented default: holding nothing while offline would discard the
+  // commands the outbox exists to hold.
+  it('a NaN maxSize falls back to the default instead of unbounding', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const storage = memoryStorage();
-    const outbox = createOutbox({
-      storage, isOnline: () => false, autoFlush: false, maxSize: Number('nope'),
-    });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
-
+    const { bus, outbox } = world({ maxSize: Number('nope') });
     for (let i = 0; i < 250; i++) await bus.dispatch('a', { i });
-
-    // Measured at 300 queued before any guard - unbounded.
-    //
-    // This asserted 0 while the clamp was `| 0`, on the argument that retaining
-    // nothing is "bounded, and loud rather than silent". That argument does not
-    // survive being written down for an OUTBOX: queueing nothing while offline
-    // DISCARDS the commands the component exists to hold, silently, which is
-    // not louder than unbounded growth - only costlier. ../bounds falls back to
-    // the documented default instead, so a bad option behaves exactly like an
-    // absent one.
     expect(outbox.pending.value).toBe(200);
   });
 
-  it('hydrate persists the trim when the loaded queue is over the bound', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // A previous session persisted more records than this session allows.
-    const storage = memoryStorage(
-      [1, 2, 3, 4].map((n) => ({
-        id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: new Date(n).toISOString(),
-      })),
-    );
-
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 2 });
-    await outbox.hydrate();
-
-    expect(outbox.pending.value).toBe(2);
-    // Without persisting the trim, storage kept all four and the same two
-    // records were re-loaded and re-dropped on every startup.
-    expect(storage.data!.map((r) => r.action)).toEqual(['a3', 'a4']);
-  });
-
-  it('hydrate does not rewrite storage when nothing is dropped', async () => {
-    const storage = memoryStorage([{ id: '1', action: 'a1', target: { n: 1 }, key: 'k1', queuedAt: '1970-01-01T00:00:00.001Z' }]);
-
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 10 });
-    await outbox.hydrate();
-
-    expect(outbox.pending.value).toBe(1);
-    expect(storage.save).not.toHaveBeenCalled();
-  });
-
-  it('clear() empties the queue and the storage', async () => {
+  it('clear() empties the queue and its saved copy, and a waiting caller hears it', async () => {
     const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
-    outbox.install(bus);
+    const { bus, outbox } = world({ storage });
 
-    await bus.dispatch('a', { n: 1 });
+    const held = await bus.dispatch('a', { n: 1 });
     expect(outbox.pending.value).toBe(1);
 
     await outbox.clear();
     expect(outbox.pending.value).toBe(0);
-    expect(storage.clear).toHaveBeenCalledOnce();
-    expect(storage.data).toBeNull();
+    await saved();
+    expect(storage.rows()).toEqual([]);
+    expect(await doneOf(held)).toFailWith('outbox:aborted:clear');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createOutbox - the stored queue
+// ---------------------------------------------------------------------------
+
+describe('createOutbox - the stored queue', () => {
+  const stored = (n: number): OutboxRecord => storedRecord({ id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: new Date(n).toISOString() });
+
+  it('a sync storage loads at creation: nothing waits at startup', async () => {
+    const { outbox, bus, state } = world({ storage: memoryStorage() });
+    state.online = true;
+    expect(await bus.dispatch('cartAdd', {})).toSucceedWith('r-cartAdd');
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('loads at creation and replays with the stored key', async () => {
+    const storage = memoryStorage([{ ...stored(7), action: 'cartAdd', key: 'cartAdd:{"id":7}' }]);
+    const { outbox, sent, state } = world({ storage });
+    expect(outbox.pending.value).toBe(1);
+    state.online = true;
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
+    expect(sent.map((c) => c.meta?.idempotencyKey)).toEqual(['cartAdd:{"id":7}']);
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('an async storage holds every covered send until it lands, its records first', async () => {
+    const storage = queueStorage([stored(1)], { async: true, key: NAME });
+    const { bus, outbox, state, actions } = world({ storage });
+    state.online = true;
+    const r = await bus.dispatch('cartAdd', {});
+    expect(r.value).toBeInstanceOf(Accepted);
+    await outbox.flush();
+    expect(actions()).toEqual(['a1', 'cartAdd']);
+  });
+
+  it('persists the trim when the loaded queue is over the bound', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const storage = memoryStorage([1, 2, 3, 4].map(stored));
+    const { outbox } = world({ storage, maxSize: 2 });
+    expect(outbox.pending.value).toBe(2);
+    // Without persisting the trim, storage kept all four and the same two
+    // records were re-loaded and re-dropped on every startup.
+    await saved();
+    expect(storage.rows().map((r) => r.action)).toEqual(['a3', 'a4']);
+  });
+
+  it('does not rewrite storage when nothing is dropped', async () => {
+    const storage = memoryStorage([stored(1)]);
+    const { outbox } = world({ storage, maxSize: 10 });
+    expect(outbox.pending.value).toBe(1);
+    await saved();
+    expect(storage.saves).toBe(0);
+  });
+
+  it('loads nothing from null or an empty array', () => {
+    expect(world({ storage: memoryStorage() }).outbox.pending.value).toBe(0);
+    expect(world({ storage: memoryStorage([]) }).outbox.pending.value).toBe(0);
+  });
+
+  it("a stored record refused for good goes to `rejected`; this session's caller hears its own", async () => {
+    const storage = memoryStorage([stored(1)]);
+    const { bus, outbox, state } = world({ storage });
+    const held = await bus.dispatch('cartAdd', {});
+    state.fail = remote422;
+    state.online = true;
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 0, rejected: 2 });
+    expect(outbox.rejected.value.map((x) => x.record.id)).toEqual(['1']);
+    expect((await doneOf(held)).ok).toBe(false);
+    expect(outbox.pending.value).toBe(0);
   });
 });
 
@@ -310,478 +271,250 @@ describe('createOutbox - queueing', () => {
 // ---------------------------------------------------------------------------
 
 describe('createOutbox - flush', () => {
-  it('replays in FIFO order with the original idempotency keys visible downstream', async () => {
+  it('replays in FIFO order with the original keys and origin replay; done settles with each answer', async () => {
     const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
+    const { bus, outbox, sent, state } = world({ storage });
 
-    // Downstream plugin (e.g. where idempotent/transport would sit) observes meta.
-    const seen: Array<{ action: string; key?: string; origin?: string }> = [];
-    bus.use((cmd, next) => {
-      seen.push({ action: cmd.action, key: cmd.meta?.idempotencyKey, origin: (cmd.meta as any)?.origin });
-      return next();
-    }, { priority: 100 });
-
-    bus.register('a', async () => 'ra');
-    bus.register('b', async () => 'rb');
-
-    await bus.dispatch('a', { n: 1 });
-    await bus.dispatch('b', { n: 2 });
+    const ra = await bus.dispatch('a', { n: 1 });
+    const rb = await bus.dispatch('b', { n: 2 });
     expect(outbox.pending.value).toBe(2);
-    expect(seen).toHaveLength(0); // queued commands never reached downstream plugins
+    await saved();
+    const keys = storage.rows().map((r) => r.key);
 
-    const key1 = storage.data![0].key;
-    const key2 = storage.data![1].key;
-
-    const flushed: any[] = [];
-    bus.on('outboxFlushed', (cmd) => flushed.push(cmd.target));
-
-    online = true;
-    const summary = await outbox.flush();
-
-    expect(summary).toEqual({ replayed: 2, failed: 0, rejected: 0 });
-    expect(seen.map(s => s.action)).toEqual(['a', 'b']); // strict FIFO
-    expect(seen[0].key).toBe(key1); // ORIGINAL keys, not re-derived
-    expect(seen[1].key).toBe(key2);
-    expect(seen.every(s => s.origin === 'replay')).toBe(true);
+    state.online = true;
+    expect(await outbox.flush()).toEqual({ replayed: 2, failed: 0, rejected: 0 });
+    expect(sent.map((c) => c.action)).toEqual(['a', 'b']); // strict FIFO
+    expect(sent.map((c) => c.meta?.idempotencyKey)).toEqual(keys); // ORIGINAL keys
+    expect(sent.every((c) => c.meta?.origin === 'replay')).toBe(true);
     expect(outbox.pending.value).toBe(0);
-    expect(storage.data).toEqual([]);
-    expect(flushed).toEqual([{ replayed: 2, failed: 0, rejected: 0 }]);
+    await saved();
+    expect(storage.rows()).toEqual([]);
+    expect(await doneOf(ra)).toSucceedWith('r-a');
+    expect(await doneOf(rb)).toSucceedWith('r-b');
   });
 
-  it('a failing replay stops the flush and preserves order; retry succeeds on next flush', async () => {
+  it('a retryable failure stops the flush and keeps the order; the next flush sends both', async () => {
     const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-
-    let failFirst = true;
-    const runs: string[] = [];
-    bus.register('a', async () => {
-      if (failFirst) throw new Error('boom');
-      runs.push('a');
-      return 'ok-a';
-    });
-    bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
-
+    const { bus, outbox, state, actions } = world({ storage });
     await bus.dispatch('a', { n: 1 });
     await bus.dispatch('b', { n: 2 });
 
-    online = true;
-    const first = await outbox.flush();
-    expect(first).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(runs).toEqual([]); // 'b' never overtook the failed 'a'
-    expect(outbox.pending.value).toBe(2);
-    expect(storage.data!.map(r => r.action)).toEqual(['a', 'b']); // order preserved
-
-    failFirst = false;
-    const second = await outbox.flush();
-    expect(second).toEqual({ replayed: 2, failed: 0, rejected: 0 });
-    expect(runs).toEqual(['a', 'b']);
-    expect(outbox.pending.value).toBe(0);
-  });
-
-  // The test above fails a replay by throwing inside the HANDLER, which the
-  // async bus converts into a resolved `{ ok: false }` - so runFlush's
-  // `try/catch` around `bus.dispatch` never ran. A throwing PLUGIN is
-  // different: it makes the dispatch promise REJECT, which is the only way
-  // that catch is reachable. It is not hypothetical - any plugin installed
-  // downstream of the outbox (transport, auth, serializer) can throw on a
-  // replay that happens minutes after the command was queued.
-  // Since plugin:failed:plugin the runner converts that throw into a result, so
-  // this replay resolves `{ ok: false }` and fails the record the same way;
-  // the rejection path is now `onMissing: 'throw'`, tested next.
-  it('survives a replay through a THROWING downstream plugin, treating it as a failed record', async () => {
-    const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-
-    let explode = true;
-    // priority 100 => downstream of the outbox plugin, so this runs on
-    // replays only, never on the original queueing dispatch.
-    bus.use((_cmd, next) => {
-      if (explode) throw new Error('transport exploded mid-replay');
-      return next();
-    }, { priority: 100 });
-
-    const runs: string[] = [];
-    bus.register('a', async () => { runs.push('a'); return 'ok-a'; });
-    bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
-
-    await bus.dispatch('a', { n: 1 });
-    await bus.dispatch('b', { n: 2 });
-    expect(outbox.pending.value).toBe(2);
-
-    online = true;
-    const first = await outbox.flush();
-
-    // The rejection was caught and turned into a failed record - the flush
-    // returned a summary instead of rejecting, and nothing was lost. (A
-    // plugin:failed:plugin result now, not a rejection - the outcome is the same.)
-    expect(first).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(runs).toEqual([]); // the handler never ran; the plugin threw first
-    expect(outbox.pending.value).toBe(2);
-    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']); // order preserved
-
-    // And the queue is still replayable once the downstream plugin recovers.
-    explode = false;
-    const second = await outbox.flush();
-    expect(second).toEqual({ replayed: 2, failed: 0, rejected: 0 });
-    expect(runs).toEqual(['a', 'b']);
-    expect(outbox.pending.value).toBe(0);
-  });
-
-  it('survives a replay whose dispatch REJECTS, treating it as a failed record', async () => {
-    // runFlush's `try/catch` around `bus.dispatch`. On a real bus the one
-    // rejection left is `onMissing: 'throw'` (a plugin's throw is converted),
-    // and it is reachable on a replay: the record was queued offline, and its
-    // handler is not registered yet when the flush runs.
-    const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: 'throw' });
-    outbox.install(bus);
-
-    await bus.dispatch('a', { n: 1 }); // offline: queued, no handler needed
-    online = true;
+    state.online = true;
+    state.fail = (cmd) => (cmd.action === 'a' ? { ok: false, value: undefined, error: new Error('down') } : undefined);
     expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(storage.data!.map((r) => r.action)).toEqual(['a']); // kept
+    expect(actions()).toEqual([]); // 'b' never overtook the failed 'a'
+    await saved();
+    expect(storage.rows().map((r) => r.action)).toEqual(['a', 'b']);
 
-    bus.register('a', async () => 'ok-a');
+    state.fail = () => undefined;
+    expect(await outbox.flush()).toEqual({ replayed: 2, failed: 0, rejected: 0 });
+    expect(actions()).toEqual(['a', 'b']);
+  });
+
+  it('a transport that throws keeps the record (transport:failed:send is not a verdict)', async () => {
+    const state = { online: false, explode: true };
+    const transport = defineTransport(async () => { if (state.explode) throw new Error('wire exploded'); return { ok: true, value: 'ok', error: undefined }; });
+    const outbox = createOutbox({ storage: null, isOnline: () => state.online, autoFlush: false });
+    const bus = createAsyncCommandBus({ retry: false, transport, outbox });
+    await bus.dispatch('a', {});
+    state.online = true;
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    state.explode = false;
     expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 
-  it('wraps a non-Error rejection value in an Error rather than storing it raw', async () => {
-    // `e instanceof Error ? e : new Error(String(e))` - the else arm. A plugin
-    // that rejects with a string (or a framework that throws a plain object)
-    // must not put a non-Error into the failure path.
-    // A real bus does not reject with a non-Error - a plugin's rejection
-    // becomes a plugin:failed:plugin result - but flush(bus) takes any
-    // AsyncCommandBus, so the value comes from a foreign bus below.
-    const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('a', async () => 'ok-a');
-
-    await bus.dispatch('a', { n: 1 });
-    online = true;
-
-    // Rejecting (rather than throwing) with a bare string: same non-Error
-    // rejection value, no throw-a-literal lint suppression needed. Here it is
-    // a foreign bus: the real one, with a dispatch that rejects.
-    const foreign = { ...bus, dispatch: () => Promise.reject('a bare string, not an Error') } as any;
-    const summary = await outbox.flush(foreign);
-    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    // Record survives the non-Error rejection intact.
-    expect(outbox.pending.value).toBe(1);
-    expect(storage.data!.map((r) => r.action)).toEqual(['a']);
+  it('a held command goes to the local handler when its action has no transport any more', async () => {
+    const storage = memoryStorage([storedRecord({ id: 'r1', action: 'local', target: 1, key: 'k' })]);
+    const transport = defineTransport(async () => ({ ok: true, value: 'sent', error: undefined }));
+    const outbox = createOutbox({ name: NAME, storage, isOnline: () => true, autoFlush: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: { cart: transport }, outbox });
+    bus.register('local', async () => 'ran-here');
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 
-  it('queue-behind semantics: a dispatch during an in-progress flush lands behind the queued records', async () => {
-    const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-
-    const runs: string[] = [];
-    bus.register('a', async () => {
-      runs.push('a');
-      // New dispatch DURING the flush - must queue behind 'b', not run now.
-      const r = await bus.dispatch('c', { n: 3 });
-      expect(r.ok).toBe(true);
-      expect(r.value).toMatchObject({ queued: true });
-      return 'ok-a';
-    });
-    bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
-    bus.register('c', async () => { runs.push('c'); return 'ok-c'; });
-
+  it('a command sent during a flush is held behind the records', async () => {
+    const { bus, outbox, state, actions } = world();
     await bus.dispatch('a', { n: 1 });
     await bus.dispatch('b', { n: 2 });
-
-    online = true;
+    state.online = true;
+    let during: CommandResult | undefined;
+    state.fail = (cmd) => {
+      if (cmd.action === 'a' && during === undefined) void bus.dispatch('c', { n: 3 }).then((r) => { during = r; });
+      return undefined;
+    };
     const summary = await outbox.flush();
-
-    expect(runs).toEqual(['a', 'b', 'c']); // 'c' landed behind 'b'
+    expect(during?.value).toBeInstanceOf(Accepted);
+    expect(actions()).toEqual(['a', 'b', 'c']);
     expect(summary).toEqual({ replayed: 3, failed: 0, rejected: 0 });
-    expect(outbox.pending.value).toBe(0);
   });
 
-  it('flush() without a bus rejects; flush(bus) works without install()', async () => {
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
-    await expect(outbox.flush()).rejects.toThrow(/no bus/);
+  it('flush() off a bus rejects', async () => {
+    const outbox = createOutbox({ storage: null, isOnline: () => true, autoFlush: false });
+    await expect(outbox.flush()).rejects.toThrow(/on no bus/);
+  });
 
-    const bus = createAsyncCommandBus();
-    bus.use(outbox.plugin, { priority: 200 });
-    const summary = await outbox.flush(bus);
-    expect(summary).toEqual({ replayed: 0, failed: 0, rejected: 0 });
+  it('a second flush during one joins it', async () => {
+    const { bus, outbox, state } = world();
+    await bus.dispatch('a', {});
+    state.online = true;
+    const [x, y] = await Promise.all([outbox.flush(), outbox.flush()]);
+    expect(x).toBe(y);
+  });
+
+  it('going offline mid-flush leaves the rest held', async () => {
+    const { bus, outbox, state, actions } = world();
+    await bus.dispatch('a', {});
+    await bus.dispatch('b', {});
+    state.online = true;
+    state.fail = (cmd) => { if (cmd.action === 'a') state.online = false; return undefined; };
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
+    expect(actions()).toEqual(['a']);
+    expect(outbox.pending.value).toBe(1);
   });
 });
 
 // ---------------------------------------------------------------------------
-// createOutbox - the default isRetryable on the library's own failures
+// createOutbox - the default isRetryable
 // ---------------------------------------------------------------------------
 
-describe('createOutbox - default rule on library failures', () => {
-  /** Queue `a` then `b` offline; install `downstream` (below the outbox); flush. */
-  async function replayThrough(setup: (bus: ReturnType<typeof createAsyncCommandBus>) => void, busOptions = {}) {
+describe('createOutbox - the default rule', () => {
+  async function replay(fail: (cmd: Command) => CommandResult | undefined) {
     const storage = memoryStorage();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus(busOptions);
-    outbox.install(bus);
-    await bus.dispatch('a', { n: 1 });
-    await bus.dispatch('b', { n: 2 });
-    setup(bus);
-    const rejectedEvents: any[] = [];
-    bus.on('outboxRejected', (cmd) => rejectedEvents.push(cmd.target));
-    online = true;
-    const summary = await outbox.flush();
-    return { summary, storage, outbox, rejectedEvents };
+    const w = world({ storage });
+    const ra = await w.bus.dispatch('a', { n: 1 });
+    await w.bus.dispatch('b', { n: 2 });
+    w.state.fail = fail;
+    w.state.online = true;
+    return { ...w, storage, ra, summary: await w.outbox.flush() };
+  }
+  it("a server's verdict is final: dropped, its caller hears it, and the queue drains", async () => {
+    const { summary, storage, actions, ra } = await replay((cmd) => (cmd.action === 'a' ? remote422() : undefined));
+    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 1 });
+    expect(actions()).toEqual(['b']);
+    await saved();
+    expect(storage.rows()).toEqual([]);
+    expect((await doneOf(ra)).ok).toBe(false);
+  });
+
+  it('a library failure other than invalid is kept', async () => {
+    const { summary, storage } = await replay((cmd) => (cmd.action === 'a' ? coded('transport:failed:send') : undefined));
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    await saved();
+    expect(storage.rows().map((r) => r.action)).toEqual(['a', 'b']);
+  });
+
+  it('a library invalid is final', async () => {
+    const { summary } = await replay((cmd) => (cmd.action === 'a' ? coded('validator:invalid:payload') : undefined));
+    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createOutbox - window listeners and lifecycle
+// ---------------------------------------------------------------------------
+
+describe('createOutbox - window listeners and lifecycle', () => {
+  function stubWindow() {
+    const listeners: Record<string, Array<() => void>> = {};
+    const add = vi.fn((ev: string, fn: () => void) => { (listeners[ev] ??= []).push(fn); });
+    const remove = vi.fn((ev: string, fn: () => void) => { listeners[ev] = (listeners[ev] ?? []).filter((f) => f !== fn); });
+    vi.stubGlobal('window', { addEventListener: add, removeEventListener: remove });
+    return { listeners, add, remove, fire: (ev: string) => { for (const f of listeners[ev] ?? []) f(); } };
   }
 
-  it('a record a validator rejects at replay is final: rejected, reported, and the queue drains', async () => {
-    const runs: string[] = [];
-    const { summary, storage, outbox, rejectedEvents } = await replayThrough((bus) => {
-      bus.use(validator({ a: () => 'qty must be positive' }), { priority: 100 });
-      bus.register('a', async () => { runs.push('a'); return 'ok-a'; });
-      bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
-    });
-
-    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 1 });
-    expect(runs).toEqual(['b']); // 'b' is no longer held behind the rejected 'a'
-    expect(outbox.pending.value).toBe(0);
-    expect(storage.data).toEqual([]);
-    expect(rejectedEvents).toHaveLength(1);
-    expect(rejectedEvents[0].record.action).toBe('a');
-    expect(rejectedEvents[0].error.code).toBe('validator:invalid:payload');
-  });
-
-  it('a missing handler is kept (it may be registered later)', async () => {
-    const { summary, storage } = await replayThrough(() => {});
-    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
-  });
-
-  it('a plugin that throws is kept (a bug, not a verdict on the command)', async () => {
-    const { summary, storage } = await replayThrough((bus) => {
-      bus.use(Object.assign(() => { throw new Error('plugin bug'); }, { id: 'buggy' }) as never, { priority: 100 });
-      bus.register('a', async () => 'ok-a');
-      bus.register('b', async () => 'ok-b');
-    });
-    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
-  });
-
-  it('an authGuard refusal is kept (replayed after sign-in)', async () => {
-    let signedIn = false;
-    const { summary, storage, outbox } = await replayThrough((bus) => {
-      bus.use(authGuard({ isAuthenticated: () => signedIn, protected: ['a'] }), { priority: 100 });
-      bus.register('a', async () => 'ok-a');
-      bus.register('b', async () => 'ok-b');
-    });
-    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
-    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
-
-    signedIn = true;
-    expect(await outbox.flush()).toEqual({ replayed: 2, failed: 0, rejected: 0 });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createOutbox - hydrate / dispose / autoFlush
-// ---------------------------------------------------------------------------
-
-describe('createOutbox - hydrate and lifecycle', () => {
-  it('hydrate() restores a persisted queue and flush replays it with the original key', async () => {
-    const record: OutboxRecord = {
-      id: 'r1',
-      action: 'cartAdd',
-      target: { id: 7 },
-      payload: { qty: 1 },
-      key: 'cartAdd:{"id":7}',
-      queuedAt: '1970-01-01T00:00:00.123Z',
-    };
-    const storage = memoryStorage([record]);
-    const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-
-    const seenKeys: Array<string | undefined> = [];
-    bus.register('cartAdd', async (cmd) => { seenKeys.push(cmd.meta?.idempotencyKey); return 'ok'; });
-
-    await outbox.hydrate();
-    expect(outbox.pending.value).toBe(1);
-
-    const summary = await outbox.flush();
-    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 0 });
-    expect(seenKeys).toEqual(['cartAdd:{"id":7}']);
+  it('the offline and online events keep the flag, and online flushes', async () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    const win = stubWindow();
+    const { bus, outbox } = world({ isOnline: undefined, autoFlush: true });
+    win.fire('offline');
+    const r = await bus.dispatch('a', {});
+    expect(r.value).toBeInstanceOf(Accepted);
+    win.fire('online');
+    expect(await doneOf(r)).toSucceedWith('r-a');
     expect(outbox.pending.value).toBe(0);
   });
 
-  it('a record persisted with a numeric queuedAt (before RFC 3339) still hydrates and replays', async () => {
-    // The outbox never reads queuedAt, so a queue saved by an older build
-    // replays as it is: no migration.
-    const legacy = { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: 123 } as unknown as OutboxRecord;
-    const storage = memoryStorage([legacy]);
-    const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('a', async () => 'ok');
-
-    await outbox.hydrate();
-    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
+  it('an online event on an outbox with nothing held does nothing', () => {
+    const win = stubWindow();
+    const { outbox } = world({ autoFlush: true });
+    expect(() => win.fire('online')).not.toThrow();
+    expect(outbox.pending.value).toBe(0);
   });
 
-  it('autoFlush registers the window "online" listener and flushes on reconnect', async () => {
-    let online = false;
-    const listeners = new Map<string, () => void>();
-    vi.stubGlobal('window', {
-      addEventListener: vi.fn((event: string, handler: () => void) => listeners.set(event, handler)),
-      removeEventListener: vi.fn(),
-    });
-
-    const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: true });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('a', async () => 'ok');
-
-    await bus.dispatch('a', { n: 1 });
-    expect(outbox.pending.value).toBe(1);
-
-    online = true;
-    listeners.get('online')!(); // browser fires 'online'
-    await vi.waitFor(() => expect(outbox.pending.value).toBe(0));
-  });
-
-  it('dispose() removes the "online" listener', () => {
-    const add = vi.fn();
-    const remove = vi.fn();
-    vi.stubGlobal('window', { addEventListener: add, removeEventListener: remove });
-
-    const outbox = createOutbox({ storage: memoryStorage(), autoFlush: true });
-    expect(add).toHaveBeenCalledWith('online', expect.any(Function));
-
+  it("an online event before the outbox is on a bus flushes nothing", async () => {
+    const win = stubWindow();
+    const storage = memoryStorage([storedRecord({ id: 'r1', action: 'a', target: 1, key: 'k' })]);
+    const outbox = createOutbox({ name: NAME, storage, isOnline: () => true });
+    win.fire('online');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.rows()).toHaveLength(1);
     outbox.dispose();
-    expect(remove).toHaveBeenCalledWith('online', add.mock.calls[0][1]);
-
-    outbox.dispose(); // idempotent - no second removal
-    expect(remove).toHaveBeenCalledOnce();
   });
 
-  it('autoFlush: false does not touch window', () => {
-    const add = vi.fn();
-    vi.stubGlobal('window', { addEventListener: add, removeEventListener: vi.fn() });
-    createOutbox({ storage: memoryStorage(), autoFlush: false });
-    expect(add).not.toHaveBeenCalled();
-  });
-
-  it('hydrate() is a no-op when storage has nothing persisted (load() resolves null)', async () => {
-    const outbox = createOutbox({ storage: memoryStorage(), isOnline: () => true, autoFlush: false });
-    await outbox.hydrate();
+  it('a stored queue flushes once loaded on a bus while online', async () => {
+    stubWindow();
+    const storage = memoryStorage([storedRecord({ id: 'r1', action: 'a', target: 1, key: 'k' })]);
+    const sent: string[] = [];
+    const transport = defineTransport(async (cmd) => { sent.push(cmd.action); return { ok: true, value: 'ok', error: undefined }; });
+    const outbox = createOutbox({ name: NAME, storage, isOnline: () => true });
+    createAsyncCommandBus({ retry: false, transport, outbox });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual(['a']);
     expect(outbox.pending.value).toBe(0);
+    outbox.dispose();
   });
 
-  it('hydrate() is a no-op when the persisted queue is an empty array', async () => {
-    const outbox = createOutbox({ storage: memoryStorage([]), isOnline: () => true, autoFlush: false });
-    await outbox.hydrate();
-    expect(outbox.pending.value).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// localStorageOutbox
-// ---------------------------------------------------------------------------
-
-describe('localStorageOutbox', () => {
-  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, payload: { p: 2 }, key: 'a:{"n":1}', queuedAt: '1970-01-01T00:00:00.001Z' };
-
-  it('round-trips records through localStorage', async () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-      setItem: (k: string, v: string) => { store.set(k, String(v)); },
-      removeItem: (k: string) => { store.delete(k); },
-    });
-
-    const s = localStorageOutbox('test:outbox');
-    expect(await s.load()).toBeNull();
-
-    await s.save([record]);
-    expect(store.has('test:outbox')).toBe(true);
-    expect(await s.load()).toEqual([record]);
-
-    await s.clear();
-    expect(await s.load()).toBeNull();
+  it('dispose() removes both listeners, once; the bus disposes its outbox', () => {
+    const win = stubWindow();
+    const { bus } = world({ isOnline: undefined, autoFlush: true });
+    expect(win.add).toHaveBeenCalledTimes(2);
+    bus.dispose();
+    expect(win.remove).toHaveBeenCalledTimes(2);
   });
 
-  it('is SSR-safe: no localStorage -> load() returns null, save/clear are no-ops', async () => {
-    const s = localStorageOutbox();
-    expect(await s.load()).toBeNull();
-    await expect(Promise.resolve(s.save([record]))).resolves.toBeUndefined();
-    await expect(Promise.resolve(s.clear())).resolves.toBeUndefined();
+  it('with isOnline given and autoFlush off, the window is not touched', () => {
+    const win = stubWindow();
+    world({ autoFlush: false });
+    expect(win.add).not.toHaveBeenCalled();
   });
 
-  it('returns null on corrupt JSON with a warning', async () => {
+  it('a store that fails to load warns and starts empty', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('localStorage', {
-      getItem: () => '{not json',
-      setItem: () => {},
-      removeItem: () => {},
-    });
-    const s = localStorageOutbox();
-    expect(await s.load()).toBeNull();
-    expect(warn).toHaveBeenCalled();
-  });
-
-  it('returns null when the stored JSON parses but is not an array', async () => {
-    vi.stubGlobal('localStorage', {
-      getItem: () => JSON.stringify({ not: 'an array' }),
-      setItem: () => {},
-      removeItem: () => {},
-    });
-    const s = localStorageOutbox();
-    expect(await s.load()).toBeNull();
+    const throwing: PersistStorage = { getItem: () => { throw new Error('load failed'); }, setItem: () => {} };
+    expect(world({ storage: throwing }).outbox.pending.value).toBe(0);
+    const rejecting: PersistStorage = { getItem: async () => { throw new Error('load failed'); }, setItem: () => {} };
+    const { outbox } = world({ storage: rejecting });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(outbox.pending.value).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 
 // ---------------------------------------------------------------------------
-// indexedDbOutbox - smoke test with a minimal in-memory fake (no deps)
+// The queue on IndexedDB (indexedDbStorage), with a minimal in-memory fake
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal fake IDB: enough surface for open/upgrade + get/put/clear requests.
- * The real order: the request succeeds, then its transaction completes. With
- * `abort`, a write's transaction aborts after its request succeeded instead.
+ * Minimal fake IDB: enough surface for open/upgrade + get/put requests. The
+ * real order: the request succeeds, then its transaction completes.
  */
-function fakeIndexedDb(abort?: { error: DOMException | null }) {
+function fakeIndexedDb() {
   const data = new Map<string, any>();
   const db = {
     createObjectStore: () => ({}),
-    transaction: (_name: string, mode: IDBTransactionMode) => {
+    transaction: () => {
       const tx: any = { oncomplete: null, onabort: null, error: null };
       function request(result?: any) {
         const req: any = { onsuccess: null, onerror: null, result };
         queueMicrotask(() => {
           req.onsuccess?.();
-          if (abort && mode === 'readwrite') queueMicrotask(() => { tx.error = abort.error; tx.onabort?.(); });
-          else queueMicrotask(() => tx.oncomplete?.());
+          queueMicrotask(() => tx.oncomplete?.());
         });
         return req;
       }
       tx.objectStore = () => ({
         get: (k: string) => request(data.get(k)),
-        put: (v: any, k: string) => { if (!abort) data.set(k, v); return request(); },
-        clear: () => { if (!abort) data.clear(); return request(); },
+        put: (v: any, k: string) => { data.set(k, v); return request(); },
       });
       return tx;
     },
@@ -796,77 +529,19 @@ function fakeIndexedDb(abort?: { error: DOMException | null }) {
   };
 }
 
-describe('indexedDbOutbox', () => {
-  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:{"n":1}', queuedAt: '1970-01-01T00:00:00.001Z' };
-
-  it('round-trips records through a fake indexedDB', async () => {
-    vi.stubGlobal('indexedDB', fakeIndexedDb());
-
-    const s = indexedDbOutbox();
-    expect(await s.load()).toBeNull();
-
-    await s.save([record]);
-    expect(await s.load()).toEqual([record]);
-
-    await s.clear();
-    expect(await s.load()).toBeNull();
-  });
-
-  it('surfaces a generic Error when open() fails with no req.error', async () => {
-    // `reject(req.error ?? new Error('indexedDB open failed'))` - the `??`
-    // fallback. A failed open normally carries a DOMException, but private
-    // browsing / quota refusals can fire onerror with `error` still null, and
-    // rejecting with `null` would surface as an unreadable failure downstream.
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('indexedDB', {
-      open: () => {
-        const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, error: null };
-        queueMicrotask(() => req.onerror?.());
-        return req;
-      },
-    });
-
-    const s = indexedDbOutbox();
-    expect(await s.load()).toBeNull(); // load swallows and reports null
-    await s.save([record]);
-    expect(warn).toHaveBeenCalled();
-    const reported = warn.mock.calls.flat().find((a) => a instanceof Error) as Error | undefined;
-    expect(reported?.message).toBe('indexedDB open failed');
-  });
-
-  it('is SSR-safe: no indexedDB -> load() resolves null, save/clear warn but do not throw', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const s = indexedDbOutbox();
-    expect(await s.load()).toBeNull();
-    await s.save([record]);
-    await s.clear();
-    expect(warn).toHaveBeenCalled();
-  });
-
+describe('the queue on IndexedDB', () => {
   it('works end-to-end as the outbox storage', async () => {
     vi.stubGlobal('indexedDB', fakeIndexedDb());
+    const first = world({ storage: indexedDbStorage() });
+    await first.bus.dispatch('a', { n: 1 });
+    expect(first.outbox.pending.value).toBe(1);
+    await new Promise((r) => setTimeout(r, 0));
 
-    const storage: OutboxStorage = indexedDbOutbox();
-    let online = false;
-    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
-    const bus = createAsyncCommandBus();
-    outbox.install(bus);
-    bus.register('a', async () => 'ok');
-
-    await bus.dispatch('a', { n: 1 });
-    expect(outbox.pending.value).toBe(1);
-
-    // A "second session" hydrates the same persisted queue.
-    const outbox2 = createOutbox({ storage: indexedDbOutbox(), isOnline: () => true, autoFlush: false });
-    const bus2 = createAsyncCommandBus();
-    outbox2.install(bus2);
-    bus2.register('a', async () => 'ok');
-    await outbox2.hydrate();
-    expect(outbox2.pending.value).toBe(1);
-
-    online = true;
-    const summary = await outbox2.flush();
-    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 0 });
+    // A "second session" loads the same stored queue at creation.
+    const second = world({ storage: indexedDbStorage() });
+    await vi.waitFor(() => expect(second.outbox.pending.value).toBe(1));
+    second.state.online = true;
+    expect(await second.outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 });
 
@@ -874,105 +549,18 @@ describe('indexedDbOutbox', () => {
 // createOutbox - key derivation and replay failure shapes
 // ---------------------------------------------------------------------------
 
-describe("createOutbox - custom key + non-Error replay failure", () => {
-  it("uses a supplied key() instead of the default commandKey", async () => {
+describe("createOutbox - custom key", () => {
+  it("uses a supplied key() instead of the default record id", async () => {
     const storage = memoryStorage();
-    const outbox = createOutbox({
-      actions: ["cart*"],
-      storage,
-      isOnline: () => false,
-      autoFlush: false,
-      // A caller-supplied idempotency key - e.g. one the backend already knows.
-      key: (cmd) => `custom:${cmd.action}:${(cmd.target as { id: number }).id}`,
-    });
-    const bus = createAsyncCommandBus({ onMissing: "ignore" });
-    outbox.install(bus);
+    // A caller-supplied idempotency key - e.g. one the backend already knows.
+    const { bus } = world({ actions: ["cart*"], storage, key: (cmd) => `custom:${cmd.action}:${(cmd.target as { id: number }).id}` });
 
     await bus.dispatch("cartAdd", { id: 7 });
 
-    expect(storage.data?.[0].key).toBe("custom:cartAdd:7");
+    await saved();
+    expect(storage.rows()[0]?.key).toBe("custom:cartAdd:7");
     // and specifically NOT the default derivation
-    expect(storage.data?.[0].key).not.toBe(commandKey("cartAdd", { id: 7 }));
-  });
-
-});
-
-/** Fake IDB whose open() fails - private browsing, quota, corrupted profile. */
-function failingOpenIndexedDb() {
-  return {
-    open: () => {
-      const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, error: new Error("open denied") };
-      queueMicrotask(() => req.onerror?.());
-      return req;
-    },
-  };
-}
-
-/** Fake IDB that opens fine but fails the individual request. */
-function failingRequestIndexedDb() {
-  const db = {
-    createObjectStore: () => ({}),
-    transaction: () => ({
-      objectStore: () => ({
-        get: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
-        put: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
-        clear: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
-      }),
-    }),
-  };
-  return {
-    open: () => {
-      const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, result: db };
-      queueMicrotask(() => { req.onupgradeneeded?.(); req.onsuccess?.(); });
-      return req;
-    },
-  };
-}
-
-describe("indexedDbOutbox - failure paths", () => {
-  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: "1970-01-01T00:00:00.001Z" };
-
-  it("a failed open() surfaces as a warning, not a throw, and does not poison later attempts", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubGlobal("indexedDB", failingOpenIndexedDb());
-
-    const s = indexedDbOutbox();
-    // Storage is a best-effort cache for an offline queue: losing it must
-    // degrade to "nothing persisted", never break the dispatch path.
-    await expect(s.save([record])).resolves.not.toThrow();
-    expect(await s.load()).toBeNull();
-    expect(warn).toHaveBeenCalled();
-
-    // The cached open promise is cleared on failure, so a second call retries
-    // rather than replaying the first rejection forever.
-    await expect(s.save([record])).resolves.not.toThrow();
-  });
-
-  it("a failed request surfaces the same way once the db is open", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubGlobal("indexedDB", failingRequestIndexedDb());
-
-    const s = indexedDbOutbox();
-    expect(await s.load()).toBeNull();
-    await expect(s.save([record])).resolves.not.toThrow();
-    await expect(s.clear()).resolves.not.toThrow();
-    expect(warn).toHaveBeenCalled();
-  });
-
-  it.each([
-    ['the browser\'s error', new DOMException('quota', 'QuotaExceededError'), 'QuotaExceededError'],
-    ['an Error naming the store, when the abort carries none', null, 'Error'],
-  ])("a write that does not commit warns with %s, and nothing is stored", async (_name, error, name) => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubGlobal("indexedDB", fakeIndexedDb({ error }));
-
-    const s = indexedDbOutbox();
-    await s.save([record]);
-    await s.clear();
-    const reported = warn.mock.calls.map((c) => c[1] as Error);
-    expect(reported.map((e) => e.name)).toEqual([name, name]);
-    if (!error) expect(reported[0].message).toBe('indexedDB write to "records" did not commit');
-    expect(await s.load()).toBeNull();
+    expect(storage.rows()[0]?.key).not.toBe(storage.rows()[0]?.id);
   });
 });
 
@@ -981,44 +569,20 @@ describe("indexedDbOutbox - failure paths", () => {
 // ---------------------------------------------------------------------------
 
 describe("storage failure paths", () => {
-  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: "1970-01-01T00:00:00.001Z" };
-
-  it("localStorageOutbox warns instead of throwing when the store rejects writes", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Quota exceeded is the real case here: Safari private mode throws on
-    // setItem rather than reporting a full quota, and an offline queue that
-    // cannot persist must still work in memory.
-    vi.stubGlobal("localStorage", {
-      getItem: () => { throw new Error("read denied"); },
-      setItem: () => { throw new Error("QuotaExceededError"); },
-      removeItem: () => { throw new Error("remove denied"); },
-    });
-
-    const s = localStorageOutbox();
-    expect(s.load()).toBeNull();
-    expect(() => s.save([record])).not.toThrow();
-    expect(() => s.clear()).not.toThrow();
-    expect(warn).toHaveBeenCalledTimes(3);
-  });
-
   it("createOutbox survives a storage that rejects on every call", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const storage: OutboxStorage = {
-      load: async () => { throw new Error("load failed"); },
-      save: async () => { throw new Error("save failed"); },
-      clear: async () => { throw new Error("clear failed"); },
+    const storage: PersistStorage = {
+      getItem: async () => { throw new Error("load failed"); },
+      setItem: async () => { throw new Error("save failed"); },
     };
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });
-    const bus = createAsyncCommandBus({ onMissing: "ignore" });
-    outbox.install(bus);
+    const { bus, outbox } = world({ storage });
+    await new Promise((r) => setTimeout(r, 0));
 
-    // hydrate(), saveQueue() and clear() each swallow-and-warn on their own,
+    // The load and every save each swallow-and-warn on their own (persist),
     // so the in-memory queue stays authoritative even with no working storage.
-    await expect(outbox.hydrate()).resolves.not.toThrow();
-
     const result = await bus.dispatch("cartAdd", { id: 1 });
     expect(result.ok).toBe(true);
-    expect(outbox.pending.value).toBe(1); // queued in memory despite save() failing
+    expect(outbox.pending.value).toBe(1); // held in memory despite save() failing
 
     await expect(outbox.clear()).resolves.not.toThrow();
     expect(outbox.pending.value).toBe(0);

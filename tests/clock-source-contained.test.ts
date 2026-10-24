@@ -9,7 +9,7 @@
  * breaker open, or defeat a rate limiter.
  *
  * That containment is currently true by construction rather than by design -
- * `cache`, `idempotent`, `circuitBreaker`, `rateLimit`, `throttle`, the
+ * `cache`, `idempotent`, `circuitBreaker`, `rateLimit`, `pace`, the
  * transport queues, the CSRF cache and the outbox all call `Date.now()` at their
  * own call sites. This file pins it, so a future refactor that routes any of
  * them through the injectable clock fails here instead of in production, where

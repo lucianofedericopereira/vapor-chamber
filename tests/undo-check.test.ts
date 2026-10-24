@@ -2,7 +2,7 @@
 import { afterEach, describe, expect } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { history, optimisticUndo } from '../src/plugins-core';
+import { history } from '../src/plugins-core';
 import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
@@ -23,8 +23,7 @@ function counter(bus: ReturnType<typeof createCommandBus>) {
 describe('canUndo on register', () => {
   it('history reports it, and undo() runs only when it is true', () => {
     const bus = createCommandBus();
-    const h = history({ bus, filter: (cmd) => cmd.action !== 'bump' });
-    bus.use(h);
+    const h = history({ bus, actionFilter: (a) => a !== 'bump' });
     const c = counter(bus);
     bus.dispatch('inc', null);
     expect(h.getState().canUndo).toBe(true);
@@ -39,8 +38,7 @@ describe('canUndo on register', () => {
 
   it('true again once the command on top can be undone', () => {
     const bus = createCommandBus();
-    const h = history({ bus, filter: (cmd) => cmd.action !== 'bump' });
-    bus.use(h);
+    const h = history({ bus, actionFilter: (a) => a !== 'bump' });
     const c = counter(bus);
     bus.dispatch('inc', null);
     bus.dispatch('bump', null);
@@ -53,7 +51,6 @@ describe('canUndo on register', () => {
   it('without canUndo, a non-empty history can undo, as before', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     bus.register('plain', () => 1, { undo: () => {} });
     bus.dispatch('plain', null);
     expect(h.getState().canUndo).toBe(true);
@@ -63,7 +60,6 @@ describe('canUndo on register', () => {
   it('unregistering the handler drops its check', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const off = bus.register('inc', () => 1, { undo: () => {}, canUndo: () => false });
     bus.dispatch('inc', null);
     expect(h.getState().canUndo).toBe(false);
@@ -74,7 +70,6 @@ describe('canUndo on register', () => {
   it('on the async bus too', async () => {
     const bus = createAsyncCommandBus();
     const h = history({ bus });
-    bus.use(h);
     bus.register('inc', async () => 1, { undo: () => {}, canUndo: () => false });
     await bus.dispatch('inc', null);
     expect(h.getState().canUndo).toBe(false);
@@ -85,7 +80,7 @@ describe('canUndo on register', () => {
     const bus = createCommandBus();
     setCommandBus(bus);
     const c = counter(bus);
-    const hist = useCommandHistory({ filter: (cmd) => cmd.action !== 'bump' });
+    const hist = useCommandHistory({ actionFilter: (a) => a !== 'bump' });
     bus.dispatch('inc', null);
     expect(hist.canUndo.value).toBe(true);
     bus.dispatch('bump', null);
@@ -108,7 +103,6 @@ describe('a rollback does not read canUndo', () => {
   it('a transactional batch reverses the step that ran; history refuses the same step', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const undone = wired(bus);
     bus.dispatch('inc', null);
     expect(h.undo()).toBeUndefined();
@@ -118,11 +112,10 @@ describe('a rollback does not read canUndo', () => {
     expect(undone).toEqual(['inc']);
   });
 
-  it('optimisticUndo reverses the action that failed', () => {
+  it('an optimistic action reverses the step that failed, whatever canUndo says', () => {
     const bus = createCommandBus();
     const undone: string[] = [];
-    bus.register('save', () => { throw new Error('boom'); }, { undo: () => { undone.push('save'); }, canUndo: () => false });
-    bus.use(optimisticUndo(bus, ['save']));
+    bus.register('save', () => { throw new Error('boom'); }, { undo: () => { undone.push('save'); }, canUndo: () => false, optimistic: true });
     expect(bus.dispatch('save', null).ok).toBe(false);
     expect(undone).toEqual(['save']);
   });
@@ -132,7 +125,7 @@ describe('a rollback does not read canUndo', () => {
  * Owner, 2026-10-04: undo runs only when it can be undone. Log s35.113.
  *
  * canUndo is history's check: history undoes by turn, newest first, and asks
- * it before each undo. A rollback (optimisticUndo, a transactional batch) is
+ * it before each undo. A rollback (an optimistic action's failure, a transactional batch) is
  * wired once to reverse the step that failed and never reads it. A store's
  * rebase depends on that: its canUndo is false for an older step. Owner,
  * 2026-10-05 (not built). Log s35.161.

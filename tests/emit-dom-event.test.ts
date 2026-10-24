@@ -6,30 +6,11 @@
  * `emit` goes through Vue's component event system - these tests verify
  * the DOM-event path that escapes that system.
  *
- * Loaded from the IIFE bundle in a sandboxed VM context because emitDOMEvent
- * is exposed on the elements/full IIFE namespaces, not from the ESM main
- * entry. (It's a widget-only helper - has no place in the general bus API.)
+ * The real function (src/widget.ts), the one both IIFEs and the root export.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-// We're testing the function directly. The same code is reused in iife.ts
-// and iife-elements.ts; we exercise it inline here to keep this test
-// independent of the build artifacts.
-function emitDOMEvent(
-  el: Element,
-  eventName: string,
-  detail?: unknown,
-  options: { bubbles?: boolean; composed?: boolean; cancelable?: boolean } = {},
-): boolean {
-  if (typeof CustomEvent !== 'function' || !el) return true;
-  const event = new CustomEvent(eventName, {
-    detail,
-    bubbles: options.bubbles ?? true,
-    composed: options.composed ?? true,
-    cancelable: options.cancelable ?? false,
-  });
-  return el.dispatchEvent(event);
-}
+import { emitDOMEvent } from '../src/widget';
 
 // Set up a minimal DOM. Vitest's default node env doesn't include the DOM,
 // so we use happy-dom-equivalent shims via the `Window` available when run

@@ -35,7 +35,7 @@ describe('examples/vapor-island-cart/src/main.ts: island lookup', () => {
     vi.stubGlobal('IntersectionObserver', class { observe = observe; unobserve() {} disconnect() {} });
     pageWith('<vc-products client:visible></vc-products><vc-cart client:visible></vc-cart>');
     await loadMain();
-    expect(observe.mock.calls.map((c) => (c[0] as Element).tagName.toLowerCase())).toEqual(['vc-products', 'vc-cart']);
+    expect(observe.mock.calls.map((c) => (c[0] as Element).tagName.toLowerCase()).sort()).toEqual(['vc-cart', 'vc-products']);
   });
 });
 
@@ -46,12 +46,14 @@ describe('examples/vapor-island-cart/src/main.ts: island lookup', () => {
  * `Object`, called it, got `{}`, and passed `undefined` to
  * defineVaporCustomElement under the name "constructor", which is not a valid
  * custom element name. The promise rejected unhandled. `Object.hasOwn` reads
- * the map the way src/dict.ts says external strings must be read.
+ * the map the way src/dict.ts says external strings must be read. Since
+ * 1.32 step 6d main.ts walks its island files and defines each tag through
+ * `defineWidget`, so a tag no island file names is never looked up.
  *
  * The control cannot hydrate a real island: neither test project loads
  * @vitejs/plugin-vue, so a `.vue` import does not compile here. It shows the
  * page's real islands still reach the loader path (client:visible observes
- * them) through the same module, so the fix did not stop the lookup working.
+ * them, through defineWidget's one observer) through the same module, so the fix did not stop the lookup working.
  * It runs in the Vapor project because main.ts imports
  * `defineVaporCustomElement` from `vue`, which only the with-vapor build has.
  */

@@ -373,7 +373,7 @@ describe('route table delivery - error paths', () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const router = createRouter({
       routes: { url: '/routes.json' },
-      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
+      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }), onInvalidateGroup: () => () => {} } as never,
     });
     await router.isReady();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('declares base "/admin"'));
@@ -385,7 +385,7 @@ describe('route table delivery - error paths', () => {
     const router = createRouter({
       base: '/admin',
       routes: { url: '/routes.json' },
-      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
+      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }), onInvalidateGroup: () => () => {} } as never,
     });
     await router.isReady();
     expect(warn).not.toHaveBeenCalled();
@@ -395,7 +395,7 @@ describe('route table delivery - error paths', () => {
   it('remote: a failing fetch surfaces as router:failed:routes', async () => {
     const router = createRouter({
       routes: { url: '/routes.json' },
-      http: { get: async () => { throw new Error('network down'); } } as never,
+      http: { get: async () => { throw new Error('network down'); }, onInvalidateGroup: () => () => {} } as never,
     });
     await expect(router.isReady()).rejects.toMatchObject({ code: 'router:failed:routes' });
   });

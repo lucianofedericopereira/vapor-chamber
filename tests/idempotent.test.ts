@@ -65,12 +65,13 @@ describe('idempotent plugin', () => {
     expect(n).toBe(2);
   });
 
-  it('stamps cmd.meta.idempotencyKey (default: action + stable target)', async ({ asyncBus: bus }) => {
+  it("stamps cmd.meta.idempotencyKey (default: the dispatch's id)", async ({ asyncBus: bus }) => {
     let stamped: string | undefined;
+    let id: string | undefined;
     bus.use(idempotent());
-    bus.register('save', async (cmd) => { stamped = cmd.meta?.idempotencyKey; return 1; });
+    bus.register('save', async (cmd) => { stamped = cmd.meta?.idempotencyKey; id = cmd.meta?.id; return 1; });
     await bus.dispatch('save', { a: 1, b: 2 });
-    expect(stamped).toBe('save:{"a":1,"b":2}');
+    expect(stamped).toBe(id);
   });
 
   it('honors a custom key and skips on null', async ({ asyncBus: bus }) => {

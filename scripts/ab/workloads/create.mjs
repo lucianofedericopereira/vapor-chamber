@@ -14,7 +14,7 @@ bus.register('inc', (cmd) => cmd.payload + 1);
 export const N = { create_useCommand: 50_000, create_component_mix: 30_000 };
 export function create_useCommand(n) {
   let s = 0;
-  for (let i = 0; i < n; i++) { const sc = effectScope(); const c = sc.run(() => useCommand()); s += c.loading.value ? 1 : 0; sc.stop(); }
+  for (let i = 0; i < n; i++) { const sc = effectScope(); const c = sc.run(() => useCommand()); s += typeof c.dispatch === 'function' ? 1 : 0; sc.stop(); }
   return s;
 }
 export function create_component_mix(n) {
@@ -22,7 +22,7 @@ export function create_component_mix(n) {
   for (let i = 0; i < n; i++) {
     const sc = effectScope();
     const r = sc.run(() => ({ c: useCommand(), q: useCommandQuery(), sh: useSharedCommandState() }));
-    s += (r.c.loading.value ? 1 : 0) + (r.q.loading.value ? 1 : 0) + r.sh.inFlight.value;
+    s += (typeof r.c.dispatch === 'function' ? 1 : 0) + (r.q.loading.value ? 1 : 0) + r.sh.errors.value.length;
     sc.stop();
   }
   return s;

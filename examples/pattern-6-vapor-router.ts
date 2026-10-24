@@ -11,6 +11,11 @@
  *   WRITES -> vapor-chamber: bus commands to POST /api/vc (validation, undo,
  *            optimistic updates, outbox). Exactly what pattern-2 shows.
  *
+ *   ONE CLIENT -> the bus and the router send through one http client, so a
+ *            write that names the groups it changed (`Cache-Group-Invalidation`,
+ *            RFC 9875) refreshes the reads on screen whose answer named the
+ *            same group (`Cache-Groups`). No refetch call in the page.
+ *
  * Laravel side: ONE catch-all for the admin island...
  *
  *   Route::view('/admin/{any?}', 'admin.shell')->where('any', '.*');
@@ -21,22 +26,28 @@
  *   <div id="admin"></div>
  */
 
-import { createAsyncCommandBus, createHttpBridge, setCommandBus } from 'vapor-chamber/vue';
+import { createAsyncCommandBus, createHttpClient, httpTransport, setCommandBus } from 'vapor-chamber/vue';
 import { createRouter, useQueryParam, useRouter } from 'vapor-chamber/router';
-// Loader preset for plain JSON backends: 'vapor-chamber/router-fetch'.
+import { routerHttp } from 'vapor-chamber/router/remote';
+// Loader preset for plain JSON backends.
+import { fetchLoaders } from 'vapor-chamber/router-fetch';
 
-// ---- writes: the bus, unchanged ------------------------------------------------
+// ---- writes: the bus ----------------------------------------------------------
 
-// ASYNC bus - createHttpBridge is an async plugin (same reasoning as pattern-2).
-const bus = createAsyncCommandBus();
+// The app's one client: the transport and the router both send through it.
+const http = createHttpClient({ csrf: true });
+const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient: http }) });
 setCommandBus(bus);
-bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
 // ---- reads: the router ---------------------------------------------------------
 
 const router = createRouter({
   base: '/admin',
   routes: { inline: '#vcr-routes' }, // Blade-rendered, permission-filtered server-side
+  // The router marks the app's client as router traffic and shares its cache. A read is
+  // kept a minute, and a write that names its group ends that early.
+  http: routerHttp({ http }),
+  loaders: fetchLoaders({ cache: { ttl: 60_000 } }),
   components: {
     'Catalog/ListPage': () => import('./pages/CatalogList.vue'),
     'Catalog/EditPage': () => import('./pages/CatalogEdit.vue'),
@@ -89,4 +100,10 @@ const router = createRouter({
 //   const result = await dispatch('productUpdate', { id }, form);  // bus write
 //   if (result.ok) router.push({ name: 'catalog.products' });      // router read
 
-export { bus, router };
+//
+// What the server says, per answer:
+//   GET  /api/products?page=1  ->  Cache-Groups: products        (the list belongs to "products")
+//   POST /api/vc productUpdate ->  Cache-Group-Invalidation: products   (the write changed them)
+// The list on screen is read again, past both caches, with `router.isRevalidating` true meanwhile.
+
+export { bus, http, router };

@@ -1,6 +1,7 @@
-/** Schema keys: the camelCase name the bus validates is a typed name too; a raw one still compiles and warns in development (log s35.175). Two keys with one camel name throw at creation (D13 G8). Rationale at the end. */
+/** Schema keys: the camelCase name the bus validates is the typed name; a raw one warns in development (log s35.175). Two keys with one camel name throw at creation (D13 G8). Rationale at the end. */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { createAsyncSchemaCommandBus, createSchemaCommandBus, ERROR_CODE_REGISTRY, type InferMap } from '../src/schema';
+import { createAsyncSchemaCommandBus, createSchemaCommandBus, type InferMap } from '../src/schema';
+import { ERROR_CODE_REGISTRY } from '../src/error-registry';
 import { stubEnv } from '../src/vitest-pure';
 
 afterEach(() => vi.restoreAllMocks());
@@ -12,11 +13,11 @@ const warnings = () => {
 };
 
 describe('types', () => {
-  it('InferMap has the camelCase name, and keeps the raw one', () => {
+  it('InferMap has the camelCase name only', () => {
     type M = InferMap<typeof schema>;
     expectTypeOf<M['cartAdd']['target']['id']>().toEqualTypeOf<number>();
     expectTypeOf<M['userGet']>().not.toBeNever();
-    expectTypeOf<M['cart_add']['target']['id']>().toEqualTypeOf<number>();
+    expectTypeOf<keyof M>().toEqualTypeOf<'cartAdd' | 'userGet' | 'cartClear'>();
     expectTypeOf<M['cartClear']>().not.toBeNever();
   });
 });
@@ -101,8 +102,8 @@ describe('two keys, one camel name', () => {
  * registered and dispatched `cart_add`, which the validator, getSchema and
  * MCP know as `cartAdd`: validation was skipped, and MCP listed a tool the
  * code never registered (audit B12, probe P11). InferMap now carries each
- * key's camelCase name too (ToCamel, toCamel's rules at the type level), so
- * the name that validates is typed, and the raw name still compiles (1.26 code).
+ * key's camelCase name (ToCamel, toCamel's rules at the type level), so
+ * the name that validates is the typed name.
  * The one warning stays where the rename happens, at bus creation, and now
  * says to register and dispatch the camel name. It printed in production
  * and is DEV-only now. No register wrapper: one fact, one place. Log s35.175.

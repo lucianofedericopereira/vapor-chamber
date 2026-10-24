@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { effectScope, watchEffect } from 'vue';
 import { createCommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { defineChamberStore, fieldRef } from '../src/store';
+import { history } from '../src/plugins-core';
 
 type S = { a: number; b: number; list: number[] };
 const useS = defineChamberStore('fields', {
@@ -34,7 +34,6 @@ describe('$onField', () => {
   it('unsubscribes, and fires on $reset and on an undo too', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const store = useS(bus);
     const a: number[] = [];
     const off = store.$onField('a', (v) => a.push(v as number));

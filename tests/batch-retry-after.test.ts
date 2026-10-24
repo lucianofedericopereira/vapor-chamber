@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, type BusError, type CommandResult } from '../src/command-bus';
 import { problemOf } from '../src/http-errors';
-import { createBatchingHttpBridge, createWsBridge } from '../src/transports';
+import { httpTransport, wsTransport } from '../src/transports';
 import { batchServer, MockWebSocket } from './backend-stubs';
 
 afterEach(() => {
@@ -17,8 +17,7 @@ const thenSaved = (first: Record<string, unknown>) => {
   return batchServer(() => (n++ === 0 ? first : { state: 'saved' }));
 };
 const bus = (idempotent: boolean) => {
-  const b = createAsyncCommandBus({ retry: idempotent ? { actionPolicies: { save: 'idempotent' } } : {} });
-  b.use(createBatchingHttpBridge({ endpoint: '/batch' }));
+  const b = createAsyncCommandBus({ retry: idempotent ? { actionPolicies: { save: 'idempotent' } } : {}, transport: httpTransport({ endpoint: '/batch', batch: {} }) });
   return b;
 };
 const errorOf = (r: CommandResult) => r.error as BusError;
@@ -84,9 +83,8 @@ describe('a WebSocket frame with its own Retry-After', () => {
   it('is read as a batched result is', async () => {
     let socket!: MockWebSocket;
     vi.stubGlobal('WebSocket', class extends MockWebSocket { constructor(url: string) { super(url); socket = this; } });
-    const ws = createWsBridge({ url: 'ws://x', reconnect: false });
-    const b = createAsyncCommandBus({ retry: false });
-    b.use(ws);
+    const ws = wsTransport({ url: 'ws://x', reconnect: false });
+    const b = createAsyncCommandBus({ retry: false, transport: ws });
     ws.connect();
     await Promise.resolve();
     const p = b.dispatch('save', { id: 1 });

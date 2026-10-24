@@ -6,13 +6,16 @@
 import { effectScope } from 'vue';
 import { createCommandBus } from '__DIST__/index.js';
 import { useSharedCommandState } from '__DIST__/vue.js';
+// Arms one key: `pending` from 1.32 step 5, `isLoading` in the base arm.
+const armKey = (s, a, t) => (s.pending ?? s.isLoading)(a, t);
 
 function make(kind) {
   const bus = createCommandBus();
   bus.register('x', (cmd) => cmd.target + 1);
-  if (kind === 'hook' || kind === 'both') bus.onBefore(() => {});
+  // A no-op before-hook on the base arm, a no-op started part from 1.32 step 8e.
+  if (kind === 'hook' || kind === 'both') (bus.onBefore ? bus.onBefore(() => {}) : bus.use({ started: () => {} }));
   if (kind === 'star' || kind === 'both') bus.on('*', () => {});
-  if (kind === 'tracked') effectScope().run(() => useSharedCommandState({ bus }).isLoading('x', 1));
+  if (kind === 'tracked') effectScope().run(() => armKey(useSharedCommandState({ bus }), 'x', 1));
   return bus;
 }
 const buses = { bare: make('bare'), hook: make('hook'), star: make('star'), both: make('both'), tracked: make('tracked') };

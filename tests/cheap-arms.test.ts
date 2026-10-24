@@ -111,7 +111,7 @@ describe('http response fallbacks', () => {
       .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
 
     const started = Date.now();
-    await expect(createHttpClient().get('/api/data', { retry: 1 })).rejects.toMatchObject({ context: { status: 429 } });
+    await expect(createHttpClient().get('/api/data', { retry: { maxAttempts: 2 } })).rejects.toMatchObject({ context: { status: 429 } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(Date.now() - started).toBeLessThan(5000);
   });

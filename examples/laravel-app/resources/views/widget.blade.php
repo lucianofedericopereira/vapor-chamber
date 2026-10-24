@@ -65,7 +65,7 @@
        delimiters. Here the delimiters really are comments, textContent skips
        them, and the URL is assembled at runtime. (Described, not shown: a
        marker written into prose is still a marker to the stamper.) --}}
-  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --></span>
+  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --></span>
 
   {{-- 3. Vue, as a MODULE. Vapor ships only as `esm-browser` - there is no
           `vue.runtime-with-vapor.global.js` - so a classic <script src> tag
@@ -80,7 +80,14 @@
 
     VaporChamber.configureVue(Vue);
 
-    const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc', csrf: true });
+    // The build this page was served from: after a deploy a command from this
+    // open tab is answered { redirect } to the page, and onRedirect loads it.
+    const { bus } = VaporChamber.connect({
+      endpoint: '/api/vc',
+      csrf: true,
+      headers: { 'X-App-Version': @json((string) config('vapor-chamber.app_version')) },
+      onRedirect: (url) => location.assign(url),
+    });
 
     // A Vapor setup() returns a BLOCK - real DOM nodes. There is no compiler on
     // a no-build page to turn a template into one, and `h` is not on the
@@ -90,22 +97,25 @@
         const block = document.createElement('div');
         const button = document.createElement('button');
         button.textContent = 'Add coffee';
+        // The widget's busy state is markup: bindCommands on the widget's own root
+        // dispatches the command, sets aria-disabled while it is in flight (never
+        // disabled, which would send a keyboard user's focus to <body>), ignores a
+        // press meanwhile and announces a failure.
+        button.setAttribute('data-vc-command', 'cartAdd');
+        button.setAttribute('data-vc-target', '{"id":1}');
+        button.setAttribute('data-vc-payload', '{"qty":1}');
         // The widget's own live region: a failure is said, not swallowed.
         const status = document.createElement('p');
         status.setAttribute('role', 'status');
         block.append(button, status);
-        button.addEventListener('click', async () => {
-          // aria-disabled, not disabled: disabling the focused button would
-          // send a keyboard user's focus to <body>. A press in flight is ignored.
-          if (button.getAttribute('aria-disabled') === 'true') return;
-          button.setAttribute('aria-disabled', 'true');
-          const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
-          button.removeAttribute('aria-disabled');
+        VaporChamber.bindCommands(block, { bus });
+        // The answer decides what the page hears. Bridge out of the shadow root to
+        // whatever the page uses. A redirect is a navigation, not a failure to show.
+        bus.on('cartAdd', (cmd, result) => {
+          if (result.error?.code === 'transport:refused:redirect') return;
           status.textContent = result.ok ? '' : result.error.message;
           if (!result.ok) return;
-          // Bridge out of the shadow root to whatever the page uses.
-          const host = button.getRootNode().host;
-          VaporChamber.emitDOMEvent(host, 'cart-added', {
+          VaporChamber.emitDOMEvent(button.getRootNode().host, 'cart-added', {
             count: result.value.count,
             lastAdded: result.value.lastAdded,
           });

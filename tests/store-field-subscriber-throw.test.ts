@@ -1,9 +1,9 @@
 /** A `$onField` subscriber that throws is logged; the write and the other subscribers go on. Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type CommandResult } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { defineChamberStore as defineVue } from '../src/store';
 import { defineChamberStore as defineCore } from '../src/store/core';
+import { history } from '../src/plugins-core';
 
 type Cart = { items: number[]; n: number };
 const state = (): Cart => ({ items: [], n: 0 });
@@ -17,7 +17,6 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
       const bus = createCommandBus();
       const h = history({ bus });
-      bus.use(h);
       const cart = (define as typeof defineCore)('cart', { state, reducers })(bus);
       const boom = new Error('subscriber');
       const later: string[] = [];
@@ -32,7 +31,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       expect(later).toEqual(['items', 'n=1']);
       expect(h.getState().past.map((c) => c.action)).toEqual(['cartAdd']);
       expect(logged).toHaveBeenCalledTimes(1);
-      expect(logged).toHaveBeenCalledWith('[vapor-chamber] Store "cart": the $onField subscriber for "items" threw:', boom);
+      expect(logged).toHaveBeenCalledWith(expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] store:failed:subscriber: Store "cart": the \$onField subscriber for "items" threw/), boom);
       cart.$dispose();
     });
 

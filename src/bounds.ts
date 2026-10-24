@@ -81,7 +81,7 @@ export type Delay = number & { readonly [delayBrand]: true };
  * A caller-supplied delay, by countOption's rule with MAX_TIMEOUT_MS as the
  * ceiling: NaN is `fallback`, a larger value the maximum. The fallback is the
  * library's own default. `undefined` as the default means "no timer" (the
- * batching bridge's microtask).
+ * HTTP transport's batch microtask).
  */
 export function delayOption(value: unknown, fallback: number, min?: number): Delay;
 export function delayOption(value: unknown, fallback: undefined, min?: number): Delay | undefined;
@@ -92,7 +92,7 @@ export function delayOption(value: unknown, fallback: number | undefined, min = 
 /**
  * True for a wait a timer can keep: a number from 0 to MAX_TIMEOUT_MS. The
  * rule every reader of a declared `retryIn` applies (the async bus's retry,
- * the outbox, pollWith), so the wait is checked where it is read, whoever
+ * the outbox, a 202's poll), so the wait is checked where it is read, whoever
  * declared it. `typeof === 'number'` let NaN and Infinity through: a timer
  * fires at once on both, and the outbox re-flushed in a loop on either
  * (tests/retry-in-unusable.test.ts).

@@ -37,8 +37,9 @@
  * TABLE, not data, and nothing else on the `Router` type re-runs a loader. So
  * bus-side would have had to import a router module into the root barrel, which
  * is precisely what the constraint forbids. What it needs from the BUS, by
- * contrast, is one function shape - `(cmd, next) => result` - declared inline in
- * the implementation, importing nothing.
+ * contrast, is two shapes - the plugin function and `on(pattern, listener)` -
+ * declared inline in the implementation, importing nothing. Since 1.32 (step
+ * 3g) it listens through `on` (PluginParts.attach) and holds no `next`.
  *
  * Deep one way, shallow the other. The edge exists in one direction and it is
  * the cheap one, so it ships router-side - from the EXISTING
@@ -87,10 +88,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createCommandBus, matchesPattern } from '../src/command-bus';
+import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { matchesPattern } from '../src/pattern';
 import { isRouterError } from '@router/errors';
 import type { LoaderHandlers } from '@router/loaders';
-import { revalidateRoutes } from '@router/revalidate';
+import { revalidateRoutes, type RevalidatePlugin } from '@router/revalidate';
 import { createMemoryHistory } from '@router/history';
 import { createRouter, runLoaders } from '@router/index';
 import type { Router } from '@router/router-type';
@@ -102,6 +104,20 @@ const ROWS = [
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const LOADERS = (fn: () => unknown): LoaderHandlers => ({ prefixes: { 'rows:': () => fn() } });
+
+/** One command settled on a real bus the plugin is installed on: a success, or a handler's throw. */
+function fire(plugin: RevalidatePlugin, action: string, ok = true) {
+  const bus = createCommandBus();
+  bus.register(action, ok ? () => 'ok' : () => { throw new Error('nope'); });
+  bus.use(plugin as never);
+  return bus.dispatch(action, {});
+}
+function fireAsync(plugin: RevalidatePlugin, action: string, ok = true) {
+  const bus = createAsyncCommandBus({ retry: false });
+  bus.register(action, async () => { if (!ok) throw new Error('nope'); return 'ok'; });
+  bus.use(plugin as never);
+  return bus.dispatch(action, {});
+}
 
 function makeRouter(onLoad: () => unknown) {
   return createRouter({
@@ -180,7 +196,7 @@ describe('revalidateRoutes - behaviour', () => {
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 1 });
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
@@ -196,7 +212,7 @@ describe('revalidateRoutes - behaviour', () => {
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'orderCreate' }, () => ({ ok: true }));
+    fire(plugin, 'orderCreate');
     await settle();
 
     expect(n).toBe(before);
@@ -212,7 +228,7 @@ describe('revalidateRoutes - behaviour', () => {
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'cartAdd' }, () => ({ ok: false, error: new Error('nope') }));
+    fire(plugin, 'cartAdd', false);
     await settle();
 
     expect(n).toBe(before);
@@ -227,7 +243,7 @@ describe('revalidateRoutes - behaviour', () => {
     await router.push('/cart');
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { productSave: 'affected' });
-    plugin({ action: 'productSave' }, () => ({ ok: true }));
+    fire(plugin, 'productSave');
     await settle();
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
@@ -242,8 +258,8 @@ describe('revalidateRoutes - behaviour', () => {
 
     const onError = vi.fn();
     const plugin = revalidateRoutes(router, LOADERS(() => ({ ok: 1 })), { 'cart*': ['nope'] }, { onError });
-    const result = plugin({ action: 'cartAdd' }, () => ({ ok: true }));
-    expect(result).toEqual({ ok: true });
+    const result = fire(plugin, 'cartAdd');
+    expect(result).toMatchObject({ ok: true });
     expect(isRouterError(onError.mock.calls[0]?.[0], 'router:missing:record')).toBe(true);
     plugin.dispose();
     router.dispose();
@@ -274,7 +290,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
     plugin.dispose();
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     expect(n).toBe(before);
@@ -288,7 +304,7 @@ describe('revalidateRoutes - behaviour', () => {
     await router.push('/cart');
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'cartAdd' }, () => Promise.resolve({ ok: true }));
+    void fireAsync(plugin, 'cartAdd');
     await settle();
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
@@ -308,7 +324,7 @@ describe('revalidateRoutes - behaviour', () => {
     });
     expect(plugin.isRevalidating.value).toBe(false);
 
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
     expect(plugin.isRevalidating.value).toBe(true);
     // The router's flag belongs to the loader-driven channel and must not move.
@@ -333,7 +349,7 @@ describe('revalidateRoutes - behaviour', () => {
       { 'cart*': ['shop.cart'] },
       { onError: (e) => errors.push(e) },
     );
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     expect(errors).toHaveLength(1);
@@ -352,8 +368,8 @@ describe('revalidateRoutes - behaviour', () => {
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), {});
     // `constructor` is on Object.prototype; a `map[action]` lookup would find
     // it and treat it as a configured target.
-    plugin({ action: 'constructor' }, () => ({ ok: true }));
-    plugin({ action: 'toString' }, () => ({ ok: true }));
+    fire(plugin, 'constructor');
+    fire(plugin, 'toString');
     await settle();
 
     expect(n).toBe(before);
@@ -370,7 +386,7 @@ describe('revalidateRoutes - edges', () => {
     await router.push('/cart');
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { '*': ['shop.cart'] });
-    plugin({ action: 'literallyAnything' }, () => ({ ok: true }));
+    fire(plugin, 'literallyAnything');
     await settle();
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
@@ -384,7 +400,7 @@ describe('revalidateRoutes - edges', () => {
     // Deliberately NOT ready: START_LOCATION matches nothing, so there is no
     // leaf to resolve a chain against.
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { '*': 'affected' });
-    expect(() => plugin({ action: 'cartAdd' }, () => ({ ok: true }))).not.toThrow();
+    expect(() => fire(plugin, 'cartAdd')).not.toThrow();
     await settle();
     expect(n).toBe(0);
     plugin.dispose();
@@ -398,7 +414,7 @@ describe('revalidateRoutes - edges', () => {
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { '*': 'affected' });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     expect(n).toBe(before);
@@ -412,7 +428,7 @@ describe('revalidateRoutes - edges', () => {
 
     const onError = vi.fn();
     const plugin = revalidateRoutes(router, LOADERS(() => ({ v: 1 })), { '*': ['shop.cart'] }, { onError });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     const caught = onError.mock.calls[0]?.[0];
     expect(isRouterError(caught, 'router:missing:record')).toBe(true);
     expect(String((caught as Error).message)).toContain('none');
@@ -430,7 +446,7 @@ describe('revalidateRoutes - edges', () => {
     const plugin = revalidateRoutes(router, LOADERS(async () => { await gate; return { page: 'STALE' }; }), {
       'cart*': ['shop.cart'],
     });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     await router.push('/');          // navigate away while the refresh is open
@@ -453,7 +469,7 @@ describe('revalidateRoutes - edges', () => {
     const plugin = revalidateRoutes(router, LOADERS(async () => { await gate; return { v: 'second' }; }), {
       'cart*': ['shop.cart'],
     });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
     plugin.dispose();
     release();
@@ -472,7 +488,7 @@ describe('revalidateRoutes - edges', () => {
     await router.push('/cart');
 
     const plugin = revalidateRoutes(router, LOADERS(() => { throw new Error('down'); }), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
 
     expect(seen.some((m) => String(m).includes('revalidateRoutes refresh failed'))).toBe(true);
@@ -491,9 +507,9 @@ describe('revalidateRoutes - edges', () => {
     const plugin = revalidateRoutes(router, LOADERS(async () => { await gate; return { v: 1 }; }), {
       'cart*': ['shop.cart'],
     });
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
-    plugin({ action: 'cartRemove' }, () => ({ ok: true }));
+    fire(plugin, 'cartRemove');
     await settle();
     expect(plugin.isRevalidating.value).toBe(true);
 
@@ -524,7 +540,7 @@ describe('revalidateRoutes - edges', () => {
       { 'cart*': ['shop.cart'] },
       { onError: (e) => errors.push(e) },
     );
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     await settle();
     plugin.dispose();
     release();
@@ -544,7 +560,7 @@ describe('revalidateRoutes - edges', () => {
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { 'cart*': ['shop.cart'] });
-    plugin({ action: 'cartAdd' }, () => Promise.resolve({ ok: false }));
+    void fireAsync(plugin, 'cartAdd', false);
     await settle();
 
     expect(n).toBe(before);
@@ -614,8 +630,8 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     });
 
     const cartBefore = router.currentRoute.value.data.get('shop.cart');
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
-    plugin({ action: 'wishAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
+    fire(plugin, 'wishAdd');
     await settle();
 
     // Both landed: the wishlist's refresh does not abort the cart's (which
@@ -643,8 +659,8 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     };
     const plugin = revalidateRoutes(router, loaders, { cartAdd: ['shop.cart'] });
 
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
+    fire(plugin, 'cartAdd');
     await settle();
 
     // The first was superseded, not merged: the committed value is the later
@@ -667,7 +683,7 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
       { prefixes: { 'rows:': async (ref: string) => ({ ref }) } },
       { cartAdd: ['shop.cart'] },
     );
-    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    fire(plugin, 'cartAdd');
     plugin.dispose();
     await settle();
 

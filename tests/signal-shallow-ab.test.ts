@@ -1,11 +1,12 @@
 /**
  * Empirical proof: signal() backed by Vue shallowRef vs ref, measured on the
- * REAL useCommandState dispatch path.
+ * real dispatch path: a handler that writes a `signal()` per dispatch, the path
+ * a command-driven state takes.
  *
  * Why this exists as its own test and not in perf.bench.ts: vitest's bench()
  * harness has a ~480µs/iteration setup floor (createCommandBus + effectScope +
  * the bench machinery) that swamps the signal-write cost and compresses every
- * useCommandState case to the same ~2,100 ops/sec - it literally cannot resolve
+ * dispatch case to the same ~2,100 ops/sec - it literally cannot resolve
  * the ref-vs-shallowRef difference. This harness uses precise process.hrtime
  * timing with the setup amortised, interleaves A/B reps to cancel thermal drift,
  * and takes medians. The numbers it prints are the source of truth for the
@@ -19,7 +20,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { ref, shallowRef, effectScope } from 'vue';
 import { configureSignal } from '../src/signal';
-import { useCommandState, getCommandBus, setCommandBus, waitForVueDetection } from '../src/chamber';
+import { getCommandBus, setCommandBus, waitForVueDetection } from '../src/chamber';
+import { signal } from '../src/signal';
 import { createCommandBus } from '../src/command-bus';
 import { runTiming } from './under-coverage';
 
@@ -32,19 +34,21 @@ function runOnce(kind: Kind, n: number): void {
   const scope = effectScope();
   scope.run(() => {
     if (kind === 'array') {
-      const { dispose } = useCommandState<number[]>([], { append: (s, cmd) => [...s, cmd.target] });
+      const state = signal<number[]>([]);
+      const off = bus.register('append', (cmd) => (state.value = [...state.value, cmd.target]));
       for (let i = 0; i < n; i++) bus.dispatch('append', i);
-      dispose();
+      off();
     } else {
-      const { dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
+      const state = signal(0);
+      const off = bus.register('inc', () => (state.value = state.value + 1));
       for (let i = 0; i < n; i++) bus.dispatch('inc', null);
-      dispose();
+      off();
     }
   });
   scope.stop();
 }
 
-/** ops/sec where one "op" = `n` dispatches through a fresh useCommandState. */
+/** ops/sec where one "op" = `n` dispatches into a fresh signal. */
 function opsPerSec(factory: Factory, kind: Kind, n: number, iters: number): number {
   configureSignal(factory as any);
   const t0 = process.hrtime.bigint();
@@ -58,7 +62,7 @@ function median(xs: number[]): number {
   return s[Math.floor(s.length / 2)];
 }
 
-describe('signal() shallowRef vs ref - empirical proof (real useCommandState path)', () => {
+describe('signal() shallowRef vs ref - empirical proof (real dispatch path)', () => {
   // Leave the factory as the library default (shallowRef) for any later tests.
   afterAll(() => { configureSignal(shallowRef as any); });
 
@@ -101,7 +105,7 @@ describe('signal() shallowRef vs ref - empirical proof (real useCommandState pat
     }
 
     // eslint-disable-next-line no-console
-    console.log('\n  signal() backend - real useCommandState dispatch path (median of 5 interleaved reps)');
+    console.log('\n  signal() backend - real dispatch path (median of 5 interleaved reps)');
     for (const [k, v] of Object.entries(results)) {
       const pct = ((v.ratio - 1) * 100);
       // eslint-disable-next-line no-console

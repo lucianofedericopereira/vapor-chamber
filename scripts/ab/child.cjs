@@ -18,6 +18,9 @@
 // 0.2-0.8 us and 1.5 us, log s35.45), so the timed window is hrtime around
 // f(n) alone. A workload exporting `ASYNC = true` gets the same loop awaiting
 // f(n), so the window closes when its promise settles; a sync one is unchanged.
+// A workload exporting `SETTLE = { fn: async () => {} }` has it awaited after
+// every call of fn, outside the window: the place to drain work a call leaves
+// queued, such as another tab's messages (tests/ab-tool.test.ts).
 'use strict';
 const { GCProfiler } = require('node:v8');
 const { mkLoop } = require('./loop.cjs');
@@ -26,6 +29,12 @@ const cfg = JSON.parse(process.argv[2]);
 const arms = cfg.order.map((k) => ({ k, mod: require(cfg.bundles[k]) }));
 for (const a of arms) a.loop = mkLoop(a.mod.ASYNC === true);
 const minor = () => global.gc({ type: 'minor' });
+const call = async (a, fn, n) => {
+  const r = await a.loop(a.mod[fn], n, GCProfiler);
+  const settle = a.mod.SETTLE?.[fn];
+  if (settle) await settle();
+  return r;
+};
 
 (async () => {
 // Sizing mode: ns per iteration of the first arm on a WARM call, per function.
@@ -34,9 +43,9 @@ if (cfg.size) {
   for (const fn of Object.keys(arms[0].mod.N)) {
     const a = arms[0];
     const probe = Math.max(1000, a.mod.N[fn] >> 4);
-    for (let w = 0; w < 3; w++) { minor(); await a.loop(a.mod[fn], probe, GCProfiler); }
+    for (let w = 0; w < 3; w++) { minor(); await call(a, fn, probe); }
     const xs = [];
-    for (let w = 0; w < 5; w++) { minor(); xs.push((await a.loop(a.mod[fn], probe, GCProfiler))[0]); }
+    for (let w = 0; w < 5; w++) { minor(); xs.push((await call(a, fn, probe))[0]); }
     out[fn] = xs.sort((x, y) => x - y)[2];
   }
   process.stdout.write(JSON.stringify(out));
@@ -48,14 +57,14 @@ let sink = 0;
 for (const fn of Object.keys(arms[0].mod.N)) {
   if (cfg.only && !cfg.only.includes(fn)) continue;
   const n = cfg.n[fn];
-  for (let w = 0; w < 3; w++) for (const a of arms) { minor(); await a.loop(a.mod[fn], n, GCProfiler); }
+  for (let w = 0; w < 3; w++) for (const a of arms) { minor(); await call(a, fn, n); }
   global.gc();
-  for (let w = 0; w < 2; w++) for (const a of arms) { minor(); await a.loop(a.mod[fn], n, GCProfiler); }
+  for (let w = 0; w < 2; w++) for (const a of arms) { minor(); await call(a, fn, n); }
   const rec = Object.fromEntries(arms.map((a) => [a.k, { wall: [], cpu: [], thr: [], gc: [] }]));
   for (let r = 0; r < cfg.rounds; r++) {
     for (const a of r % 2 ? [...arms].reverse() : arms) {
       minor();
-      const [wall, cpu, thr, gc, v] = await a.loop(a.mod[fn], n, GCProfiler);
+      const [wall, cpu, thr, gc, v] = await call(a, fn, n);
       const x = rec[a.k];
       x.wall.push(wall);
       x.cpu.push(cpu);

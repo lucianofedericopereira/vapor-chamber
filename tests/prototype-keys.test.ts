@@ -11,7 +11,7 @@
 import { describe, expect } from 'vitest';
 import { commandKey } from '../src/command-bus';
 import { createFormBus } from '../src/form';
-import { optimistic, validator } from '../src/plugins-core';
+import { validator } from '../src/plugins-core';
 import { validateSchemas, validateSchemasAsync } from '../src/plugins-schema';
 import { it } from '../src/vitest';
 
@@ -23,8 +23,8 @@ describe('commandKey - an own __proto__ key must not be swallowed', () => {
 
   it('gives different targets different keys', () => {
     expect(Object.hasOwn(a, '__proto__')).toBe(true);
-    // Pre-fix both produced `act:{"id":1}` - the key backing idempotent, cache,
-    // serialize and supersede, so two distinct commands collapsed into one.
+    // Pre-fix both produced `act:{"id":1}` - the key backing idempotent, cache
+    // and supersede, so two distinct commands collapsed into one.
     expect(commandKey('act', a)).not.toBe(commandKey('act', b));
   });
 
@@ -63,18 +63,6 @@ describe('plugin maps keyed by action name', () => {
     // the declared rule still applies
     bus.register('real', () => 'ran');
     expect(bus.dispatch('real', {}).ok).toBe(false);
-  });
-
-  it('optimistic() does not treat an inherited member as a handler config', ({ bus }) => {
-    bus.use(optimistic({ real: { apply: () => null } }));
-    for (const action of INHERITED) {
-      bus.register(action, () => 'ran');
-      // Pre-fix `handlers['constructor']` was `Object`, whose `.apply` is
-      // Function.prototype.apply - called as the optimistic `apply`.
-      const result = bus.dispatch(action, {});
-      expect(result.ok, `${action} should dispatch normally`).toBe(true);
-      expect(result.value).toBe('ran');
-    }
   });
 
   it('validateSchemas() does not validate against an inherited member', ({ bus }) => {

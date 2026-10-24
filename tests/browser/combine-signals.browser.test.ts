@@ -1,7 +1,7 @@
 /** In Chromium: the helper's fallback matches the native `AbortSignal.any`, and a bridge's scope cancels its request without it (log 36.13). Note at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../../src/command-bus';
-import { createHttpBridge } from '../../src/transports';
+import { httpTransport } from '../../src/transports';
 import { _combineSignals } from '../../src/http';
 
 const nativeAny = AbortSignal.any;
@@ -30,7 +30,7 @@ describe('_combineSignals in Chromium', () => {
   });
 });
 
-describe.each([['without AbortSignal.any', true], ['native (control)', false]])('createHttpBridge, %s', (_name, fallback) => {
+describe.each([['without AbortSignal.any', true], ['native (control)', false]])('httpTransport, %s', (_name, fallback) => {
   it('disposing the scope cancels a request when the bridge has its own signal too', async () => {
     if (fallback) delete (AbortSignal as { any?: unknown }).any;
     const sent: AbortSignal[] = [];
@@ -42,8 +42,7 @@ describe.each([['without AbortSignal.any', true], ['native (control)', false]])(
       });
     });
     const scope = new AbortController();
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal, scopeController: scope }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: new AbortController().signal, scopeController: scope }) });
     setTimeout(() => scope.abort(), 5);
     const r = await bus.dispatch('save', {});
     expect([r.ok, (r.error as { code?: string })?.code, sent[0].aborted]).toEqual([false, 'core:aborted:dispatch', true]);

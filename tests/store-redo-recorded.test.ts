@@ -1,8 +1,8 @@
 /** Redo of a store step writes the state it recorded, not a second run of the reducer (log s35.158). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
-import { createCommandBus, type Command } from '../src/command-bus';
-import { history } from '../src/plugins-core';
+import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
+import { history } from '../src/plugins-core';
 
 type Todos = { items: Array<{ id: number; text: string }> };
 let minted = 0;
@@ -12,10 +12,9 @@ const reducers = {
 };
 const useTodos = defineChamberStore('todos', { state: (): Todos => ({ items: [] }), reducers, undo: true });
 
-function setup(filter?: (cmd: Command) => boolean) {
+function setup(actionFilter?: (action: string) => boolean) {
   const bus = createCommandBus();
-  const h = history({ bus, filter });
-  bus.use(h);
+  const h = history({ bus, actionFilter });
   const todos = useTodos(bus);
   return { bus, h, todos };
 }
@@ -64,7 +63,7 @@ describe('redo of a store step', () => {
   });
 
   it('control: after a change history did not record, redo runs the reducer', () => {
-    const { h, todos } = setup((cmd) => cmd.action !== 'todosTouch');
+    const { h, todos } = setup((action) => action !== 'todosTouch');
     todos.add('milk');
     h.undo();
     todos.touch();

@@ -187,8 +187,9 @@ try {
   // showed on identical bytes. Below it, a number means nothing.
   //
   // The ACTION band is what would matter to this library, derived from the
-  // bench rather than chosen. Measured: `syncDispatch - bare handler` runs
-  // 4,250.90 hz over 10,000 dispatches, i.e. 23.5ns per dispatch. Against
+  // bench rather than chosen. Measured: the bare sync dispatch row (now
+  // `dispatch.sync.bare`) ran 4,250.90 hz over 10,000 dispatches, i.e. 23.5ns
+  // per dispatch. Against
   // that, one shallowRef write is ~1.3ns (~800k writes in 1.03ms) and one
   // effectScope create+dispose is ~38ns (30k in 1.15ms).
   //

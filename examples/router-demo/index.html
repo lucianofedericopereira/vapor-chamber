@@ -22,6 +22,14 @@
     · ?page= is STATE: it refetches without remounting the component
     · back/forward walk both path and query
     · a deep link (or F5 on /products/17) is served by the catch-all
+    · a WRITE is a bus command: "+5" restocks an item, the server's answer
+      names the cache group it changed, and the list on screen reads again.
+      No refetch call anywhere in this file: the bus and the router send
+      through ONE http client, and the router listens to it.
+
+  The split: READS belong to the router (path and query address them), WRITES
+  to the bus (a command to /api/vc). examples/pattern-6-vapor-router.ts is the
+  same split for a Vapor app.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -68,6 +76,14 @@
   tbody tr:nth-child(odd) { background: #fafafa; }
   .right { text-align: right; font-variant-numeric: tabular-nums; }
   .muted { color: #6b6b6b; font-size: .85rem; }
+  /* The Blade shell's busy line: shown while the router loads or refreshes
+     the page, from the bus (`data-vc-router`, set by bindDisplay from
+     routerFacts). A display choice, here a plain hide in a reserved line. */
+  .router-busy { min-height: 1.3em; }
+  [data-vc-router]:not(.vc-loading) { display: none; }
+  /* The stock buttons: `vc-loading` and `vc-error` are set by the directive. */
+  button.vc-loading { opacity: .6; }
+  button.vc-error { border-color: #c00; color: #c00; }
   .bar { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
   button { padding: .35rem .8rem; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
   /* aria-disabled, not disabled: Prev on page 2 would otherwise disable the
@@ -114,6 +130,14 @@
      EXACT = same path. If a tab looks wrong, this line says what it actually
      carries. -->
 <p class="muted" id="stamps">stamps: -</p>
+
+<!-- Server-rendered markup outside the router's island: it shows the
+     navigation loading, and the page refreshing after a write, with no
+     router import, through the bus. -->
+<p class="muted router-busy" role="status">
+  <span data-vc-router="loading">loading the next page...</span>
+  <span data-vc-router="revalidating">refreshing the page...</span>
+</p>
 
 <!-- Boot diagnostics. An example that fails silently teaches nothing: if the
      module throws, never evaluates, or mounts nothing, say so ON THE PAGE
@@ -185,16 +209,37 @@
 </script>
 
 <script type="module">
-  import { createApp, computed } from 'vue';
+  import { createApp, computed, ref } from 'vue';
   import {
-    createRouter,
+    createRouter, routerFacts,
     useRouter, useRoute, useRouteData, useRouteError, useQueryParam, usePagination, useMenu,
   } from '/dist/router/index.js';
   // <RouterOutlet> lives on the vdom subpath - importing it is what opts you
   // into Vue's virtual-DOM runtime. Register it locally (as Shell does below);
   // the router deliberately does not register it globally.
   import { RouterOutlet } from '/dist/router/vdom.js';
+  // `routerHttp` marks the app's own client as router traffic: opting into the
+  // http client is what this subpath is for.
+  import { routerHttp } from '/dist/router/remote.js';
   import { fetchLoaders } from '/dist/router-fetch/index.js';
+  import { createAsyncCommandBus, createHttpClient, httpTransport, setCommandBus, bindDisplay } from '/dist/index.js';
+  import { createDirectivePlugin } from '/dist/directives.js';
+
+  // ---- writes: the bus ---------------------------------------------------------
+  // The app's ONE http client. The bus sends its commands through it and the
+  // router reads through it, so a write's answer reaches the router.
+  const http = createHttpClient();
+  const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient: http }) });
+  // The directives (`v-vc-command`) find the page's bus here.
+  setCommandBus(bus);
+
+  // What the last stock change said, for the line under the nav.
+  const note = ref(null);
+  bus.on('productStockAdd', (cmd, result) => {
+    note.value = result.ok
+      ? { ok: true, text: `${result.value.name}: ${result.value.stock} in stock.` }
+      : { ok: false, text: `Stock not changed: ${result.error.message}` };
+  });
 
   const Home = {
     setup() {
@@ -268,6 +313,7 @@
             <th :aria-sort="ariaSort('name')"><button type="button" class="sort" @click="sortBy('name')">Item{{ sortArrow('name') }}</button></th>
             <th class="right" :aria-sort="ariaSort('price')"><button type="button" class="sort" @click="sortBy('price')">Price{{ sortArrow('price') }}</button></th>
             <th class="right" :aria-sort="ariaSort('stock')"><button type="button" class="sort" @click="sortBy('stock')">Stock{{ sortArrow('stock') }}</button></th>
+            <th class="right">Restock</th>
           </tr></thead>
           <tbody>
             <tr v-for="item in rows" :key="item.id">
@@ -275,6 +321,11 @@
               <td><a :href="'/examples/router-demo/products/' + item.id">{{ item.name }}</a></td>
               <td class="right">\${{ item.price.toFixed(2) }}</td>
               <td class="right">{{ item.stock }}</td>
+              <!-- A write is a command, not navigation: the directive dispatches it
+                   and marks the button busy. The list reads again by itself. -->
+              <td class="right"><button type="button" v-vc-command="'productStockAdd'"
+                :data-vc-target="JSON.stringify({ id: item.id })" data-vc-payload='{"qty":5}'
+                :aria-label="'Restock ' + item.name + ' by 5'">+5</button></td>
             </tr>
           </tbody>
         </table>
@@ -315,6 +366,12 @@
           <tr><td>Price</td><td class="right">\${{ item?.price?.toFixed(2) ?? '-' }}</td></tr>
           <tr><td>Stock</td><td class="right">{{ item?.stock ?? '-' }}</td></tr>
         </tbody></table>
+        <p class="bar">
+          <button type="button" v-vc-command="'productStockAdd'"
+            :data-vc-target="JSON.stringify({ id })" data-vc-payload='{"qty":5}'>Restock +5</button>
+          <button type="button" v-vc-command="'productStockAdd'"
+            :data-vc-target="JSON.stringify({ id })" data-vc-payload='{"qty":-1}'>Sell 1</button>
+        </p>
         <p class="bar"><a href="/examples/router-demo/products"><- Back to products</a></p>
       </div>`,
   };
@@ -339,7 +396,7 @@
     components: { RouterOutlet },
     setup() {
       const { latestError, clear } = useRouteError();
-      return { error: latestError, clear };
+      return { error: latestError, clear, note };
     },
     template: `
       <div>
@@ -348,6 +405,9 @@
           - {{ error.message }}
           <button type="button" @click="clear()">dismiss</button>
         </p>
+        <!-- The stock change's outcome. A refusal is also announced, by the
+             directive, so only a success needs the status role. -->
+        <p v-if="note" :class="note.ok ? 'muted' : 'err'" :role="note.ok ? 'status' : undefined">{{ note.text }}</p>
         <RouterOutlet />
       </div>`,
   };
@@ -355,7 +415,11 @@
   const router = createRouter({
     routes: { inline: '#vcr-routes' },
     components: { Home, ProductList, ProductDetail, NotFound },
-    loaders: fetchLoaders(),
+    // The router reads through the app's client. A read is kept a minute, and
+    // a write that names its group (`Cache-Groups` on the read,
+    // `Cache-Group-Invalidation` on the answer, RFC 9875) ends that early.
+    http: routerHttp({ http }),
+    loaders: fetchLoaders({ cache: { ttl: 60_000 } }),
   });
 
   const app = createApp(Shell);
@@ -364,6 +428,7 @@
   app.config.warnHandler = (msg) => window.__vcrFail('vue warning', msg);
 
   app.use(router);
+  app.use(createDirectivePlugin());
   // Mount IMMEDIATELY - do not gate the mount on isReady(). If the first
   // navigation fails, gating means the page renders nothing at all and the
   // reader is left with a blank screen and no clue; mounting first means the
@@ -391,8 +456,17 @@
   router.afterEach(() => queueMicrotask(reportStamps));
   queueMicrotask(reportStamps);
 
+  // The shell around the island: the router's flags reach the bus as facts,
+  // and the page's own markup follows them with no router import.
+  routerFacts(router, bus);
+  bindDisplay(document.body, { bus });
+
+  // A note about an item belongs to the page it was made on.
+  router.afterEach(() => { note.value = null; });
+
   // Handy for poking at it from the console.
   window.router = router;
+  window.bus = bus;
 </script>
 
 </body>

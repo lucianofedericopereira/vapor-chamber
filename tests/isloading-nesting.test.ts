@@ -1,4 +1,4 @@
-/** isLoading's start/settle pairing on every nesting path of a sync bus, and out-of-order settles on the async one. The long note is at the end. */
+/** pending's start/settle pairing on every nesting path of a sync bus, and out-of-order settles on the async one. The long note is at the end. */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus, type BaseBus } from '../src/command-bus';
@@ -6,7 +6,7 @@ import { createAsyncCommandBus, createCommandBus, type BaseBus } from '../src/co
 type Shared = ReturnType<typeof useSharedCommandState>;
 
 /** Read each [action, target] key's flag now. */
-const lit = (s: Shared, keys: Array<[string, unknown?]>) => keys.map(([a, t]) => s.isLoading(a, t).value);
+const lit = (s: Shared, keys: Array<[string, unknown?]>) => keys.map(([a, t]) => s.pending(a, t).value);
 
 /**
  * Every start settled: with no holder left the entry is released, so the next
@@ -14,10 +14,10 @@ const lit = (s: Shared, keys: Array<[string, unknown?]>) => keys.map(([a, t]) =>
  * above 0 and the entry, so the same signal comes back.
  */
 function released(bus: BaseBus, s: Shared, action: string): boolean {
-  const before = s.isLoading(action);
+  const before = s.pending(action);
   s.dispose();
   const next = useSharedCommandState({ bus: bus as never });
-  const after = next.isLoading(action);
+  const after = next.pending(action);
   next.dispose();
   return before !== after;
 }
@@ -38,22 +38,22 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
     expect(released(bus, s, 'a')).toBe(true);
   });
 
-  it('before-hooks dispatching, behind ours and ahead of it', () => {
+  it('started parts dispatching, added before and after the state: the outer key is lit (its start comes first)', () => {
     const bus = createCommandBus();
     let during: boolean[] = [];
-    // Ahead of ours: `b` runs before `a` has started.
-    bus.onBefore((cmd) => { if (cmd.action === 'a') bus.dispatch('b', undefined); });
+    // Added before the state: `b` still runs with `a` started.
+    bus.use({ started: (cmd) => { if (cmd.action === 'a') bus.dispatch('b', undefined); } });
     const s = useSharedCommandState({ bus });
     const keys: Array<[string, unknown?]> = [['a'], ['b'], ['c']];
     lit(s, keys);
-    // Behind ours: `c` runs with `a` started.
-    bus.onBefore((cmd) => { if (cmd.action === 'a') bus.dispatch('c', undefined); });
+    // Added after it: the same.
+    bus.use({ started: (cmd) => { if (cmd.action === 'a') bus.dispatch('c', undefined); } });
     const at: Record<string, boolean[]> = {};
     bus.register('a', () => { during = lit(s, keys); });
     bus.register('b', () => { at.b = lit(s, keys); });
     bus.register('c', () => { at.c = lit(s, keys); });
     bus.dispatch('a', undefined);
-    expect(at).toEqual({ b: [false, true, false], c: [true, false, true] });
+    expect(at).toEqual({ b: [true, true, false], c: [true, false, true] });
     expect(during).toEqual([true, false, false]);
     expect(lit(s, keys)).toEqual([false, false, false]);
     expect(released(bus, s, 'a')).toBe(true);
@@ -74,7 +74,7 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
     expect(released(bus, s, 'a')).toBe(true);
   });
 
-  it('listeners dispatching, ahead of our settle (outer lit) and behind it (outer dark)', () => {
+  it('listeners dispatching, added before and after the state: the outer key is dark (its settle comes first)', () => {
     const bus = createCommandBus();
     bus.on('a', () => { bus.dispatch('b', undefined); });
     const s = useSharedCommandState({ bus });
@@ -86,18 +86,18 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
     bus.register('b', () => { at.b = lit(s, keys); });
     bus.register('c', () => { at.c = lit(s, keys); });
     bus.dispatch('a', undefined);
-    // An exact listener fans out before the '*' ones, ours among them.
-    expect(at).toEqual({ b: [true, true, false], c: [false, false, true] });
+    // The settle is announced before any listener, exact or wildcard.
+    expect(at).toEqual({ b: [false, true, false], c: [false, false, true] });
     expect(lit(s, keys)).toEqual([false, false, false]);
     expect(released(bus, s, 'a')).toBe(true);
   });
 
-  it('a before-hook behind ours throws: that command settles, the one it is nested in stays lit', () => {
+  it('a rule refuses: that command settles, the one it is nested in stays lit', () => {
     const bus = createCommandBus();
     const s = useSharedCommandState({ bus });
     const keys: Array<[string, unknown?]> = [['outer'], ['a']];
     lit(s, keys);
-    bus.onBefore((cmd) => { if (cmd.action === 'a') throw new Error('denied'); });
+    bus.use({ authorize: () => (cmd) => (cmd.action === 'a' ? { ok: false, value: undefined, error: new Error('denied') } : undefined) });
     let after: boolean[] = [];
     let r: unknown;
     bus.register('a', () => 1);
@@ -135,8 +135,8 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
     let afterB: boolean[] = [];
     bus.register('b', () => { inB = lit(s, [['a'], ['b']]); });
     bus.register('a', () => {
-      // The first isLoading() on the bus installs the before-hook now.
-      s.isLoading('b');
+      // The first pending() on the bus starts listening to `started` now.
+      s.pending('b');
       bus.dispatch('b', undefined);
       afterB = lit(s, [['a'], ['b']]);
     });
@@ -249,15 +249,14 @@ describe('async bus: settles in any order', () => {
 });
 
 /*
- * WHY THIS FILE. A tracked dispatch pairs a start (our before-hook) with a
- * settle (our on('*') observer) by the Command object. On the sync bus the
- * settles arrive in LIFO order on every path that nests (handler, before-hook
- * ahead of or behind ours, after-hook, listener ahead of or behind ours, a
- * before-hook throwing behind ours, the depth limit), so the pairing can be a
+ * WHY THIS FILE. A tracked dispatch pairs a start (the bus's `started` fact,
+ * before every before-hook) with a settle (its `settled` fact, before every
+ * listener) by the Command object. On the sync bus the settles arrive in LIFO
+ * order on every path that nests (handler, before-hook, after-hook, listener,
+ * a throwing before-hook, the depth limit), so the pairing can be a
  * stack instead of a Map (option c, log s35.61). It must still be correct by
  * construction rather than by that invariant: a settle with no start (a query,
- * an emit, a before-hook throwing ahead of ours, a command already running when
- * tracking was armed) must take nothing from the stack, and a start whose
+ * an emit, a command already running when tracking was armed) must take nothing from the stack, and a start whose
  * settle never arrives must not stop the commands below it from settling.
  * Every case here passes under the Map; each one is a nesting path the stack
  * has to get right. `released()` is the leak check: every start settled means

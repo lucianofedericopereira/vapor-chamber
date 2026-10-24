@@ -77,7 +77,7 @@ describe('postCommand - 419 refresh uses the fresh cookie as the only csrf heade
     stubFetch();
     // csrf on drives the refresh path; the initial request carries the stale
     // meta token under X-CSRF-TOKEN (readCsrfToken reads the meta tag first).
-    const res = await postCommand('/api/cmd', { a: 1 }, { retry: 0, csrf: true });
+    const res = await postCommand('/api/cmd', { a: 1 }, { retry: false, csrf: true });
     expect(res.ok).toBe(true);
     expect(sent).toHaveLength(2);
 
@@ -100,7 +100,7 @@ describe('postCommand - 419 refresh uses the fresh cookie as the only csrf heade
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await postCommand('/api/cmd', {}, { retry: 0, csrf: true });
+    const res = await postCommand('/api/cmd', {}, { retry: false, csrf: true });
     expect(res.ok).toBe(true);
     expect(sent[1]['X-CSRF-TOKEN']).toBe('stale-meta-token');
   });
@@ -124,6 +124,6 @@ describe('postCommand - 419 refresh with no document (a server)', () => {
       posts++;
       return Promise.resolve(mockResponse(posts === 1 ? 419 : 200));
     }));
-    await expect(postCommand('/api/cmd', {}, { retry: 0, csrf: true })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
+    await expect(postCommand('/api/cmd', {}, { retry: false, csrf: true })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
   });
 });

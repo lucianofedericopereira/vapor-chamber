@@ -18,3 +18,9 @@ Illuminate\Support\Facades\Route::get('/widget', fn () => view('widget'));
 Illuminate\Support\Facades\Route::post('/api/vc', App\Http\Controllers\VaporChamberController::class)
     ->middleware(['web'])
     ->name('api.vc');
+
+// The batch endpoint, for httpTransport with `batch`: every command of one
+// microtask in one POST.
+Illuminate\Support\Facades\Route::post('/api/vc/batch', [App\Http\Controllers\VaporChamberController::class, 'batch'])
+    ->middleware(['web'])
+    ->name('api.vc.batch');

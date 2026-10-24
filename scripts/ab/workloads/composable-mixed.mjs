@@ -1,5 +1,6 @@
 // Workload for scripts/ab/ab.mjs (log s35.237, the MIXED check for untracked()'s
-// bracket): five composable paths through vapor-chamber/vapor, interleaved on one
+// bracket): five paths through vapor-chamber/vapor (a raw dispatch beside a held
+// useSharedCommandState among them, from 1.32 step 5a), interleaved on one
 // sync bus over four actions with distinct handlers, so the bracket runs from
 // several call sites and shapes - the real-app shape composable.mjs lacks.
 // `mixed_raw` dispatches the same sequence on the bus with no bracket: the control.
@@ -36,7 +37,7 @@ export function mixed_vapor(n) {
     switch (i % 5) {
       case 0: s += c.command.dispatch(ACTIONS[i & 3], i).value; break;
       case 1: s += c.cart.dispatch('add', i).value; break;
-      case 2: s += c.shared.dispatch(ACTIONS[i & 3], i).value; break;
+      case 2: s += bus.dispatch(ACTIONS[i & 3], i).value + c.shared.errors.value.length; break;
       case 3: s += c.query.query(ACTIONS[i & 3], i).value; break;
       default: s += c.ui.dispatch(i).value;
     }

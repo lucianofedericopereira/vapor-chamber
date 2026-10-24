@@ -1,18 +1,21 @@
 /**
- * Tests for onMissing: 'buffer' - deferred dispatch (buffer-until-registered).
+ * Tests for the bus's `buffer` (createBuffer) - deferred dispatch (buffer-until-registered).
  * Built for lazy/async wiring (island hydration, code-split panels) where a
  * command can be dispatched before its handler exists: the command is queued
  * per-action and replayed, in order, the moment a handler registers.
  */
 import { describe, expect, vi } from 'vitest';
+import { Accepted } from '../src/accepted';
+import { createBuffer, type BufferOptions } from '../src/buffer';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+const buffered = (opts?: BufferOptions) => createCommandBus({ buffer: createBuffer(opts) });
 
-describe("onMissing: 'buffer' - deferred dispatch", () => {
+describe('buffer - deferred dispatch', () => {
   it('replays commands dispatched before the handler exists, in FIFO order', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = buffered();
     const seen: number[] = [];
 
     // dispatched with no handler yet -> queued
@@ -21,7 +24,8 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     bus.dispatch('open', 3);
 
     expect(seen).toEqual([]);            // nothing ran yet
-    expect(r1).toSucceedWith(undefined);           // accepted (deferred)
+    expect(r1.ok).toBe(true);
+    expect(r1.value).toBeInstanceOf(Accepted); // held: done settles when it runs
 
     // handler arrives -> buffered commands replay in order
     bus.register('open', (cmd) => { seen.push(cmd.target as number); });
@@ -29,7 +33,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('does NOT buffer once a handler exists - later dispatches run immediately', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = buffered();
     const seen: number[] = [];
     bus.register('go', (cmd) => { seen.push(cmd.target as number); });
     bus.dispatch('go', 1);
@@ -37,7 +41,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('buffers each action independently', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = buffered();
     const a: number[] = [];
     const b: number[] = [];
     bus.dispatch('a', 1);
@@ -53,9 +57,9 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('replays through the full pipeline (plugins + listeners fire)', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = buffered();
     const order: string[] = [];
-    bus.use((cmd, next) => { order.push(`plugin:${cmd.target}`); return next(); });
+    bus.use({ started: (cmd) => { order.push(`plugin:${cmd.target}`); } });
     bus.on('save', (cmd) => order.push(`listener:${cmd.target}`));
     bus.dispatch('save', 'x');           // queued
     expect(order).toEqual([]);
@@ -63,9 +67,9 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(order).toEqual(['plugin:x', 'handler:x', 'listener:x']);
   });
 
-  it('maxBufferSize drops the oldest and warns', () => {
+  it('maxSize drops the oldest and warns', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: 2 });
+    const bus = buffered({ maxSize: 2 });
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
     bus.dispatch('q', 3); // overflow -> drops oldest (1)
@@ -75,18 +79,18 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('query never buffers - it falls back to error', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = buffered();
     const r = bus.query('missing', {});
     expect(r).toFailWith('core:missing:handler');
   });
 
-  it('default onMissing is unchanged (errors, no buffering)', ({ bus }) => {
+  it('a bus with no buffer is unchanged (errors, no buffering)', ({ bus }) => {
     const r = bus.dispatch('nope', {});
     expect(r).toFailWith('core:missing:handler');
   });
 
   it('async bus buffers and replays on register', async () => {
-    const bus = createAsyncCommandBus({ onMissing: 'buffer' });
+    const bus = createAsyncCommandBus({ buffer: createBuffer() });
     const seen: number[] = [];
     bus.dispatch('load', 1);
     bus.dispatch('load', 2);
@@ -96,14 +100,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(seen).toEqual([1, 2]);
   });
 
-  it('onBufferOverflow fires when maxBufferSize drops the oldest', () => {
+  it('onDrop fires when maxSize drops the oldest', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
-    const bus = createCommandBus({
-      onMissing: 'buffer',
-      maxBufferSize: 2,
-      onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
-    });
+    const bus = buffered({ maxSize: 2, onDrop: (action, d) => dropped.push({ action, target: d.target }) });
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
     bus.dispatch('q', 3); // drops 1
@@ -111,17 +111,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   // Evicting BEFORE the push would, at a bound of 0, let an empty queue
-  // satisfy `q.length >= limit`: `shift()` returns undefined and the overflow
-  // callback dereferences it, throwing out of `bus.dispatch()` - and only when
-  // `onBufferOverflow` is set (optional-chaining a call skips its arguments).
-  it('maxBufferSize: 0 buffers nothing instead of throwing', () => {
+  // satisfy `q.length >= limit`: `shift()` returns undefined and the drop
+  // callback dereferences it, throwing out of `bus.dispatch()`.
+  it('maxSize: 0 buffers nothing instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
-    const bus = createCommandBus({
-      onMissing: 'buffer',
-      maxBufferSize: 0,
-      onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
-    });
+    const bus = buffered({ maxSize: 0, onDrop: (action, d) => dropped.push({ action, target: d.target }) });
 
     const result = bus.dispatch('q', 1);
     warn.mockRestore();
@@ -138,10 +133,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
 
   // Math.trunc and Math.max both propagate NaN, and every comparison against
   // NaN is false - so `q.length > limit` never fired and the bound silently
-  // vanished. A `maxBufferSize: Number(badConfigValue)` is all it takes.
-  it('a NaN maxBufferSize takes the default bound instead of unbounding the queue', () => {
+  // vanished. A `maxSize: Number(badConfigValue)` is all it takes.
+  it('a NaN maxSize takes the default bound instead of unbounding the queue', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: Number('not-a-number') });
+    const bus = buffered({ maxSize: Number('not-a-number') });
 
     for (let i = 0; i < 300; i++) bus.dispatch('q', i);
 
@@ -154,14 +149,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(replayed).toBe(256);
   });
 
-  it('a negative maxBufferSize is clamped rather than draining into a crash', () => {
+  it('a negative maxSize is clamped rather than draining into a crash', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: unknown[] = [];
-    const bus = createCommandBus({
-      onMissing: 'buffer',
-      maxBufferSize: -3,
-      onBufferOverflow: (_a, d) => dropped.push(d.target),
-    });
+    const bus = buffered({ maxSize: -3, onDrop: (_a, d) => dropped.push(d.target) });
 
     expect(bus.dispatch('q', 1).ok).toBe(true);
     expect(bus.dispatch('q', 2).ok).toBe(true);
@@ -169,16 +160,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(dropped).toEqual([1, 2]);
   });
 
-  it('bufferTTL reaps expired entries on push and skips them at flush', () => {
+  it('ttl reaps expired entries on push and skips them at flush', () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(1_000_000);
       const dropped: any[] = [];
-      const bus = createCommandBus({
-        onMissing: 'buffer',
-        bufferTTL: 100,
-        onBufferOverflow: (_a, d) => dropped.push(d.target),
-      });
+      const bus = buffered({ ttl: 100, onDrop: (_a, d) => dropped.push(d.target) });
       bus.dispatch('save', 'stale'); // at t=0
       vi.setSystemTime(1_000_200);   // +200ms - past TTL
       bus.dispatch('save', 'fresh'); // push reaps 'stale'
@@ -194,8 +181,8 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     }
   });
 
-  it('bufferTTL keeps non-expired entries working as before', () => {
-    const bus = createCommandBus({ onMissing: 'buffer', bufferTTL: 60_000 });
+  it('ttl keeps non-expired entries working as before', () => {
+    const bus = buffered({ ttl: 60_000 });
     bus.dispatch('go', 'a');
     const seen: string[] = [];
     bus.register('go', (cmd) => seen.push(cmd.target as string));

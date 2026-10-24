@@ -2,24 +2,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, BusError } from '../src/command-bus';
 import { rateLimit } from '../src/plugins-extra';
-import { isRetryableCode } from '../src/schema';
+import { isRetryableCode } from '../src/error-registry';
+import { pace } from '../src/pace';
 
 describe('retryable codes the bus does not re-send', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('a register({ throttle }) refusal: retryable, never re-sent', async () => {
-    expect(isRetryableCode('core:limited:handler')).toBe(true);
+  it('a throttled call at the sender: retryable, never reaches the bus', async () => {
+    expect(isRetryableCode('pace:limited:dispatch')).toBe(true);
     vi.useFakeTimers();
     const bus = createAsyncCommandBus({ retry: { baseDelay: 1, maxAttempts: 3 } });
     let runs = 0;
-    bus.register('t', async () => { runs++; }, { throttle: 30 });
-    await bus.dispatch('t', 1);
-    const second = bus.dispatch('t', 1);
+    bus.register('t', async () => { runs++; });
+    const send = pace(bus.dispatch, { throttle: 30 });
+    await send('t', 1);
+    const second = send('t', 1);
     await vi.runAllTimersAsync(); // a re-send would wait out the window here
     const r = await second;
-    expect([r.ok ? 'ok' : (r.error as BusError).code, runs]).toEqual(['core:limited:handler', 1]);
+    expect([r.ok ? 'ok' : (r.error as BusError).code, runs]).toEqual(['pace:limited:dispatch', 1]);
   });
 
   it("a plugin's refusal: retryable, never re-sent", async () => {

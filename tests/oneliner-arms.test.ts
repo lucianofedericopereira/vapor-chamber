@@ -10,7 +10,6 @@
  *  - router/url: encodeQueryParam wrapping a scalar for an `array` param.
  *  - router/history: resolveBase with no window and no pathname.
  *  - router/menu: a table with no menu-flagged rows at all.
- *  - ssr: the rehydrate() thenable guard's own `.catch`.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTransitionBridge } from '../src/transitions';
@@ -18,7 +17,6 @@ import { createReaction } from '../src/utilities';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
 import { encodeQueryParam } from '@router/url';
 import { resolveBase } from '@router/history';
-import { rehydrate } from '../src/ssr';
 import { buildMenu } from '@router/menu';
 import { createRouteTable } from '@router/table';
 
@@ -174,21 +172,3 @@ describe('buildMenu', () => {
 // ssr - the thenable guard's own catch
 // ---------------------------------------------------------------------------
 
-describe('rehydrate on an async bus', () => {
-  it('absorbs the pending dispatch rejection it reports', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = {
-      hasHandler: () => true,
-      // A pending promise that later rejects: rehydrate() must attach its own
-      // catch, or this surfaces as an unhandled rejection after it returns.
-      dispatch: () => Promise.reject(new Error('late failure')),
-    } as any;
-
-    const results = rehydrate(bus, [{ action: 'cartAdd', target: {} }]);
-    expect(results[0]!.ok).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-
-    // Give the rejection a turn to surface - the absorbed catch keeps it quiet.
-    await new Promise(r => setTimeout(r, 0));
-  });
-});

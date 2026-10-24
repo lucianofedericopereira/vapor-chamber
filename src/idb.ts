@@ -1,14 +1,14 @@
 /**
- * vapor-chamber - one IndexedDB key-value store, for the outbox and persist.
+ * vapor-chamber - one IndexedDB key-value store, for a store's persist (the outbox's queue included).
  *
  * Zero dependencies. The database opens lazily on first use, so a module
  * load touches nothing (SSR-safe). Each call is one request in its own
  * transaction, so a write is atomic.
  */
 
-import type { PersistStorage } from './plugins-io';
+import type { PersistStorage } from './store-persist';
 
-/** @internal One object store of one database: the outbox's and persist's storage. */
+/** @internal One object store of one database: `indexedDbStorage`'s. */
 export function _idbStore(dbName: string, storeName: string) {
   let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -52,29 +52,25 @@ export function _idbStore(dbName: string, storeName: string) {
   return {
     get: (key: string): Promise<unknown> => run('readonly', s => s.get(key)),
     put: (key: string, value: unknown): Promise<void> => run('readwrite', s => s.put(value, key)),
-    delete: (key: string): Promise<void> => run('readwrite', s => s.delete(key)),
-    clear: (): Promise<void> => run('readwrite', s => s.clear()),
   };
 }
 
 /**
- * indexedDbStorage - an IndexedDB storage for `persist`. Prefer it over
- * `localStorage` for a large state: no ~5 MB origin quota, no synchronous I/O.
- * Its answers are promises, so read the saved state with `hydrate()`, not
- * `load()`. Failures reach persist, which warns.
+ * indexedDbStorage - an IndexedDB storage for a store's `persist`. Prefer it
+ * over `localStorage` for a large state: no ~5 MB origin quota, no synchronous
+ * I/O. Its answers are promises: the store reads the saved state when it
+ * lands (docs/store.md, Saved state). Failures reach the store, which warns.
  *
  * @param dbName    Database name. Default: `'vc-persist'`.
  * @param storeName Object store name. Default: `'state'`.
  *
  * @example
- * const cartPersist = persist({ key: 'vc:cart', getState, storage: indexedDbStorage() });
- * const saved = await cartPersist.hydrate(); // before the first dispatch
+ * defineChamberStore('cart', { state, reducers, persist: saveTo({ key: 'vc:cart', storage: indexedDbStorage() }) });
  */
 export function indexedDbStorage(dbName: string = 'vc-persist', storeName: string = 'state'): PersistStorage {
   const db = _idbStore(dbName, storeName);
   return {
     getItem: (key) => db.get(key).then(v => (typeof v === 'string' ? v : null)),
     setItem: (key, value) => db.put(key, value),
-    removeItem: (key) => db.delete(key),
   };
 }

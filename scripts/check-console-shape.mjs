@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
- * check-console-shape - a value a developer would INSPECT is an argument, not
- * a substring.
+ * check-console-shape - one reporter, and a value a developer would INSPECT is
+ * an argument, not a substring.
  *
- * The convention, already followed at every console site in `src/`:
+ * Two rules. First, every warning and error in `src/` goes through
+ * `_report(level, code, message, error?, context?)` (src/report.ts): a
+ * `console.warn` or `console.error` anywhere else fails, except in report.ts
+ * itself and inside the `logger` plugin function, whose job is printing. One
+ * total rule, the exceptions named by place, not by pattern.
  *
- *     console.warn(`[vapor-chamber] ... "${cmd.action}" ...`, el)
+ * Second, the shape, at every `_report` code and message and every console
+ * call left:
+ *
+ *     _report('warn', 'core:invalid:name', `... "${cmd.action}" ...`, error, { action })
  *
  * Identifying text - an action name, a storage key, a count, a limit, a code,
  * a pattern - is interpolated into the message, because that is what the
@@ -47,22 +54,15 @@
  * reviewed, rather than a flattening that hides whatever the value really was.
  * The failure message says so.
  *
- * NO ALLOWLIST, AND TWO SITES THAT EARN IT. Both of the calls that look like
- * exceptions pass on SHAPE, with nothing written down about them:
+ * NO ALLOWLIST FOR THE SHAPE. `validateNaming` builds one string and either
+ * throws it or reports it: `_report('warn', 'core:invalid:name', msg, ...)`
+ * passes on type, `msg` being a `string`. `--self-test` mutates it into the
+ * violating shape, and seeds a stray `console.warn` both in a module and in
+ * plugins-core.ts outside the logger, because an exemption that quietly matches
+ * too much is indistinguishable from a working check.
  *
- *   - `command-bus.ts` `` console.warn(`[vapor-chamber] ${msg}`) `` -
- *     `validateNaming` builds one string and either throws it or logs it. The
- *     call interpolates only `msg`, typed `string`, so it passes on type.
- *   - `router/index.ts` `console.error(error)` - the error IS the argument.
- *     That is the convention, in its purest form.
- *
- * Both are in `--self-test` below, mutated into the violating shape, because a
- * shape-based exemption that quietly matches too much is indistinguishable from
- * a working check - the same failure the `onSettled` sweep had when it was
- * scoped by filename.
- *
- * SCOPE, stated so it is not over-trusted. This reads the arguments of the
- * console call and nothing else. A message assembled into a local first, then
+ * SCOPE, stated so it is not over-trusted. This reads the code and message of
+ * each `_report` call and the arguments of each console call, nothing else. A message assembled into a local first, then
  * logged (`validateNaming`'s `msg` is the one such site), passes unexamined -
  * following an initializer would mean deciding which declaration a name refers
  * to, and being wrong about that is worse than a stated blind spot. It also
@@ -97,6 +97,16 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Trailing separator: a bare prefix would also match a sibling directory whose
 // name merely starts with "src".
 const SRC = join(ROOT, 'src') + sep;
+// The one module that prints, and the one plugin whose job is printing.
+const REPORTER = join('src', 'report.ts');
+const LOGGER_FILE = join('src', 'plugins-core.ts');
+
+/** Is `node` inside plugins-core.ts's `logger` function? */
+function insideLogger(node) {
+  if (relative(ROOT, node.getSourceFile().fileName) !== LOGGER_FILE) return false;
+  for (let n = node.parent; n; n = n.parent) if (ts.isFunctionDeclaration(n) && n.name?.text === 'logger') return true;
+  return false;
+}
 
 /**
  * What may be interpolated: the primitives that print as themselves.
@@ -206,16 +216,25 @@ function scan() {
     const at = (node) => `${rel}:${sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1}`;
 
     const visit = (node) => {
-      if (
+      const isConsole =
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
         ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === 'console'
-      ) {
+        node.expression.expression.text === 'console';
+      const isReport = ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === '_report';
+      if (isConsole) {
+        const name = node.expression.name.text;
+        if ((name === 'warn' || name === 'error') && rel !== REPORTER && !insideLogger(node)) {
+          problems.push(`${at(node)}  console.${name} outside the reporter - report it: _report(level, code, message, error?, context?)`);
+        }
+      }
+      if (isConsole || isReport) {
         sites++;
-        const method = `console.${node.expression.name.text}`;
+        const method = isReport ? '_report' : `console.${node.expression.name.text}`;
+        // A report's code and message are its text; its error and context are values.
+        const text = isReport ? node.arguments.slice(1, 3) : node.arguments;
 
-        for (const argument of node.arguments) {
+        for (const argument of text) {
           // Hand-flattening, anywhere in the argument - including in an argument
           // that is otherwise a perfectly good separate one.
           const flatten = (n) => {
@@ -261,9 +280,9 @@ const GUIDANCE =
   // Escaped `\${...}` in a template literal rather than a plain string: the
   // example has to show a real placeholder, and in a plain string biome's
   // noTemplateCurlyInString reads that as one written by mistake.
-  `    console.warn(\`[vapor-chamber] ... "\${cmd.action}" ...\`, el)\n` +
+  `    _report('warn', 'core:invalid:name', \`... "\${cmd.action}" ...\`, undefined, { el })\n` +
   '  not\n' +
-  `    console.warn(\`[vapor-chamber] ... \${JSON.stringify(el)} ...\`)\n\n` +
+  `    _report('warn', 'core:invalid:name', \`... \${JSON.stringify(el)} ...\`)\n\n` +
   'The first is expandable in devtools; the second is "[object Object]".\n\n' +
   'A value typed `any` or `unknown` fails here too - nothing shows it is identifying\n' +
   'text. If you know it is, say so at the call site with a cast, which is a claim a\n' +
@@ -274,7 +293,7 @@ const GUIDANCE =
  * The violations this guard exists to catch, each injected into a real module.
  *
  * Three of them are the rule itself, at the buffer-overflow warning in
- * `handleMissing` - a DEV-gated `console.warn` with the command object in scope,
+ * the buffer's `hold` - a DEV-gated `console.warn` with the command object in scope,
  * which is exactly the inspectable value the convention is about. The other two
  * are the sites that pass on shape rather than on an allowlist: mutating them
  * proves the scan REACHES them, which a passing run alone never shows.
@@ -283,43 +302,52 @@ const GUIDANCE =
 // GUIDANCE gives: this script has to quote source that contains real
 // placeholders, and in a plain string biome reads each one as a mistake.
 const BUFFER_WARNING =
-  `        console.warn(\`[vapor-chamber] onMissing:'buffer' queue for "\${cmd.action}" hit maxBufferSize (\${limit}); dropped the oldest pending command. Register a handler, or raise maxBufferSize.\`);`;
+  `_report('warn', 'buffer:exceeded:queue', \`more than \${limit} "\${cmd.action}" commands waited for their handler; dropped the oldest. Register its handler, or raise maxSize.\`);`;
 const ACTION_SLOT = `\${cmd.action}`;
 const mutate = (from, to) => ({ from, to });
 
 const MUTATIONS = [
   {
-    file: 'src/command-bus.ts',
+    file: 'src/buffer.ts',
     what: 'an object interpolated into a template literal',
     expect: /interpolates `cmd` \(type Command/,
     ...mutate(BUFFER_WARNING, BUFFER_WARNING.replace(ACTION_SLOT, `\${cmd}`)),
   },
   {
-    file: 'src/command-bus.ts',
+    file: 'src/buffer.ts',
     what: 'JSON.stringify inside the message',
     expect: /calls JSON\.stringify\(\) on an argument/,
     ...mutate(BUFFER_WARNING, BUFFER_WARNING.replace(ACTION_SLOT, `\${JSON.stringify(cmd)}`)),
   },
   {
-    file: 'src/command-bus.ts',
+    file: 'src/buffer.ts',
     what: 'String() around the value',
     expect: /calls String\(\) on an argument/,
     ...mutate(BUFFER_WARNING, BUFFER_WARNING.replace(ACTION_SLOT, `\${String(cmd.target)}`)),
   },
   {
     file: 'src/command-bus.ts',
-    what: "validateNaming's console.warn site, made to interpolate the pattern",
+    what: "validateNaming's report, made to interpolate the pattern",
     expect: /interpolates `naming\.pattern` \(type RegExp\)/,
     ...mutate(
-      `  if (mode === 'warn') console.warn(\`[vapor-chamber] \${msg}\`);`,
-      `  if (mode === 'warn') console.warn(\`[vapor-chamber] \${naming.pattern}\`);`,
+      "  if (mode === 'warn') _report('warn', 'core:invalid:name', msg, undefined, { action });",
+      `  if (mode === 'warn') _report('warn', 'core:invalid:name', \`\${naming.pattern}\`, undefined, { action });`,
     ),
   },
   {
-    file: 'src/router/index.ts',
-    what: 'the exempt console.error(error) site, made to interpolate',
-    expect: /interpolates `error`/,
-    ...mutate('    console.error(error);', `    console.error(\`\${error}\`);`),
+    file: 'src/buffer.ts',
+    what: 'a console.warn in a module, beside the reporter',
+    expect: /console\.warn outside the reporter/,
+    ...mutate(BUFFER_WARNING, BUFFER_WARNING.replace("_report('warn', 'buffer:exceeded:queue', ", 'console.warn(')),
+  },
+  {
+    file: 'src/plugins-core.ts',
+    what: 'a console.warn in plugins-core.ts outside the logger function',
+    expect: /plugins-core\.ts:\d+ {2}console\.warn outside the reporter/,
+    ...mutate(
+      '  const list = options.protected;',
+      "  const list = options.protected;\n  console.warn('stray');",
+    ),
   },
 ];
 
@@ -421,13 +449,13 @@ if (process.argv.includes('--self-test')) {
 } else {
   const { problems, sites, interpolations, files } = scan();
   if (problems.length) {
-    console.error(`console-shape: ${problems.length} site(s) put a value in the message that belongs beside it.\n`);
+    console.error(`console-shape: ${problems.length} problem(s): a console call outside the reporter, or a value in a message that belongs beside it.\n`);
     for (const problem of problems) console.error(`  ${problem}`);
     console.error(GUIDANCE);
     process.exit(1);
   }
   console.log(
-    `console-shape: OK (${sites} console.* sites in ${files} files, ` +
+    `console-shape: OK (${sites} _report and console sites in ${files} files, ` +
       `${interpolations} interpolated values, all identifying text)`,
   );
 }

@@ -1,22 +1,19 @@
 /**
- * vapor-chamber - SSR hydration plugin
+ * vapor-chamber - SSR by the stores' states
  *
- * rehydrate() replays bus commands ABOVE Vue's DOM hydration: it holds no
- * DOM references, hydration anchors or interop state, so Vue's hydration
- * fixes land below it and only hand it a more-correct DOM. It replays when
- * called; the client entry below calls it before mount.
- * The history is in CHANGELOG.md and the whitepaper's appendix B.
- *
- * Per the whitepaper (section 12): commands that ran on the server to populate initial
- * state need to replay on the client so reactive signals reflect the same values.
- * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
+ * The server reads every store's state on the request's bus into the page
+ * (`storeStates`), and the client gives them to its stores (`seedStores`): a
+ * store already on the bus takes its state through its own write, one created
+ * later starts from it. Nothing replays: a reducer that mints an id or reads a
+ * clock ends on the server's state in the browser too. It works above Vue's DOM
+ * hydration: no DOM references, anchors or interop state. Route data stays the
+ * router's. The history is in CHANGELOG.md and the whitepaper's appendix B.
  *
  * CONCURRENCY. The shared bus is a module global, one per Node process. A
  * server that renders requests concurrently creates a bus per request: it
- * provides it to that request's app, and a component passes it to each
- * composable as `{ bus }`. Setting the shared bus per request is safe only
- * when requests render one at a time. Interleaved renders lose or swap each
- * other's dispatches (tests/ssr-per-request-bus.test.ts).
+ * provides it to that request's app, and each store is created on it
+ * (`useCart(bus)`). Its stores, and so its states, are that request's alone
+ * (tests/ssr-per-request-bus.test.ts, tests/ssr-store-states.test.ts).
  *
  * The HTTP client has the same rule: its cache and in-flight dedupe map live
  * in `createHttpClient()`'s closure, and while the cache key holds the
@@ -27,34 +24,29 @@
  * import { createSSRApp } from 'vue';
  * import { renderToString } from 'vue/server-renderer';
  * import { createCommandBus } from 'vapor-chamber';
- * import { createSSRPlugin, serializeForScript } from 'vapor-chamber/ssr';
+ * import { storeStates, serializeForScript } from 'vapor-chamber/ssr';
  *
  * export async function render(App) {
  *   const bus = createCommandBus();
- *   const ssr = createSSRPlugin();
- *   bus.use(ssr.plugin);
  *   const app = createSSRApp(App);
- *   app.provide('bus', bus); // in a component: useCommand({ bus: inject('bus') })
+ *   app.provide('bus', bus); // in a component: useCart(inject('bus'))
  *   const html = await renderToString(app);
- *   return { html, commands: ssr.dehydrate() };
+ *   return { html, states: storeStates(bus) };
  * }
- * // Embed: <script>window.__VAPOR_COMMANDS__ = ${serializeForScript(commands)}</script>
+ * // Embed: <script>window.__VAPOR_STATES__ = ${serializeForScript(states)}</script>
  * // (never JSON.stringify here: it leaves `</script>` in user text intact)
  *
  * @example Client entry
- * import { getCommandBus } from 'vapor-chamber';
- * import { rehydrate } from 'vapor-chamber/ssr';
+ * import { createVaporChamberApp, getCommandBus } from 'vapor-chamber/vapor';
+ * import { seedStores } from 'vapor-chamber/ssr';
  *
- * const bus = getCommandBus();
- * rehydrate(bus, window.__VAPOR_COMMANDS__);
+ * seedStores(getCommandBus(), window.__VAPOR_STATES__);
  * createVaporChamberApp(App).mount('#app');
  */
 
-import { DEV } from './dev';
-import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
-import { _errResult, _failures } from './command-bus';
-import { onSettled } from './settled';
-import { countOption } from './bounds';
+import type { BaseBus } from './command-bus';
+import type { ChamberStore } from './store-base';
+import { _busStores, _registryEntry, _storesOf, type RegistryEntry, type StoreFact } from './applied-remotely';
 
 /** What a <script> element, or an engine older than ES2019, would read in JSON text. */
 const SCRIPT_UNSAFE = /[<>&\u2028\u2029]/g;
@@ -64,245 +56,89 @@ const SCRIPT_ESCAPES: Record<string, string> = { '<': '\\u003c', '>': '\\u003e',
  * JSON for a `<script>` element: `JSON.stringify` with `<`, `>`, `&`, U+2028
  * and U+2029 written as `\u` escapes. Still JSON, and it parses to the same
  * value, but a string holding `</script>` cannot close the element it is
- * embedded in. Use it wherever dehydrated commands - which carry targets and
- * payloads, and so user text - go into the page.
+ * embedded in. Use it wherever the stores' states - which carry user text -
+ * go into the page.
  *
  * @example
- * `<script>window.__VAPOR_COMMANDS__ = ${serializeForScript(ssr.dehydrate())}</script>`
+ * `<script>window.__VAPOR_STATES__ = ${serializeForScript(storeStates(bus))}</script>`
  */
 export function serializeForScript(value: unknown): string {
   return JSON.stringify(value).replace(SCRIPT_UNSAFE, (c) => SCRIPT_ESCAPES[c] as string);
 }
 
-/** rehydrate()'s own refusals; the plugin's are `ssr` too (its id). */
-const ssrFail = _failures('ssr');
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** Serializable command entry for transport between server and client. */
-export type DehydratedCommand = {
-  action: string;
-  target: any;
-  payload?: any;
-};
-
-export type SSRPluginOptions = {
-  /**
-   * Filter which commands to record for dehydration. Return false to skip.
-   * Default: record all successful commands.
-   *
-   * @example Skip side-effectful commands
-   * filter: (cmd) => !cmd.action.startsWith('analytics')
-   */
-  filter?: (cmd: Command) => boolean;
-  /**
-   * Maximum number of commands to record. Prevents unbounded growth in
-   * long SSR renders. Default: 500.
-   */
-  maxSize?: number;
-};
-
-export type SSRPlugin = {
-  /** Sync plugin - install on the server bus via bus.use(ssr.plugin). */
-  plugin: Plugin;
-  /**
-   * Extract the recorded commands as a serializable array.
-   * Call after SSR render is complete, embed in HTML for the client.
-   */
-  dehydrate(): DehydratedCommand[];
-  /** Clear recorded commands. Call in `finally` block after each SSR request. */
-  clear(): void;
-  /** Number of recorded commands. */
-  size(): number;
-  /**
-   * How many commands were dropped at the `maxSize` cap. Non-zero means
-   * the client will rehydrate PARTIAL state - server/client divergence. Check
-   * it after `dehydrate()` rather than trusting the render silently: a cap
-   * that reads as "recorded everything" when it didn't is the failure mode
-   * this accessor exists to make visible.
-   */
-  dropped(): number;
-};
-
-export type RehydrateOptions = {
-  /**
-   * When true, commands that don't have a registered handler are silently
-   * skipped instead of producing errors. Default: true.
-   */
-  ignoreUnhandled?: boolean;
-  /**
-   * Plugin to suppress side effects during rehydration. When provided,
-   * this function is called for each command before dispatch. Return false
-   * to skip the dispatch (e.g. for analytics, API calls).
-   */
-  filter?: (cmd: DehydratedCommand) => boolean;
-};
-
-// ---------------------------------------------------------------------------
-// createSSRPlugin - server-side recording
-// ---------------------------------------------------------------------------
+type Entry = RegistryEntry;
 
 /**
- * createSSRPlugin - records dispatched commands on the server for dehydration.
+ * storeStates - the state of every store the request wrote on a bus, by store
+ * id: what a server render puts into the page. A store still on the state it
+ * was created with is left out, so the client's own load stands (its persist,
+ * or `state()`): the server declares only what it wrote. A seeded id whose
+ * store was never created is left out too.
  *
- * Install the `.plugin` on the server bus. After rendering, call `.dehydrate()`
- * to get a serializable command list for embedding in the HTML payload.
+ * @example
+ * const states = storeStates(bus); // { cart: { items: [...] }, user: { ... } }
  */
-export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
-  const { filter } = options;
-  const maxSize = countOption(options.maxSize, 500); // a NaN is the default (bounds.ts)
-  const recorded: DehydratedCommand[] = [];
-  let droppedCount = 0;
-  let capWarned = false;
-
-  // THROUGH `onSettled`: on the async bus `next()` is a promise, whose `.ok`
-  // is undefined, so reading it directly records nothing and `dehydrate()`
-  // comes back empty with no error (tests/ssr.test.ts, both buses).
-  const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
-    if (result.ok && (!filter || filter(cmd))) {
-      if (recorded.length < maxSize) {
-        recorded.push({
-          action: cmd.action,
-          target: cmd.target,
-          ...(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
-        });
-      } else {
-        // Past the cap the client rehydrates partial state, so say so: warn
-        // once (a blown cap means thousands) and keep a count.
-        droppedCount++;
-        if (!capWarned && DEV) {
-          capWarned = true;
-          console.warn(
-            `[vapor-chamber] SSR command recording hit maxSize (${maxSize}) at "${cmd.action}". ` +
-              'Further commands are dropped and the client will rehydrate PARTIAL state. ' +
-              'Raise maxSize, or narrow what is recorded with the `filter` option.',
-          );
-        }
-      }
-    }
-    return result;
-  }) as CommandResult;
-
-  function dehydrate(): DehydratedCommand[] {
-    return [...recorded];
-  }
-
-  function clear(): void {
-    recorded.length = 0;
-    droppedCount = 0;
-    capWarned = false;
-  }
-
-  function size(): number {
-    return recorded.length;
-  }
-
-  function dropped(): number {
-    return droppedCount;
-  }
-
-  return { plugin: Object.assign(plugin, { id: 'ssr' }), dehydrate, clear, size, dropped };
-}
-
-// ---------------------------------------------------------------------------
-// rehydrate - client-side replay
-// ---------------------------------------------------------------------------
-
-/**
- * rehydrate - replay server-recorded commands on the client bus.
- *
- * Dispatches each dehydrated command in order so reactive signals reach the
- * same state as the server render. Commands without registered handlers are
- * silently skipped by default (the handler may not be registered yet during
- * early client bootstrap).
- *
- * @returns Array of results from each replayed command.
- */
-export function rehydrate(
-  bus: BaseBus,
-  commands: DehydratedCommand[],
-  options: RehydrateOptions = {},
-): CommandResult[] {
-  const { ignoreUnhandled = true, filter } = options;
-  const results: CommandResult[] = [];
-  let asyncWarned = false;
-
-  for (const cmd of commands) {
-    if (filter && !filter(cmd)) continue;
-
-    if (ignoreUnhandled && !bus.hasHandler(cmd.action)) continue;
-
-    try {
-      const result = bus.dispatch(cmd.action, cmd.target, cmd.payload);
-      // `BaseBus.dispatch` returns `any`, so an AsyncCommandBus type-checks
-      // here - and this loop is sync. A pending promise pushed as a
-      // CommandResult is a lie: `result.ok` reads `undefined`, the try/catch
-      // above catches nothing that rejects later, and a failed replay surfaces
-      // as an unhandled rejection while `results` reports nothing wrong. Say
-      // so instead, and point at the function that actually handles this.
-      if (isThenable(result)) {
-        (result as Promise<CommandResult>).catch(() => {
-          /* already reported below - never an unhandled rejection */
-        });
-        if (!asyncWarned && DEV) {
-          asyncWarned = true;
-          console.warn(
-            `[vapor-chamber] rehydrate() received a pending dispatch for "${cmd.action}" - ` +
-              'this bus is asynchronous and rehydrate() is synchronous. ' +
-              'Use `await rehydrateAsync(bus, commands)` instead.',
-          );
-        }
-        results.push(_errResult(ssrFail(
-          'invalid:bus',
-          `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus - use rehydrateAsync()`,
-          { action: cmd.action },
-        )));
-        continue;
-      }
-      results.push(result);
-    } catch (e) {
-      results.push(_errResult(e as Error));
+export function storeStates(bus: BaseBus): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const registry = _busStores.get(bus)?.entries as Map<string, Entry> | undefined;
+  if (registry !== undefined) {
+    for (const [id, entry] of registry) {
+      // Only a store this request wrote: one still on the state it was created
+      // with says nothing the client does not know, and seeding it would
+      // overwrite the client's own (a saved cart, a preference). A write
+      // `coalesce` holds lands first, so one made this tick is read.
+      entry.land();
+      const cell = entry.cell;
+      if (cell !== null && cell.value !== entry.first) out[id] = cell.value;
     }
   }
-
-  return results;
-}
-
-// Its own copy, as command-bus.ts keeps one: importing settled.ts's measured -8 raw
-// and +1 brotli on an ssr consumer (log s35.177), no win, so the copy stays.
-function isThenable(value: unknown): boolean {
-  return value != null && typeof (value as { then?: unknown }).then === 'function';
+  return out;
 }
 
 /**
- * rehydrate for an `AsyncCommandBus` - the common case as soon as any handler
- * hits an HTTP transport.
+ * liveStores - the stores in use on a bus, in the order they were created: a
+ * new array each call, so disposing or creating a store while iterating is
+ * safe. A disposed store, and a seeded id whose store was never created, are
+ * left out. It reads the registry the bus keeps, so no dispatch or write pays
+ * for it. tests/live-stores.test.ts.
  *
- * Awaits each dispatch **in order**, preserving the module's design intent
- * (deterministic replay before the app goes interactive). A rejected dispatch
- * becomes `{ ok: false, error }` in the results, exactly as a thrown one does
- * on the sync path - never an unhandled rejection.
+ * @example
+ * for (const store of liveStores(bus)) store.$reset();
  */
-export async function rehydrateAsync(
-  bus: BaseBus,
-  commands: DehydratedCommand[],
-  options: RehydrateOptions = {},
-): Promise<CommandResult[]> {
-  const { ignoreUnhandled = true, filter } = options;
-  const results: CommandResult[] = [];
-
-  for (const cmd of commands) {
-    if (filter && !filter(cmd)) continue;
-    if (ignoreUnhandled && !bus.hasHandler(cmd.action)) continue;
-
-    try {
-      results.push(await bus.dispatch(cmd.action, cmd.target, cmd.payload));
-    } catch (e) {
-      results.push(_errResult(e as Error));
-    }
+export function liveStores(bus: BaseBus): Array<ChamberStore<any, any>> {
+  const out: Array<ChamberStore<any, any>> = [];
+  const registry = _busStores.get(bus)?.entries as Map<string, Entry> | undefined;
+  if (registry !== undefined) {
+    for (const entry of registry.values()) if (entry.store !== null) out.push(entry.store as ChamberStore<any, any>);
   }
+  return out;
+}
 
-  return results;
+/** A placeholder has no write `coalesce` could hold. */
+const nothingHeld = (): void => {};
+
+/**
+ * seedStores - give a server render's states to the client's stores, by id.
+ * Each state is a fact on the bus's stores' lane: a store already on the bus
+ * writes it at once through its own write (a step of its ring, saved by its
+ * persist: the server's state wins over a saved one). For an id with no store
+ * yet a placeholder holds the state, and a server's later one (a push before
+ * the store exists) replaces it; the store starts from it when it is created.
+ * Only an object is a state, as for a store. Call it before the app mounts.
+ *
+ * @example
+ * seedStores(getCommandBus(), window.__VAPOR_STATES__);
+ */
+export function seedStores(bus: BaseBus, states: Record<string, unknown>): void {
+  const { entries, lane } = _storesOf(bus);
+  const registry = entries;
+  const cmd = { action: '$seeded', target: undefined };
+  for (const id of Object.keys(states)) {
+    if (!registry.has(id)) {
+      const entry = _registryEntry(null, [], null, nothingHeld, nothingHeld, nothingHeld, undefined, null, undefined);
+      entry.unlisten = lane.on(id, (f: StoreFact) => { if (f.state !== null && typeof f.state === 'object') entry.seeded = f.state; });
+      registry.set(id, entry);
+    }
+    lane.emit(id, { cmd, state: states[id] });
+  }
 }

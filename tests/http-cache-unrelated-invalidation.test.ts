@@ -36,30 +36,17 @@ describe('a read in flight across an invalidation of another URL', () => {
     expect(s.gets.get('/a')).toBe(1);
   });
 
-  it('control: an invalidation of ITS URL, the read is not stored', async () => {
+  it('control: a write to ITS URL, the read is not stored', async () => {
     const s = server();
     const http = createHttpClient();
     s.hold = true;
     const first = http.get('/a', { cache: true });
     await tick();
-    http.invalidateCache('/a');
+    await http.post('/a', {});
     s.release();
     await first;
     await http.get('/a', { cache: true });
     expect(s.gets.get('/a')).toBe(2);
-  });
-
-  it('invalidateCache of another URL: the read is stored', async () => {
-    const s = server();
-    const http = createHttpClient();
-    s.hold = true;
-    const first = http.get('/a', { cache: true });
-    await tick();
-    http.invalidateCache('/b');
-    s.release();
-    await first;
-    await http.get('/a', { cache: true });
-    expect(s.gets.get('/a')).toBe(1);
   });
 
   it('a write to another URL resolves meanwhile: the read is stored', async () => {
@@ -75,13 +62,13 @@ describe('a read in flight across an invalidation of another URL', () => {
     expect(s.gets.get('/a')).toBe(1);
   });
 
-  it('dedupe off: an invalidation of its URL still keeps the read from being stored', async () => {
+  it('dedupe off: a write to its URL still keeps the read from being stored', async () => {
     const s = server();
     const http = createHttpClient();
     s.hold = true;
     const first = http.get('/a', { cache: true, dedupe: false });
     await tick();
-    http.invalidateCache('/a');
+    await http.post('/a', {});
     s.release();
     await first;
     await http.get('/a', { cache: true });

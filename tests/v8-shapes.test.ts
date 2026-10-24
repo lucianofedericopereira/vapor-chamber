@@ -9,7 +9,7 @@
  * fields, another order). Each is a different map, so a `result.ok` site that
  * saw a validator rejection, an HTTP bridge result and a plain dispatch was
  * polymorphic. Measured with %HaveSameMap before the fix: validator, authGuard,
- * debounce and async optimisticUndo results all differed from the bus's own.
+ * the debounce plugin (now `pace`) and async optimisticUndo (now the optimistic option) results all differed from the bus's own.
  *
  * The check is the engine's own, not a proxy: `sameMap` (tests/v8.ts) is
  * V8's `%HaveSameMap`. A key-order comparison would pass for maps V8 still
@@ -22,13 +22,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, vi } from 'vitest';
-import { createAsyncCommandBus, createCommandBus, type CommandResult } from '../src/command-bus';
-import { authGuard, debounce, optimisticUndo, throttle, validator } from '../src/plugins-core';
+import { _replayOf, createAsyncCommandBus, createCommandBus, createCommandPool, type CommandResult } from '../src/command-bus';
+import { createTestBus } from '../src/testing';
+import { authGuard, history, validator } from '../src/plugins-core';
+import { defineChamberStore } from '../src/store/core';
+import { shareTabs } from '../src/store-share';
+import { listen, quiet } from './tabs-quiet';
+import { pace } from '../src/pace';
 import { idempotent } from '../src/plugins-extra';
 import { validateSchemas } from '../src/plugins-schema';
 import { schemaValidator } from '../src/schema';
-import { rehydrate } from '../src/ssr';
-import { createHttpBridge } from '../src/transports';
+import { defineTransport, httpTransport } from '../src/transports';
 import { it } from '../src/vitest';
 import { sameMap } from './v8';
 
@@ -40,8 +44,7 @@ function busResult(): CommandResult {
 
 function bridged(data: unknown, ok = true, status = 200): Promise<CommandResult> {
   const httpClient = { post: vi.fn().mockResolvedValue({ ok, status, headers: {}, data }) } as any;
-  const bus = createAsyncCommandBus();
-  bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
+  const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient }) });
   return bus.dispatch('save', {});
 }
 
@@ -65,22 +68,20 @@ describe('CommandResult hidden class', () => {
 
     const d = createCommandBus();
     d.register('t', () => 1);
-    const deb = debounce(['t'], 5);
-    d.use(deb);
-    expect(sameMap(ref, d.dispatch('t', 1))).toBe(true);
+    const deb = pace(d.dispatch, { debounce: 5 });
+    const superseded = deb('t', 1);
     deb.dispose();
+    expect(sameMap(ref, await superseded)).toBe(true);
 
     const th = createCommandBus();
     th.register('t', () => 1);
-    const thr = throttle(['t'], 1000);
-    th.use(thr);
-    th.dispatch('t', 1);
-    expect(sameMap(ref, th.dispatch('t', 1))).toBe(true);
+    const thr = pace(th.dispatch, { throttle: 1000 });
+    await thr('t', 1);
+    expect(sameMap(ref, await thr('t', 1))).toBe(true);
     thr.dispose();
 
     const o = createAsyncCommandBus();
-    o.register('t', async () => 1, { undo: () => {} });
-    o.use(optimisticUndo(o as any, ['t']));
+    o.register('t', async () => 1, { undo: () => {}, optimistic: true });
     expect(sameMap(ref, await o.dispatch('t', 1))).toBe(true);
   });
 
@@ -100,16 +101,6 @@ describe('CommandResult hidden class', () => {
     expect(sameMap(ref, refused)).toBe(true);
   });
 
-  it('rehydrate()\'s refusal of an async bus shares the bus\'s map', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const a = createAsyncCommandBus();
-    a.register('t', async () => 1);
-    const [refused] = rehydrate(a, [{ action: 't', target: 1 }]);
-    warn.mockRestore();
-    expect(refused.ok).toBe(false);
-    expect(sameMap(ref, refused)).toBe(true);
-  });
-
   it('HTTP bridge results share the bus\'s map', async () => {
     expect(sameMap(ref, await bridged({ state: 1 }))).toBe(true);
     expect(sameMap(ref, await bridged({}, false, 503))).toBe(true);
@@ -117,20 +108,37 @@ describe('CommandResult hidden class', () => {
     expect(sameMap(ref, await bridged({ redirect: '/x' }))).toBe(true);
   });
 
-  it('the sync bus builds one command map across dispatch, query and request', async ({ bus }) => {
-    // The async bus adds `signal` and is its own map by design (the shape
-    // note in docs/performance.md). On the sync bus a request()'s signal
-    // settles the request's promise and never reaches the command, so the
-    // responder sees the map every handler sees.
+  it('every command shares one map: both buses, dispatch, query, batch, request, a replay and the test bus', async ({ bus }) => {
+    // Every literal carries `signal`, `undefined` where nothing sets it, so a
+    // site that reads commands from both buses stays monomorphic (log 36.F56).
+    // On the sync bus a request()'s own signal still settles the request's
+    // promise and never reaches the command.
     const seen: object[] = [];
     bus.register('t', (cmd) => { seen.push(cmd); return 1; });
     bus.respond('q', (cmd) => { seen.push(cmd); return 1; });
     bus.dispatch('t', 1);
     bus.query('t', 1);
+    bus.dispatchBatch([{ action: 't', target: 1 }]);
     await bus.request('q', 1, undefined, { signal: new AbortController().signal });
-    await bus.request('q', 1);
-    expect(seen).toHaveLength(4);
+    expect((seen[seen.length - 1] as { signal?: unknown }).signal).toBeUndefined();
+    const a = createAsyncCommandBus({ retry: false });
+    a.register('t', (cmd) => { seen.push(cmd); return 1; });
+    await a.dispatch('t', 1);
+    await a.query('t', 1);
+    seen.push(_replayOf('t', 1, undefined, 'k'));
+    const t = createTestBus({ passthroughHandlers: true });
+    t.register('t', (cmd) => { seen.push(cmd); return 1; });
+    t.dispatch('t', 1);
+    seen.push(createCommandPool(1).acquire('t', 1));
+    expect(seen).toHaveLength(9);
     for (const cmd of seen.slice(1)) expect(sameMap(seen[0], cmd)).toBe(true);
+  });
+
+  it('control: a command literal without `signal` is another map', ({ bus }) => {
+    let cmd: object | undefined;
+    bus.register('t', (c) => { cmd = c; return 1; });
+    bus.dispatch('t', 1);
+    expect(sameMap(cmd!, { action: 't', target: 1, payload: undefined, meta: (cmd as { meta: unknown }).meta })).toBe(false);
   });
 
   it('a command\'s meta keeps one map when an idempotency key is stamped later', async () => {
@@ -157,8 +165,7 @@ describe('CommandResult hidden class', () => {
     await local.dispatch('t', 1);
     const h = { 'content-type': 'application/json' };
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, url: '', redirected: false, headers: { entries: () => Object.entries(h), get: () => h['content-type'] }, text: async () => '{"state":1}' })));
-    const bridged = createAsyncCommandBus({ retry: false });
-    bridged.use(createHttpBridge({ endpoint: '/vc' }));
+    const bridged = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc' }) });
     bridged.on('*', (cmd) => { seen.push(cmd.meta!); });
     await bridged.dispatch('t', 2);
     vi.unstubAllGlobals();
@@ -171,10 +178,41 @@ describe('CommandResult hidden class', () => {
     const bus = createAsyncCommandBus();
     bus.register('t', async (cmd) => { seen.push(cmd.meta!); return 1; });
     await bus.dispatch('t', 1);
-    bus.use((cmd, next) => { cmd.meta!.request = { headers: { traceparent: 'x' } }; return next(); });
+    bus.use({ started: (cmd) => { cmd.meta!.request = { headers: { traceparent: 'x' } }; } });
     await bus.dispatch('t', 2);
     expect((seen[1] as { request?: unknown }).request).toBeDefined();
     expect(sameMap(seen[0], seen[1])).toBe(true);
+  });
+
+  it("a command another tab sent keeps the sync command's map and the meta's (log 36.F30)", async () => {
+    vi.stubGlobal('window', {}); // a page: shareTabs opens only where there are tabs
+    const name = `v8-tabs-${Math.random()}`;
+    const wire = listen(name);
+    const make = () => {
+      const bus = createCommandBus();
+      const h = history({ bus });
+      const s = defineChamberStore('cart', { state: () => ({ n: 0 }), reducers: { add: (st: { n: number }) => ({ n: st.n + 1 }) }, undo: true, share: shareTabs(name) })(bus);
+      return { h, s };
+    };
+    const a = make();
+    const b = make();
+    try {
+      await quiet(wire.heard);
+      a.s.add();
+      await quiet(wire.heard);
+      const local = a.h.getState().past[0]!;
+      const got = b.h.getState().past[0]!;
+      expect(got).not.toBe(local);
+      expect(sameMap(local, got)).toBe(true);
+      expect(sameMap(local.meta!, got.meta!)).toBe(true);
+      // Control: a command literal without `meta` is another map.
+      expect(sameMap(local, { action: 'cartAdd', target: undefined, payload: undefined })).toBe(false);
+    } finally {
+      a.s.$dispose();
+      b.s.$dispose();
+      wire.close();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('src/ builds no CommandResult literal of its own', () => {
@@ -225,12 +263,9 @@ describe('hook lists', () => {
   it('a removal keeps the bus state on its map, on both buses', () => {
     for (const make of [createCommandBus, createAsyncCommandBus]) {
       const fresh = make();
-      fresh.onBefore(() => {});
       fresh.onAfter(() => {});
       const removed = make();
-      const offB = removed.onBefore(() => {});
       const offA = removed.onAfter(() => {});
-      offB();
       offA();
       expect(sameMap(stateOf(fresh), stateOf(removed))).toBe(true);
     }
@@ -240,17 +275,31 @@ describe('hook lists', () => {
     expect(sameMap(stateOf(createCommandBus()), stateOf(createAsyncCommandBus()))).toBe(false);
   });
 
-  it('every hook entry shares one map: before and after, sync and async', () => {
+  it('every hook entry shares one map: sync and async', () => {
     const sync = createCommandBus();
     const async = createAsyncCommandBus();
-    sync.onBefore(() => {});
     sync.onAfter(() => {});
-    async.onBefore(async () => {});
     async.onAfter(async () => {});
-    const entries = [sync, async].flatMap((b) => {
-      const s = stateOf(b) as { beforeHooks: object[]; afterHooks: object[] };
-      return [s.beforeHooks[0], s.afterHooks[0]];
-    });
+    const entries = [sync, async].map((b) => (stateOf(b) as { afterHooks: object[] }).afterHooks[0]);
     for (const e of entries) expect(sameMap(entries[0], e)).toBe(true);
+  });
+});
+
+// A transport is read on every sent dispatch (`rec.transport.send`): each
+// factory builds one literal, `localFallback` always a boolean in one place.
+describe('transport objects', () => {
+  const send = async (): Promise<CommandResult> => ({ ok: true, value: 1, error: undefined });
+
+  it('defineTransport keeps one map with and without localFallback', () => {
+    expect(sameMap(defineTransport(send), defineTransport(send, { localFallback: true }))).toBe(true);
+    expect(sameMap(defineTransport(send), defineTransport(send, {}))).toBe(true);
+  });
+
+  it('two httpTransports, single and batched, share one map', () => {
+    expect(sameMap(httpTransport({ endpoint: '/a' }), httpTransport({ endpoint: '/b', batch: {} }))).toBe(true);
+  });
+
+  it('control: the check tells a literal without the field apart', () => {
+    expect(sameMap(defineTransport(send), { id: 'transport', send })).toBe(false);
   });
 });

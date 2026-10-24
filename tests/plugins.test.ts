@@ -1,7 +1,7 @@
 import { conditionOf } from '../src/command-bus';
-import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, vi, } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
-import { logger, validator, history, debounce, throttle, authGuard, optimistic } from '../src/plugins';
+import { logger, validator, history, authGuard } from '../src/plugins';
 import { stubGlobal } from '../src/vitest-pure';
 import { it } from '../src/vitest';
 
@@ -42,7 +42,7 @@ describe('logger plugin', () => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
+    bus.use(logger({ actions: ['cart*'] }));
     bus.register('cartAdd', () => 'cart');
     bus.register('userLogin', () => 'user');
 
@@ -174,7 +174,6 @@ describe('history plugin - undoAction/redoAction triggers', () => {
   it('repeated undo + redo work when triggers are dispatched through the bus (cart scenario)', ({ bus }) => {
     let total = 0;
     const h = history({ bus, undoAction: 'cart.undo', redoAction: 'cart.redo' });
-    bus.use(h);
     bus.register('cart.add', (cmd) => { total += cmd.target as number; }, {
       undo: (cmd) => { total -= cmd.target as number; },
     });
@@ -199,11 +198,10 @@ describe('history plugin - undoAction/redoAction triggers', () => {
   it('trigger actions are excluded from recording even if filter matches them', ({ bus }) => {
     const h = history({
       bus,
-      filter: cmd => cmd.action.startsWith('cart'),
+      actions: ['cart*'],
       undoAction: 'cart.undo',
       redoAction: 'cart.redo',
     });
-    bus.use(h);
     bus.register('cart.add', () => 'ok');
 
     bus.dispatch('cart.add', 1);
@@ -215,25 +213,17 @@ describe('history plugin - undoAction/redoAction triggers', () => {
   it('dispose() unregisters the trigger handlers', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const h = history({ bus, undoAction: 'u', redoAction: 'r' });
-    bus.use(h);
     expect(bus.hasHandler('u')).toBe(true);
     h.dispose();
     expect(bus.hasHandler('u')).toBe(false);
     expect(bus.hasHandler('r')).toBe(false);
   });
-
-  it('warns and skips trigger registration when bus is missing', () => {
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    history({ undoAction: 'u' });
-    expect(warn).toHaveBeenCalledOnce();
-  });
 });
 
 describe('history plugin', () => {
   it('should track successful commands', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -246,9 +236,8 @@ describe('history plugin', () => {
   });
 
   it('should not track failed commands', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testError', () => {
       throw new Error('Failed');
     });
@@ -260,9 +249,8 @@ describe('history plugin', () => {
   });
 
   it('should undo commands', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -277,9 +265,8 @@ describe('history plugin', () => {
   });
 
   it('should redo commands', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -293,9 +280,8 @@ describe('history plugin', () => {
   });
 
   it('should clear future on new command', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -310,9 +296,8 @@ describe('history plugin', () => {
   });
 
   it('should respect maxSize', ({ bus }) => {
-    const historyPlugin = history({ maxSize: 2 });
+    const historyPlugin = history({ bus, maxSize: 2 });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -327,10 +312,10 @@ describe('history plugin', () => {
 
   it('should respect filter', ({ bus }) => {
     const historyPlugin = history({
-      filter: (cmd) => cmd.action.startsWith('track'),
+      bus,
+      actions: ['track*'],
     });
 
-    bus.use(historyPlugin);
     bus.register('trackAction', () => 'tracked');
     bus.register('otherAction', () => 'not tracked');
 
@@ -343,9 +328,8 @@ describe('history plugin', () => {
   });
 
   it('should clear history', ({ bus }) => {
-    const historyPlugin = history();
+    const historyPlugin = history({ bus });
 
-    bus.use(historyPlugin);
     bus.register('testAction', () => 'success');
 
     bus.dispatch('testAction', { id: 1 });
@@ -359,145 +343,6 @@ describe('history plugin', () => {
   });
 });
 
-describe('debounce plugin', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  it('should debounce specified actions', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(debounce(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    // Same target = same debounce key
-    bus.dispatch('testAction', { id: 1 });
-    bus.dispatch('testAction', { id: 1 });
-    bus.dispatch('testAction', { id: 1 });
-
-    expect(handler).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(100);
-
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('should not debounce unspecified actions', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(debounce(['debouncedAction'], 100));
-    bus.register('otherAction', handler);
-
-    bus.dispatch('otherAction', {});
-
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-
-  it('should return pending status for debounced calls', ({ bus }) => {
-
-    bus.use(debounce(['testAction'], 100));
-    bus.register('testAction', () => 'result');
-
-    const result = bus.dispatch('testAction', {});
-
-    expect(result.ok).toBe(true);
-    expect(result.value?.pending).toBe(true);
-  });
-
-  it('should debounce per target', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(debounce(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    bus.dispatch('testAction', { id: 1 });
-    bus.dispatch('testAction', { id: 2 });
-
-    vi.advanceTimersByTime(100);
-
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-});
-
-describe('throttle plugin', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  it('should execute first call immediately', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(throttle(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    const result = bus.dispatch('testAction', {});
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(result.value).toBe('result');
-  });
-
-  it('should throttle subsequent calls', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(throttle(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    bus.dispatch('testAction', {});
-    const throttled = bus.dispatch('testAction', {});
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(throttled).toFailWith('throttle:limited:handler');
-    expect(throttled.error?.message).toContain('throttled');
-  });
-
-  it('should allow calls after wait period', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(throttle(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    bus.dispatch('testAction', {});
-
-    vi.advanceTimersByTime(100);
-
-    bus.dispatch('testAction', {});
-
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-
-  it('should not throttle unspecified actions', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(throttle(['throttledAction'], 100));
-    bus.register('otherAction', handler);
-
-    bus.dispatch('otherAction', {});
-    bus.dispatch('otherAction', {});
-
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-
-  it('should throttle per target', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.use(throttle(['testAction'], 100));
-    bus.register('testAction', handler);
-
-    bus.dispatch('testAction', { id: 1 });
-    bus.dispatch('testAction', { id: 2 });
-
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-});
-
 // ─── history with bus (undo executes inverse handler) ─────────────────────────
 
 describe('history plugin with bus (undo/redo execution)', () => {
@@ -507,7 +352,6 @@ describe('history plugin with bus (undo/redo execution)', () => {
     bus.register('cartAdd', () => 'added', { undo: undoFn });
 
     const historyPlugin = history({ bus });
-    bus.use(historyPlugin);
 
     bus.dispatch('cartAdd', { id: 1 });
     historyPlugin.undo();
@@ -523,7 +367,6 @@ describe('history plugin with bus (undo/redo execution)', () => {
     bus.register('cartAdd', handler);
 
     const historyPlugin = history({ bus });
-    bus.use(historyPlugin);
 
     bus.dispatch('cartAdd', { id: 1 });
     expect(handler).toHaveBeenCalledTimes(1);
@@ -542,7 +385,7 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => false,
-      protected: ['shopCart', 'shopWishlist'],
+      protected: ['shopCart*', 'shopWishlist*'],
     }));
 
     bus.register('shopCartAdd', () => 'added');
@@ -564,7 +407,7 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => true,
-      protected: ['shopCart'],
+      protected: ['shopCart*'],
     }));
 
     bus.register('shopCartAdd', () => 'added');
@@ -576,7 +419,7 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => false,
-      protected: ['shopCart'],
+      protected: ['shopCart*'],
       onUnauthenticated: callback,
     }));
 
@@ -589,78 +432,21 @@ describe('authGuard plugin', () => {
   });
 });
 
-// ─── optimistic plugin ────────────────────────────────────────────────────────
+// ─── register({ optimistic }) ─────────────────────────────────────────────────
 
-describe('optimistic plugin', () => {
-  it('should keep optimistic update on success', ({ bus }) => {
+describe('register optimistic', () => {
+  it('keeps the change on success', ({ bus }) => {
     const state = { count: 0 };
-
-    bus.use(optimistic({
-      'counterIncrement': {
-        apply: () => { state.count++; return () => { state.count--; }; }
-      }
-    }));
-
-    bus.register('counterIncrement', () => 'ok');
+    bus.register('counterIncrement', () => { state.count++; return 'ok'; }, { undo: () => { state.count--; }, optimistic: true });
     bus.dispatch('counterIncrement', {});
-
     expect(state.count).toBe(1);
   });
 
-  it('should rollback on failure', ({ bus }) => {
+  it('rolls back on failure', ({ bus }) => {
     const state = { count: 0 };
-
-    bus.use(optimistic({
-      'counterIncrement': {
-        apply: () => { state.count++; return () => { state.count--; }; }
-      }
-    }));
-
-    bus.register('counterIncrement', () => { throw new Error('fail'); });
+    bus.register('counterIncrement', () => { state.count++; throw new Error('fail'); }, { undo: () => { state.count--; }, optimistic: true });
     bus.dispatch('counterIncrement', {});
-
     expect(state.count).toBe(0);
   });
 });
 
-// ─── Plugin dispose ────────────────────────────────────────────────────────
-
-describe('throttle plugin dispose()', () => {
-  it('cancels all pending throttle timers', ({ bus }) => {
-    const t = throttle(['a'], 10000);
-    bus.use(t);
-    bus.register('a', () => 1);
-
-    expect(bus.dispatch('a', {})).toSucceedWith(1); // first call goes through, starts timer
-    expect(bus.dispatch('a', {})).toFailWith('throttle:limited:handler');
-    t.dispose(); // cancel the timer, forget the window
-    expect(bus.dispatch('a', {})).toSucceedWith(1);
-  });
-
-  it('refuses the same way register({ throttle }) does: one gate', ({ bus }) => {
-    bus.use(throttle(['a'], 10000));
-    bus.register('a', () => 1);
-    bus.register('b', () => 2, { throttle: 10000 });
-    // Same gate, same condition and subject; each refusal is its owner's.
-    for (const [action, owner] of [['a', 'throttle'], ['b', 'core']]) {
-      bus.dispatch(action, {});
-      const refused = bus.dispatch(action, {}).error as any;
-      expect(refused).toMatchObject({ code: `${owner}:limited:handler`, action });
-      expect(refused.message).toMatch(new RegExp(`^"${action}" throttled\\. Retry in \\d+ms\\.$`));
-    }
-  });
-});
-
-describe('debounce plugin dispose()', () => {
-  it('cancels all pending debounce timers', async ({ bus }) => {
-    const d = debounce(['a'], 10);
-    bus.use(d);
-    let runs = 0;
-    bus.register('a', () => { runs++; });
-
-    bus.dispatch('a', {}); // starts debounce timer
-    d.dispose(); // cancel the timer
-    await new Promise((r) => setTimeout(r, 30));
-    expect(runs).toBe(0); // the debounced call never ran
-  });
-});

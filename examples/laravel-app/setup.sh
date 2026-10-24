@@ -50,20 +50,31 @@ fi
 # strip the <?php opener before appending into the existing file
 tail -n +2 "$HERE/routes/append-to-web.php" >> "$WEB"
 
-# 5. Command input as the client sent it. Laravel's global TrimStrings and
-#    ConvertEmptyStringsToNull turn " a " into "a" and "" into null, values the
-#    client's schema accepts as they are. One closure skips both for the
-#    command routes (api/vc and everything under it). Like the routes block,
-#    our lines are dropped and written again on a re-run.
-APP="$TARGET/bootstrap/app.php"
+# 5. The repo's Composer package, from this checkout. Its provider leaves
+#    command input as the client sent it: TrimStrings and
+#    ConvertEmptyStringsToNull skip api/vc and everything under it. In local
+#    it adds the wire contract's test commands and development routes, which
+#    `node scripts/verify-contract.mjs` checks the demo with.
+(cd "$TARGET" && composer config repositories.vapor-chamber path "$(cd "$REPO" && pwd)" \
+  && composer require 'lucianofedericopereira/vapor-chamber:@dev' --no-interaction)
+
+# An older demo carries the same skip as lines in bootstrap/app.php, between
+# these markers. The provider applies it now, so the lines go.
 VC_BEGIN='// vapor-chamber: command input as sent (begin)'
 VC_END='// vapor-chamber: command input as sent (end)'
 export VC_BEGIN VC_END
-perl -i -ne 'if (index($_, $ENV{VC_BEGIN}) >= 0) { $d = 1 } print unless $d; $d = 0 if index($_, $ENV{VC_END}) >= 0' "$APP"
-perl -i -pe 'if (/->withMiddleware\(function \(Middleware \$middleware\): void \{/) { $_ .= join "", map { "        $_\n" } $ENV{VC_BEGIN}, q{$vc = fn (\Illuminate\Http\Request $request) => $request->is('"'"'api/vc'"'"', '"'"'api/vc/*'"'"');}, q{$middleware->convertEmptyStringsToNull(except: [$vc]);}, q{$middleware->trimStrings(except: [$vc]);}, $ENV{VC_END} }' "$APP"
-if ! grep -q "$VC_BEGIN" "$APP"; then
-  echo "[setup] bootstrap/app.php has no withMiddleware block: add the lines in docs/integrations/laravel.md by hand." >&2
-fi
+perl -i -ne 'if (index($_, $ENV{VC_BEGIN}) >= 0) { $d = 1 } print unless $d; $d = 0 if index($_, $ENV{VC_END}) >= 0' "$TARGET/bootstrap/app.php"
+
+# 6. The skeleton's agent files (AGENTS.md, CLAUDE.md) ask a coding agent to
+#    install Laravel Boost, and PHP through a curl-to-shell installer into the
+#    user's home. Only a file that carries those guidelines is replaced, by a
+#    note scoped to this demo. A file of your own is left as it is.
+for AGENT_FILE in AGENTS.md CLAUDE.md; do
+  if grep -q '<laravel-boost-guidelines>' "$TARGET/$AGENT_FILE" 2>/dev/null; then
+    cp "$HERE/AGENTS.demo.md" "$TARGET/$AGENT_FILE"
+    echo "[setup] $AGENT_FILE: replaced the Laravel Boost guidelines with the demo note"
+  fi
+done
 
 echo
 echo "[setup] done. Run it:"

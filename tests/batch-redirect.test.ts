@@ -1,7 +1,7 @@
 /**
  * `onRedirect` on the batching bridge.
  *
- * `BatchingHttpBridgeOptions` is `HttpBridgeOptions & { window }`, so it has
+ * `HttpBatchOptions` is `HttpTransportOptions & { window }`, so it has
  * always ACCEPTED `onRedirect` - and never read it: a redirect result was
  * resolved as a success whose value was the redirect. The single bridge has
  * handled the same body field since `onRedirect` shipped.
@@ -18,7 +18,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus } from '../src/command-bus';
-import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { batchServer, reply } from './backend-stubs';
 
 afterEach(() => {
@@ -29,8 +29,7 @@ describe('the batching bridge honours onRedirect', () => {
   it('a redirected command fails with transport:refused:redirect and onRedirect navigates', async () => {
     batchServer((command) => (command === 'logout' ? { redirect: '/login' } : { ok: true, state: { saved: true } }));
     const visits: string[] = [];
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', onRedirect: (url) => visits.push(url) }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', onRedirect: (url) => visits.push(url), batch: {} }) });
 
     const [logout, save] = await Promise.all([bus.dispatch('logout', {}), bus.dispatch('save', {})]);
 
@@ -44,8 +43,7 @@ describe('the batching bridge honours onRedirect', () => {
   it('two redirects in one batch navigate once; each command still carries its own url', async () => {
     batchServer((command) => ({ redirect: command === 'a' ? '/first' : '/second' }));
     const visits: string[] = [];
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', onRedirect: (url) => visits.push(url) }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', onRedirect: (url) => visits.push(url), batch: {} }) });
 
     const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
 
@@ -56,8 +54,7 @@ describe('the batching bridge honours onRedirect', () => {
 
   it('without onRedirect the redirect still fails the command, and says why', async () => {
     batchServer(() => ({ redirect: '/login' }));
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', batch: {} }) });
 
     const result = await bus.dispatch('logout', {});
 
@@ -68,8 +65,7 @@ describe('the batching bridge honours onRedirect', () => {
   it('CONTROL: the single bridge answers the same field the same way', async () => {
     vi.stubGlobal('fetch', async () => reply(200, { redirect: '/login' }));
     const visits: string[] = [];
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', onRedirect: (url) => visits.push(url) }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', onRedirect: (url) => visits.push(url) }) });
 
     const result = await bus.dispatch('logout', {});
 

@@ -18,17 +18,16 @@
  */
 import { describe, expect, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, _withOriginScope, type Command, type CommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { useCommandHistory, setCommandBus, resetCommandBus } from '../src/chamber';
 import { it } from '../src/vitest';
+import { history } from '../src/plugins-core';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const actions = (cmds: Command[]) => cmds.map((c) => c.action);
+const actions = (cmds: readonly Command[]) => cmds.map((c) => c.action);
 
 describe('history() plugin: dispatches inside an undo handler or a redo are not recorded', () => {
   it('sync bus: an undo handler that dispatches two compensations', ({ bus }) => {
     const h = history({ bus });
-    bus.use(h);
     bus.register('comp', () => 'compensated');
     bus.register('act', () => 'done', { undo: () => { bus.dispatch('comp', 1); bus.dispatch('comp', 2); } });
     bus.dispatch('act', 1);
@@ -44,7 +43,6 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
 
   it('async bus: the same, where a flag would be cleared before the recorder runs', async ({ asyncBus: bus }) => {
     const h = history({ bus: bus as unknown as CommandBus });
-    bus.use(h as any);
     bus.register('comp', async () => 'compensated');
     bus.register('act', async () => 'done', { undo: () => { bus.dispatch('comp', 1); bus.dispatch('comp', 2); } });
     await bus.dispatch('act', 1);
@@ -62,7 +60,6 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
     for (const make of [createCommandBus, createAsyncCommandBus] as const) {
       const bus: any = make();
       const h = history({ bus });
-      bus.use(h);
       let nested = false;
       bus.register('child', () => 'c');
       bus.register('act', () => { if (nested) bus.dispatch('child', 1); return 'a'; }, { undo: () => {} });
@@ -79,7 +76,6 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
 
   it('listeners see the origin: undo for the compensations, redo for the replay', ({ bus }) => {
     const h = history({ bus });
-    bus.use(h);
     const seen: Array<[string, unknown]> = [];
     bus.on('*', (cmd) => { seen.push([cmd.action, cmd.meta?.origin]); });
     bus.register('comp', () => 'c');

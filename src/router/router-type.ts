@@ -53,8 +53,8 @@ export type Router<TName extends string = string> = {
   afterEach: (hook: AfterEachHook) => () => void;
   onError: (handler: (error: unknown, to: RouteLocation) => void) => () => void;
   setRoutes: (rows: readonly RouteRecord[]) => void;
-  /** Re-fetch the table from the configured { url } source (admin tasks:
-   *  deploys, permission changes). Coded error when no url is configured. */
+  /** Re-fetch the table from the configured { url } source. Coded error when
+   *  no url is configured. */
   reload: () => Promise<void>;
   start: () => Promise<void>;
   isReady: () => Promise<void>;

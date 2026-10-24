@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type BusError, createAsyncCommandBus, type AsyncCommandBusOptions, type CommandResult } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
-import { optimisticUndo } from '../src/plugins-core';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { stubEnv } from '../src/vitest-pure';
 
 type Answer = { status: number; body?: unknown; headers?: Record<string, string> };
@@ -40,9 +39,8 @@ afterEach(() => {
 
 /** An async bus with the HTTP bridge, a short bridge timeout and a 1 ms backoff. */
 function bridged(retry: AsyncCommandBusOptions['retry'] = { baseDelay: 1 }, key?: string) {
-  const bus = createAsyncCommandBus({ retry });
-  if (key) bus.use((cmd, next) => { cmd.meta!.idempotencyKey = key; return next(); }, { priority: 10 });
-  bus.use(createHttpBridge({ endpoint: '/vc', timeout: 15 }));
+  const bus = createAsyncCommandBus({ retry, transport: httpTransport({ endpoint: '/vc', timeout: 15 }) });
+  if (key) bus.use({ started: (cmd) => { cmd.meta!.idempotencyKey = key; } });
   return bus;
 }
 
@@ -108,16 +106,16 @@ describe('the bus: no reply on an unidentified command', () => {
     expect(warnings()).toEqual([]);
   });
 
-  it('optimisticUndo rolls back, and onRollback reads the outcome', async () => {
+  it('optimistic rolls back, and done carries the outcome', async () => {
     fetchAnswering('hang');
     const bus = bridged();
     let count = 0;
-    bus.register('cartAdd', async () => { count++; }, { undo: () => { count--; } });
-    const seen: unknown[] = [];
-    bus.use(optimisticUndo(bus, ['cartAdd'], { onRollback: (_cmd, err) => seen.push((err as BusError).context?.outcome) }), { priority: 100 });
-    count++; // the optimistic write the bridge's failure must take back
-    expect((await bus.dispatch('cartAdd', { id: 1 })).ok).toBe(true); // the prediction, at once
-    await vi.waitFor(() => expect(seen).toEqual(['unknown']));
+    // The handler is the change shown; the bridge's failure must take it back.
+    bus.register('cartAdd', async () => { count++; }, { undo: () => { count--; }, optimistic: true });
+    const r = await bus.dispatch('cartAdd', { id: 1 });
+    expect(r.ok).toBe(true); // answered at once
+    const end = await (r.value as { done: Promise<{ ok: boolean; error?: unknown }> }).done;
+    expect((end.error as BusError).context?.outcome).toBe('unknown');
     expect(count).toBe(0);
   });
 });
@@ -144,7 +142,7 @@ describe('the HTTP client', () => {
   it('a POST with no reply is sent once, marked, with one warning per method and URL', async () => {
     const calls = fetchAnswering('hang');
     const failures: BusError[] = [];
-    for (let i = 0; i < 2; i++) await postCommand('/orders', { sku: 1 }, { retry: 2, timeout: 15 }).catch((e) => failures.push(e));
+    for (let i = 0; i < 2; i++) await postCommand('/orders', { sku: 1 }, { retry: { maxAttempts: 3 }, timeout: 15 }).catch((e) => failures.push(e));
     expect(calls).toHaveLength(2);
     expect(failures.map((e) => [e.code, e.context?.outcome])).toEqual([['transport:timeout:reply', 'unknown'], ['transport:timeout:reply', 'unknown']]);
     expect(warnings()).toHaveLength(1);
@@ -154,7 +152,7 @@ describe('the HTTP client', () => {
   it('a 504 and a 502 on an unkeyed POST are sent once and marked', async () => {
     for (const status of [504, 502]) {
       const calls = fetchAnswering({ status, body: { detail: 'gateway' } });
-      const e = await createHttpClient().post('/orders', { sku: 1 }, { retry: 2 }).catch((x) => x);
+      const e = await createHttpClient().post('/orders', { sku: 1 }, { retry: { maxAttempts: 3 } }).catch((x) => x);
       expect(calls, String(status)).toHaveLength(1);
       expect((e as BusError).context?.outcome, String(status)).toBe('unknown');
     }
@@ -163,7 +161,7 @@ describe('the HTTP client', () => {
   it('control: an Idempotency-Key in any case makes it re-sendable', async () => {
     vi.useFakeTimers();
     const calls = fetchAnswering('hang', 'hang', { status: 200, body: {} });
-    const p = postCommand('/orders', { sku: 1 }, { retry: 2, timeout: 15, headers: { 'idempotency-key': '"k"' } });
+    const p = postCommand('/orders', { sku: 1 }, { retry: { maxAttempts: 3 }, timeout: 15, headers: { 'idempotency-key': '"k"' } });
     await vi.advanceTimersByTimeAsync(10_000);
     expect((await p).ok).toBe(true);
     expect(calls).toHaveLength(3);
@@ -180,14 +178,14 @@ describe('the HTTP client', () => {
 
   it('a 409 with Retry-After on an unkeyed POST fails once with retryIn; keyed, it is re-sent', async () => {
     let calls = fetchAnswering({ status: 409, body: { detail: 'busy' }, headers: { 'retry-after': '1' } });
-    const e = await postCommand('/orders', {}, { retry: 1 }).catch((x) => x);
+    const e = await postCommand('/orders', {}, { retry: { maxAttempts: 2 } }).catch((x) => x);
     expect(calls).toHaveLength(1);
     expect((e as BusError).context).toMatchObject({ status: 409, retryIn: 1000 });
     expect((e as BusError).context?.outcome).toBeUndefined();
     expect(warnings()).toHaveLength(1);
     vi.useFakeTimers();
     calls = fetchAnswering({ status: 409, body: null, headers: { 'retry-after': '1' } }, { status: 200, body: { state: 1 } });
-    const p = postCommand('/orders', {}, { retry: 1, headers: { 'Idempotency-Key': '"k"' } });
+    const p = postCommand('/orders', {}, { retry: { maxAttempts: 2 }, headers: { 'Idempotency-Key': '"k"' } });
     await vi.advanceTimersByTimeAsync(999);
     expect(calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -198,7 +196,7 @@ describe('the HTTP client', () => {
   it('RateLimit r=0 declares a wait of t seconds', async () => {
     vi.useFakeTimers();
     const calls = fetchAnswering({ status: 429, body: null, headers: { ratelimit: '"default";r=0;t=2' } }, { status: 200, body: {} });
-    const p = postCommand('/orders', {}, { retry: 1 });
+    const p = postCommand('/orders', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(1999);
     expect(calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -209,7 +207,7 @@ describe('the HTTP client', () => {
   it('control: RateLimit with quota left declares no wait (the backoff runs)', async () => {
     vi.useFakeTimers();
     const calls = fetchAnswering({ status: 429, body: null, headers: { ratelimit: '"default";r=5;t=30' } }, { status: 200, body: {} });
-    const p = postCommand('/orders', {}, { retry: 1 });
+    const p = postCommand('/orders', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(1200);
     expect((await p).ok).toBe(true);
     expect(calls).toHaveLength(2);
@@ -218,7 +216,7 @@ describe('the HTTP client', () => {
   it('Retry-After takes precedence over RateLimit', async () => {
     vi.useFakeTimers();
     const calls = fetchAnswering({ status: 429, body: null, headers: { 'retry-after': '1', ratelimit: '"default";r=0;t=5' } }, { status: 200, body: {} });
-    const p = postCommand('/orders', {}, { retry: 1 });
+    const p = postCommand('/orders', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(1000);
     expect((await p).ok).toBe(true);
     expect(calls).toHaveLength(2);
@@ -226,11 +224,11 @@ describe('the HTTP client', () => {
 
   it('control: a 2xx that is not JSON and a 500 are not marked', async () => {
     fetchAnswering({ status: 200, body: 'not json' });
-    const a = await postCommand('/orders', {}, { retry: 2 }).catch((x) => x);
+    const a = await postCommand('/orders', {}, { retry: { maxAttempts: 3 } }).catch((x) => x);
     expect((a as BusError).code).toBe('remote:unexpected:json');
     expect((a as BusError).context?.outcome).toBeUndefined();
     const calls = fetchAnswering({ status: 500, body: { detail: 'broke' } });
-    const b = await postCommand('/orders', {}, { retry: 2 }).catch((x) => x);
+    const b = await postCommand('/orders', {}, { retry: { maxAttempts: 3 } }).catch((x) => x);
     expect(calls).toHaveLength(1);
     expect((b as BusError).context?.outcome).toBeUndefined();
     expect(warnings()).toEqual([]);
@@ -242,10 +240,9 @@ describe('production', () => {
     using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const { createAsyncCommandBus: bus } = await import('../src/command-bus');
-    const { createHttpBridge: bridge } = await import('../src/transports');
+    const { httpTransport } = await import('../src/transports');
     fetchAnswering('hang');
-    const b = bus({ retry: { baseDelay: 1 } });
-    b.use(bridge({ endpoint: '/vc', timeout: 15 }));
+    const b = bus({ retry: { baseDelay: 1 }, transport: httpTransport({ endpoint: '/vc', timeout: 15 }) });
     const r = await b.dispatch('cartAdd', { id: 1 });
     expect((r.error as BusError).context?.outcome).toBe('unknown');
     expect(warnings()).toEqual([]);

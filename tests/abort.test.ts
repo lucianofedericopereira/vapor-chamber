@@ -15,7 +15,7 @@
  */
 import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAsyncCommandBus, BusError, type Command } from '../src/command-bus';
-import { createHttpBridge, createWsBridge } from '../src/transports';
+import { httpTransport, wsTransport } from '../src/transports';
 import { it } from '../src/vitest';
 
 /**
@@ -151,8 +151,7 @@ describe('AbortController - HTTP bridge auto-propagation', () => {
       return new Response(JSON.stringify({ state: { ok: true } }), { status: 200 });
     }) as any;
 
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api' }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api' }) });
 
     const ac = new AbortController();
     await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
@@ -328,10 +327,10 @@ describe('AbortController - WS bridge propagation', () => {
   beforeEach(() => { originalWS = (globalThis as any).WebSocket; (globalThis as any).WebSocket = FakeWebSocket; });
   afterEach(() => { (globalThis as any).WebSocket = originalWS; });
 
-  it('pre-aborted signal short-circuits - message is NOT sent', async ({ asyncBus: bus }) => {
-    const ws = createWsBridge({ url: 'ws://test' });
+  it('pre-aborted signal short-circuits - message is NOT sent', async () => {
+    const ws = wsTransport({ url: 'ws://test' });
+    const bus = createAsyncCommandBus({ transport: ws });
     ws.connect();
-    bus.use(ws);
     await new Promise(r => queueMicrotask(() => r(null))); // let onopen fire
 
     const ac = new AbortController();
@@ -343,10 +342,10 @@ describe('AbortController - WS bridge propagation', () => {
     ws.disconnect();
   });
 
-  it('mid-flight abort settles the pending request without waiting for server', async ({ asyncBus: bus }) => {
-    const ws = createWsBridge({ url: 'ws://test', timeout: WS_TIMEOUT });
+  it('mid-flight abort settles the pending request without waiting for server', async () => {
+    const ws = wsTransport({ url: 'ws://test', timeout: WS_TIMEOUT });
+    const bus = createAsyncCommandBus({ transport: ws });
     ws.connect();
-    bus.use(ws);
     await new Promise(r => queueMicrotask(() => r(null)));
 
     const ac = new AbortController();

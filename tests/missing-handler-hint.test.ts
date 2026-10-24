@@ -1,21 +1,21 @@
 /**
  * core:missing:handler in DEV: the other cause, when a plugin could have taken it.
  *
- * A transport plugin forwards only the actions its `actions` filter matches;
- * any other falls through `next()` to the handler lookup, which then says
- * "Call bus.register(...) first" - the wrong fix when the action was meant for
- * the transport (docs/rc-alignment-log.md s10.1, B2). In DEV, a bus with at least one
- * plugin installed now names that cause too. Production carries the fact
+ * A transport is the work only for the actions its pattern covers; any other
+ * goes to the handler lookup, which then says "Call bus.register(...) first" -
+ * the wrong fix when the action was meant for the transport
+ * (docs/rc-alignment-log.md s10.1, B2). In DEV, a bus with a transport names
+ * that cause too. Production carries the fact
  * alone: all advice sits behind DEV, which the IIFEs fold at build and a
  * consumer's production build folds, and the fix text is the catalogue's
  * (ERROR_CODE_REGISTRY).
  *
- * The real bridge, not a stand-in: its filter is what decides whether the
+ * The real transport map, not a stand-in: its pattern decides whether the
  * dispatch reaches the handler lookup at all.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const HINT = "a transport plugin's `actions` filter did not match";
+const HINT = 'Or declare a transport pattern that covers it.';
 const FACT = 'No handler registered for "orderCancel".';
 const SHIPPED = `${FACT} Call bus.register("orderCancel", handler) first.`;
 
@@ -23,17 +23,16 @@ const SHIPPED = `${FACT} Call bus.register("orderCancel", handler) first.`;
 async function fresh() {
   vi.resetModules();
   const { createAsyncCommandBus, createCommandBus } = await import('../src/command-bus');
-  const { createHttpBridge } = await import('../src/transports');
-  return { createAsyncCommandBus, createCommandBus, createHttpBridge };
+  const { httpTransport } = await import('../src/transports');
+  return { createAsyncCommandBus, createCommandBus, httpTransport };
 }
 
-/** An async bus whose only plugin is a bridge that forwards `cart*` and nothing else. */
+/** An async bus whose one transport covers `cart*` and nothing else. */
 async function bridgedMiss() {
-  const { createAsyncCommandBus, createHttpBridge } = await fresh();
+  const { createAsyncCommandBus, httpTransport } = await fresh();
   const fetchStub = vi.fn();
   vi.stubGlobal('fetch', fetchStub);
-  const bus = createAsyncCommandBus();
-  bus.use(createHttpBridge({ endpoint: '/api/vc', actions: ['cart*'] }));
+  const bus = createAsyncCommandBus({ transport: { 'cart*': httpTransport({ endpoint: '/api/vc' }) } });
   const result = await bus.dispatch('orderCancel', { id: 1 });
   return { result, fetchStub };
 }
@@ -45,16 +44,16 @@ describe('core:missing:handler message', () => {
     vi.resetModules();
   });
 
-  it('DEV, a bridge whose filter misses: the message names the filter', async () => {
+  it('DEV, a transport pattern that misses: the message names it', async () => {
     const { result, fetchStub } = await bridgedMiss();
-    // Harness guard: the filter really let it through to the handler lookup.
+    // Harness guard: the pattern really let it through to the handler lookup.
     expect(fetchStub).not.toHaveBeenCalled();
     expect(result).toFailWith('core:missing:handler');
     expect(result.error?.message.startsWith(SHIPPED)).toBe(true);
     expect(result.error?.message).toContain(HINT);
   });
 
-  it('DEV, no plugin installed: the register() advice is the whole story', async () => {
+  it('DEV, no transport declared: the register() advice is the whole story', async () => {
     const { createCommandBus } = await fresh();
     const result = createCommandBus().dispatch('orderCancel', null);
     expect(result.error?.message).toBe(SHIPPED);

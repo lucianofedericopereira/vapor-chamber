@@ -45,16 +45,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Optional: per-command rate limits
+    | Idempotency-Key replay window
     |--------------------------------------------------------------------------
     |
-    | If your VaporChamberController consults this map (you'll need to wire
-    | it in the controller - not done by default), each command can declare
-    | per-user rate limits. Useful for high-frequency commands (search,
-    | telemetry) where you don't want one client to overwhelm the bus.
+    | How long, in seconds, a finished Idempotency-Key replays its answer to
+    | a re-send. Set it from how long your clients stay offline: the outbox
+    | re-sends a record after a reload, any time later. A re-send after the
+    | window runs the action again. Default 24 hours.
     |
     */
-    'rate_limits' => [
-        // 'searchExecute' => ['max' => 30, 'per_seconds' => 60],
-    ],
+    'idempotency_ttl' => 86400,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Old pages
+    |--------------------------------------------------------------------------
+    |
+    | The build this app serves. A page sends its own build as the
+    | `X-App-Version` header (httpTransport `headers`), and a command from a
+    | page that differs is answered `{ redirect }` to that page, so the reload
+    | brings the new build. Leave it null to check nothing. The version is
+    | yours: the library carries none.
+    |
+    | `reload_url` is where an old page goes when its `Referer` is not this
+    | host's.
+    |
+    */
+    'app_version' => env('APP_VERSION'),
+    'reload_url' => '/',
 ];

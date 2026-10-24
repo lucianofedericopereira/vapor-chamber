@@ -72,16 +72,15 @@ const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 else console.error(result.error);
 
-// Plugins - logger, debounce, throttle, persist, ... (the async bus retries on its own)
+// Plugins - logger, authGuard, ... (the async bus retries on its own, pace() paces a sender)
 bus.use(logger());
 
-// before/after hooks
-bus.onBefore((cmd) => { if (!authorized(cmd)) throw new Error('forbidden'); });
+// a rule refuses before the work; an after-hook hears every outcome
+bus.use({ authorize: () => (cmd, fail) => (authorized(cmd) ? undefined : err(fail('refused:action', 'forbidden'))) });
 bus.onAfter((cmd, result) => metrics.record(cmd.action, result.ok));
 
 // Async with results
-const asyncBus = createAsyncCommandBus();
-asyncBus.use(createHttpBridge({ endpoint: '/api/vc' }));
+const asyncBus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }) });
 const result = await asyncBus.dispatch('orderCreate', cart);
 
 // AbortController
@@ -100,7 +99,7 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+**<!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB brotli**, a couple
 of orders of magnitude more. That difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.
@@ -118,11 +117,11 @@ lane.emit('cartAdd', { id: 42 });
 ```
 
 On the three-listener fan-out both libraries are built for, the fast lane
-measures **<!-- vc:benchFastLaneVsMitt -->1.88-2.32<!-- /vc:benchFastLaneVsMitt -->x
+measures **<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x
 mitt**, and the general bus's `emit`
-**<!-- vc:benchEmitVsMittFanout -->1.53-1.63<!-- /vc:benchEmitVsMittFanout -->x**.
+**<!-- vc:benchEmitVsMittFanout -->1.57-1.94<!-- /vc:benchEmitVsMittFanout -->x**.
 Each is the range over several runs on one host
-(<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
+(<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
 libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
 15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
 them. Nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)

@@ -33,8 +33,8 @@ requireDist(existsSync(dist('index.js')) && existsSync(dist('vue.js')));
 /** chamber.ts's DEV-only probe-path hint - the string s19.4 found shipped. */
 const HINT = 'Vue detected at runtime rather than at build time';
 /** chamber.ts's runtime probe as it lands in a consumer bundle: proof chamber.ts is in the graph.
- *  Backticks too - Vite's minifier writes the literal as a template. */
-const PROBE = /import\(\s*(?:\/\*[^*]*\*\/\s*)?["'`]vue["'`]\s*\)/;
+ *  Its specifier is a module binding (VUE_PKG, log 36.F26), minified to `x="vue"` or `x=\`vue\``. */
+const PROBE = /[\w$]\s*=\s*["'`]vue["'`]/;
 /** What the DEV expression leaves behind if it does not fold. Not bare `import.meta`:
  *  Vite's own preload helper reads `import.meta.url` in any app with a dynamic import. */
 const UNFOLDED = ['typeof process', 'import.meta.env'];

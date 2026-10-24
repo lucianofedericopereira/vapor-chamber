@@ -10,7 +10,8 @@
  */
 import { describe, expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';
-import { createCommandBus } from '../src/command-bus';
+import { _groupsAt, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { httpTransport } from '../src/transports';
 import { createTestBus } from '../src/testing';
 import { it } from '../src/vitest';
 import { compileVapor } from './compile-vapor';
@@ -59,6 +60,101 @@ describe('register() cleanup ownership', () => {
     bus.register('save', () => 'B');
     offA();
     expect(bus.dispatch('save', {})).toSucceedWith('B');
+  });
+
+  it('the newer owner leaves first: the older one answers again, with its undo (sync bus)', ({ bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const undoA = () => 'undo A';
+    const offA = bus.register('save', () => 'A', { undo: undoA });
+    const offB = bus.register('save', () => 'B', { undo: () => 'undo B' });
+
+    offB();
+    expect(bus.dispatch('save', {})).toSucceedWith('A');
+    expect(bus.getUndoHandler('save')).toBe(undoA);
+    expect(bus.dispatch('save$undo', {})).toSucceedWith('undo A');
+
+    offA();
+    expect(bus.hasHandler('save')).toBe(false);
+    expect(bus.hasHandler('save$undo')).toBe(false);
+  });
+
+  it('the same on the async bus', async ({ asyncBus: bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bus.register('save', async () => 'A');
+    const offB = bus.register('save', async () => 'B');
+    offB();
+    expect(await bus.dispatch('save', {})).toSucceedWith('A');
+  });
+
+  it('three owners: the newest still live answers, whichever leaves', ({ bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const offA = bus.register('save', () => 'A');
+    const offB = bus.register('save', () => 'B');
+    const offC = bus.register('save', () => 'C');
+    offB();
+    expect(bus.dispatch('save', {})).toSucceedWith('C');
+    offC();
+    expect(bus.dispatch('save', {})).toSucceedWith('A');
+    offA();
+    expect(bus.hasHandler('save')).toBe(false);
+  });
+
+  it('three owners, the newest leaving first each time: each covered one answers in turn', ({ bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const offA = bus.register('save', () => 'A');
+    const offB = bus.register('save', () => 'B');
+    const offC = bus.register('save', () => 'C');
+    offC();
+    expect(bus.dispatch('save', {})).toSucceedWith('B');
+    offB();
+    expect(bus.dispatch('save', {})).toSucceedWith('A');
+    offA();
+    expect(bus.hasHandler('save')).toBe(false);
+  });
+
+  it('one function value in two owners: either leaving keeps the other', ({ bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const same = () => 'same';
+    const offA = bus.register('save', same);
+    const offB = bus.register('save', same);
+    offA();
+    expect(bus.dispatch('save', {})).toSucceedWith('same');
+    offA();
+    expect(bus.dispatch('save', {})).toSucceedWith('same');
+    offB();
+    expect(bus.hasHandler('save')).toBe(false);
+  });
+
+  it("a newer owner's options are its own: no undo of the covered one runs under it", ({ bus }) => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bus.register('save', () => 'A', { undo: () => 'undo A' });
+    const offB = bus.register('save', () => 'B');
+    expect(bus.getUndoHandler('save')).toBeUndefined();
+    offB();
+    expect(bus.dispatch('save$undo', {})).toSucceedWith('undo A');
+  });
+
+  it("the older owner's answer and cache groups come back with it", async () => {
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const httpClient = { post: async () => ({ ok: true, status: 200, headers: {}, data: { state: 1 } }) } as never;
+    const bus = createAsyncCommandBus({ transport: { 'cart*': httpTransport({ endpoint: '/api/vc', httpClient }) } });
+    const heard: string[] = [];
+    bus.register('cartAdd', null, { answer: () => { heard.push('A'); }, cacheGroups: ['cart'] });
+    const offB = bus.register('cartAdd', null, { answer: () => { heard.push('B'); }, cacheGroups: ['other'] });
+    await bus.dispatch('cartAdd', {});
+    expect(_groupsAt(bus).members.get('cartAdd')).toEqual(['other']);
+    offB();
+    await bus.dispatch('cartAdd', {});
+    expect({ heard, groups: _groupsAt(bus).members.get('cartAdd') }).toEqual({ heard: ['B', 'A'], groups: ['cart'] });
+  });
+
+  it('the test double gives the older owner back the same way', () => {
+    const bus = createTestBus();
+    const undoA = () => 'undo A';
+    bus.register('save', () => 'A', { undo: undoA });
+    const offB = bus.register('save', () => 'B', { undo: () => 'undo B' });
+    offB();
+    expect(bus.getUndoHandler('save')).toBe(undoA);
   });
 
   it('KeepAlive with a max: the page on screen still answers after the other is evicted', async () => {

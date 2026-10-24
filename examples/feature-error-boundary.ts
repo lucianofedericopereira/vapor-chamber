@@ -1,103 +1,89 @@
 /**
- * Feature example: useCommandError - component-scoped error boundary
- * ==================================================================
- * Captures failed command results reactively at the component level.
- * Replaces ad-hoc try/catch blocks scattered across components.
+ * Feature example: useCommandError - a component shows the failures of its own commands
+ * =======================================================================================
+ * `useCommandError` collects the failed results of the bus reactively, all of
+ * them or only the actions named, with the failing command and a timestamp. A
+ * component reads `latestError` into a banner. No try/catch in the component.
  */
 
+import { createApp, defineComponent, h } from 'vue'
 // One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and
 // wires Vue (the root would not).
-import { createCommandBus, setCommandBus, useCommandError } from 'vapor-chamber/vue'
+import { createAsyncCommandBus, setCommandBus, useCommand, useCommandError } from 'vapor-chamber/vue'
 
-const bus = createCommandBus()
+const bus = createAsyncCommandBus()
 setCommandBus(bus)
 
-// Register some handlers that may fail
-bus.register('cartAdd', (cmd) => {
+bus.register('cartAdd', async (cmd) => {
   if (!cmd.target?.id) throw new Error('Product ID is required')
   return { added: true, id: cmd.target.id }
 })
-
 bus.register('orderSubmit', () => {
   throw new Error('Payment gateway timeout')
 })
-
-bus.register('userLogin', (cmd) => {
+bus.register('userLogin', async (cmd) => {
   if (cmd.target.password.length < 8) throw new Error('Password too short')
   return { token: 'jwt_abc123' }
 })
-
-// ─── Global error capture (catch all failures) ────────────────────────────────
-
-// Outside a component, for brevity: in an app this runs in setup(). Here nothing
-// disposes it automatically (the DEV heads-up says so); call dispose() when done.
-const { errors, latestError, clearErrors } = useCommandError()
-
-bus.dispatch('cartAdd', {})         // missing id -> error
-bus.dispatch('orderSubmit', {})     // payment error
-
-console.log('All errors:', errors.value.length)
-console.log('Latest:', latestError.value?.message)
-// -> 'Payment gateway timeout'
-
-clearErrors()
-
-// ─── Filtered: only watch specific namespaces ─────────────────────────────────
-
-const orderErrors = useCommandError({
-  filter: (cmd) => cmd.action.startsWith('order'),
+bus.register('checkoutSubmit', async () => {
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  throw new Error('Card declined')
 })
 
-const authErrors = useCommandError({
-  filter: (cmd) => cmd.action.startsWith('user'),
-})
+// ─── All failures, or only some ───────────────────────────────────────────────
 
-bus.dispatch('cartAdd', {})           // ignored by both
-bus.dispatch('orderSubmit', {})       // captured by orderErrors
-bus.dispatch('userLogin', { password: 'short' })  // captured by authErrors
+// Outside a component, for brevity: in an app each of these runs in setup()
+// and leaves with the component. Here the end of this section calls dispose().
+const all = useCommandError()
+const orderErrors = useCommandError({ actions: ['order*'] })
+const authErrors = useCommandError({ actions: ['user*'] })
 
-console.log('Order errors:', orderErrors.errors.value.length)  // -> 1
-console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
+await bus.dispatch('cartAdd', {})
+await bus.dispatch('orderSubmit', {})
+await bus.dispatch('userLogin', { password: 'short' })
+await bus.dispatch('cartAdd', { id: 1 }) // succeeds: not an error
 
-// ─── In a Vue component ───────────────────────────────────────────────────────
+console.log('All errors:', all.errors.value.length)          // 3
+console.log('Latest:', all.latestError.value?.message)       // Password too short
+console.log('Order errors:', orderErrors.errors.value.length) // 1
+console.log('Auth errors:', authErrors.errors.value.length)   // 1
 
-/*
- * <script setup lang="ts">
- * import { useCommand, useCommandError } from 'vapor-chamber/vue'
- *
- * // Per-component error state - cleared on unmount automatically
- * // Kept as objects: a template unwraps top-level refs, so the nested `.value`
- * // reads the same at runtime and for vue-tsc.
- * const cmd = useCommand()
- * const errs = useCommandError({
- *   filter: (cmd) => cmd.action === 'checkoutSubmit',
- * })
- * </script>
- *
- * <template>
- *   <div>
- *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
- *     <button type="button" @click="!cmd.loading.value && cmd.dispatch('checkoutSubmit', formData)" :aria-disabled="cmd.loading.value">
- *       {{ cmd.loading.value ? 'Processing...' : 'Pay now' }}
- *     </button>
- *
- *     <div v-if="errs.latestError.value" class="error-banner" role="alert">
- *       <p>{{ errs.latestError.value.message }}</p>
- *       <button type="button" @click="errs.clearErrors()">Dismiss</button>
- *     </div>
- *   </div>
- * </template>
- */
-
-// ─── Error entries include timestamp for stale-error detection ────────────────
-
-bus.dispatch('orderSubmit', {})
-
-// The global `errors` list kept capturing after clearErrors() above, so its
-// first entry is the cartAdd failure from the filtered section.
-const entry = errors.value[0]
-console.log('Error action:', entry.cmd.action)    // 'cartAdd'
-console.log('Error message:', entry.error.message) // 'Product ID is required'
+// Each entry names the failing command and when it failed.
+const entry = all.errors.value[0]
+console.log('Error action:', entry.cmd.action)
+console.log('Error message:', entry.error.message)
 console.log('Timestamp:', new Date(entry.timestamp).toISOString())
 
-export {}
+all.clearErrors()
+console.log('After clearErrors:', all.errors.value.length, all.latestError.value)
+for (const errors of [all, orderErrors, authErrors]) errors.dispose()
+
+// ─── In a component ───────────────────────────────────────────────────────────
+
+// The button is busy while its command is in flight (`pending`), and the banner
+// shows the failure until the user dismisses it. Click Pay now on the page.
+const Checkout = defineComponent({
+  setup() {
+    const cmd = useCommand()
+    const errs = useCommandError({ actions: ['checkoutSubmit'] })
+    const order = { id: 7 }
+    const busy = cmd.pending('checkoutSubmit', order)
+    const pay = () => { if (!busy.value) cmd.dispatch('checkoutSubmit', order) }
+
+    return () => h('div', [
+      // aria-disabled, not disabled: keyboard focus stays on the button
+      h('button', { id: 'pay', type: 'button', 'aria-disabled': busy.value, onClick: pay },
+        busy.value ? 'Processing...' : 'Pay now'),
+      errs.latestError.value
+        ? h('div', { class: 'error-banner', role: 'alert' }, [
+          h('p', errs.latestError.value.message),
+          h('button', { id: 'dismiss', type: 'button', onClick: errs.clearErrors }, 'Dismiss'),
+        ])
+        : null,
+    ])
+  },
+})
+
+const host = document.createElement('div')
+document.body.append(host)
+createApp(Checkout).mount(host)

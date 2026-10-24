@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/fast-lane';
 
 ### createFastLane
 
-**Function** - [src/fast-lane.ts:102](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L102)
+**Function** - [src/fast-lane.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L110)
 
 ```ts
 createFastLane(options?: FastLaneOptions) => FastLane
@@ -139,6 +139,14 @@ export type FastLaneOptions = {
    * see docs/performance.md Tuning.
    */
   removal?: 'live' | 'snapshot';
+  /**
+   * Where a listener's throw goes, with the action it was emitted on. Given,
+   * the throw is passed here and the emit goes on to the next listener, the
+   * rule a bus listener follows. Without it a throw stops the fan-out and
+   * reaches the caller of `emit`. Chosen once at factory time, like
+   * `removal`. tests/store-one-watcher.test.ts.
+   */
+  onError?: (error: unknown, action: string) => void;
 };
 ```
 

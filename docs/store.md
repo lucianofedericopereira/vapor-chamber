@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB brotli. Imports `vue`, the failure module and one chunk holding the library's `$` names and the commands a transport carried out: no bus, no probe.
+<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli. Imports `vue`, the failure module and one chunk holding the library's `$` names and the commands a transport carried out: no bus, no probe.
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';
@@ -33,32 +33,31 @@ nextState`: `add` on store `cart` becomes the method `cart.add` and the action
 
 `cart.add(42)` is a command. That one fact is the whole design, and it is why
 this module is small. Everything the bus already does applies to store state
-with no store-specific code. Undo is the exception, and it takes one option
-(below).
+with no store-specific code. Undo and saving are the exceptions: each is one
+option on the store (below).
 
 | you want | you add | the store contributes |
 | --- | --- | --- |
-| persistence | `persist` plugin | nothing |
-| undo / redo | `history` plugin, and `undo: true` on the store | the inverse: the state each action replaced |
-| optimistic rollback | `optimistic` plugin | nothing |
+| persistence | `persist` on the store | its state, saved after any write (below) |
+| undo / redo | `history({ bus })`, which installs itself, and `undo: true` on the store | the inverse: the state each action replaced |
+| optimistic rollback | `optimistic: true` on the store | its steps, rolled back on a failure (below) |
 | double-submit collapse | `idempotent` plugin | nothing |
-| a store's server commands in order, reads included | `serialize`, one lane per store (below) | nothing |
+| a store's server commands in order, reads included | `exclusive: true` on the store (below) | nothing |
 | a devtools timeline | `vapor-chamber/devtools` | nothing |
-| the same state in every tab | `createChannel`, and `share` on the store | the state it reached, with a version (below) |
+| the same state in every tab | `share: shareTabs()` on the store | each write's command, applied by each tab (below) |
 
-Across tabs the store shares the STATE it reached, never the command. The old
-plugin re-dispatched each command in every tab, so each tab re-derived its own
-outcome. Two tabs then disagreed for ever whenever the handler was not
-deterministic. A state cannot disagree with itself.
+Across tabs a write crosses as its command, and each tab applies it with the
+store's reducer, never through the bus. No plugin, listener or transport runs
+it twice. The old plugin re-dispatched each command in every tab, and every
+handler ran again there.
 
 ```ts
 const bus = createCommandBus();
-bus.use(history());
-bus.use(persist({ key: 'vc:cart', getState: () => cart.state.value }));
+history({ bus });
 
 const cart = useCart(bus);
 cart.add(1);
-// saved and recorded - the store did not participate
+// recorded - the store did not participate
 ```
 
 ### Undo
@@ -74,7 +73,6 @@ replaced.
 const useCart = defineChamberStore('cart', { state, reducers, undo: true });
 const bus = createCommandBus();
 const h = history({ bus });
-bus.use(h);
 const cart = useCart(bus);
 cart.add(1);
 cart.add(2);
@@ -83,8 +81,8 @@ h.redo();   // items [1, 2]
 ```
 
 The undo runs as a command, `cartAdd$undo`, as every undo does (see the bus's
-`register` options). So persist stores the undone state, and listeners and
-devtools see it with `cmd.meta.origin` `'undo'`. A redo re-dispatches the
+`register` options). A store with `persist` saves the undone state, and
+listeners and devtools see it with `cmd.meta.origin` `'undo'`. A redo re-dispatches the
 action with `'redo'`. A reload does not bring the undone state back. History
 does not record the undo.
 
@@ -94,13 +92,14 @@ produced, the same object, so an id the reducer minted comes back unchanged.
 If the state moved after the undo, through a change history did not record,
 the reducer runs instead. `tests/store-redo-recorded.test.ts`.
 
-An undo can reach an older step. `optimisticUndo` and a transactional batch
-dispatch `<action>$undo` for the action that failed, which need not be the
+An undo can reach an older step. An optimistic action's failure and a
+transactional batch dispatch `<action>$undo` for the action that failed, which need not be the
 newest. The store then rebases. It starts from that step's state before, and
 re-applies every later step it holds by calling the reducer directly. Plugins
-and bridges do not see those steps again. Every later write survives,
-including a tab's write (`$sync`), which is a step too. A later `$reset`, a
-tab's write or a server's answer (below) keeps the state it set. An undo for
+and transports do not see those steps again. Every later write survives,
+including another tab's command, which is a step too and is re-applied by its
+reducer. A later `$reset`, a state a tab answered or a server's answer (below)
+keeps the state it set. An undo for
 a step the store does not hold, or for one already undone, changes nothing. A
 reducer that throws during the replay leaves the state as it was, and the
 `$undo` command fails. A reducer that computes only from its arguments rebases
@@ -114,11 +113,11 @@ let the reducer only apply them. Production runs each reducer once.
 `tests/store-reducer-twice.test.ts`.
 
 Undo is local. A store's undo restores its own state and sends nothing. A
-command a bridge carried out reads `canUndo` false in history, because only
+command a transport carried out reads `canUndo` false in history, because only
 the server can reverse what the server applied: send a compensating command.
-`tests/undo-remote-step.test.ts`. A bridged action that got no reply fails
-with `context.outcome: 'unknown'` when nothing identifies it. `optimisticUndo`
-still rolls it back to the last confirmed state, and its `onRollback` reads
+`tests/undo-remote-step.test.ts`. A sent action that got no reply fails
+with `context.outcome: 'unknown'` when nothing identifies it. An optimistic
+action still rolls it back to the last confirmed state, and its `done` carries
 the outcome: re-read the server, since the write may have landed.
 `tests/retry-unidentified.test.ts`.
 
@@ -126,11 +125,26 @@ The store keeps its last 256 steps. An older one reads `canUndo` false
 (`history` keeps 50 by default). A store's id and action keys cannot carry a
 `$`: names with `$` are the library's (`store:invalid:name`).
 
+One undo reverses a command and the recorded commands it caused, and one redo
+replays them. A reaction's follow-up carries its cause (`causationId`), so a
+store derived from another through a reaction stays right at every press, and
+the reaction does not run on the undo or the redo. A press stops at a command
+it cannot undo. To derive a plain value, subscribe with `$onField`.
+`tests/history-group.test.ts`, `tests/reaction-undo-redo.test.ts`.
+
+A handler that dispatches a command of its own declares itself the cause:
+`bus.dispatch('statsBump', t, { __causationId: cmd.meta.id })`, or for a store
+action `stats.bump(t, { __causationId: cmd.meta.id })`. One undo then takes
+the child with its parent, and a redo applies it once: the parent's handler
+dispatches it again. A child that declares nothing is its own step, and a redo
+of its parent applies it a second time. `tests/history-child-redo.test.ts`.
+
 `canUndo` is true only while the store holds the state that action produced.
-A change the history did not record (its `filter` left it out) moves it, and
-`undo()` then does nothing rather than undo that change too. `canUndo` is
-history's check. A rollback (`optimisticUndo`, a transactional batch)
-reverses the step that failed and does not consult it. So the rebase above
+A change the history did not record (its `actions` or `actionFilter` left it out) moves it, and
+`undo()` then does nothing rather than undo that change too. A server's state
+that reached another tab moves it too, and `useCommandHistory`'s `canUndo`
+turns false. `canUndo` is history's check. A rollback (an optimistic action's failure, a transactional
+batch) reverses the step that failed and does not consult it. So the rebase above
 runs for an older step whose `canUndo` is false. `tests/undo-check.test.ts`.
 Without `undo: true`, a store's actions run exactly as they would with no
 history. `tests/store-undo.test.ts`.
@@ -142,11 +156,18 @@ does, so the store is the thin part. `docs/whitepaper.md` section 3.6 and its
 appendix A.3 say why this package now ships a state layer at all. They also
 say which parts of that decision did not change.
 
-## A store behind a bridge
+## A store behind a transport
 
-A bridge (`createHttpBridge`, `createBatchingHttpBridge`, `createWsBridge`)
-forwards the actions it matches to the server and answers them itself. The
-reducer does not run. The dispatch is `ok`, its value the answer's `state`.
+A transport (`httpTransport`, `wsTransport`, `defineTransport`) is the work
+for the actions its pattern covers: it sends them to the server. Such an
+action has no local change, so its reducer is `null`: `reducers: { add: null }`
+still gives `cart.add()` and the action `cartAdd`. A function there could
+never run, and `useStore(bus)` refuses it with `core:invalid:handler`, unless
+the store is `optimistic` (below) or the transport declares `localFallback`.
+`null` on an action no transport sends is refused the same way.
+`tests/register-shadow-check.test.ts`.
+
+The dispatch is `ok`, its value the answer's `state`.
 Whether that value is a store's state is known by the side that declares it,
 never guessed:
 
@@ -157,32 +178,41 @@ never guessed:
 - **The app declares it**, per store: `answer(state, value, cmd)` returns the
   next state from the command's own `state`. TanStack Query's `setQueryData`
   in `onSuccess` and Apollo's `update` do the same.
-- **Neither**: the store keeps its state, as in 1.26.
+- **Neither**: the store keeps its state.
 
 ```ts
 // the server replies { state: { order: 7 }, stores: { cart: { items: [] } } }
 const useCart = defineChamberStore('cart', {
   state: () => ({ items: [] as number[] }),
-  reducers: { add: (s, id: number) => ({ items: [...s.items, id] }) },
+  reducers: { add: null }, // sent: no local change
   answer: (_state, value) => value as { items: number[] }, // when cartAdd answers the cart
 });
 ```
 
 Both write as a step of the command that got the reply, inside the dispatch,
-so an unscoped `persist` saves it and a listener reads it. A `persist` scoped
-by `actions` saves after those actions only. A state that `checkout`'s reply
-declares for the cart is saved only with `checkout` in that list, or with no
-list. `tests/store-persist-declared.test.ts`. The command's own `answer`
+so the store's `persist` saves it and a listener reads it, whichever command
+got the reply. `tests/store-persist-declared.test.ts`. The command's own `answer`
 runs first and the states the server named last, so what the server named
 wins. History records the command once and cannot undo it, since only the
-server can reverse what it applied. A failed command writes nothing. Only an
+server can reverse what it applied. A failed command writes nothing. A 202
+answers an `Accepted`, which is not the final state: the `answer` and the
+declared states are written when its `done` settles ok, with its value, and
+`done` settles after them. `tests/accepted-applies-on-done.test.ts`. Only an
 object is a state: an `answer` result or a declared state that is anything
 else, `null` included, is not written, and development warns once.
-`optimisticUndo`'s `predict` still answers the caller at once, and the store
-changes when the reply lands. A store id is an external string: only the
+With `optimistic: true` the store shows the change at once, and the reply
+replaces it (below). A store id is an external string: only the
 reply's own keys are read (src/dict.ts), and an id with no store is ignored.
 `tests/store-bridged-answer.test.ts`, `tests/store-declared-by-server.test.ts`,
 `tests/store-answer-not-a-state.test.ts`.
+
+A server's push declares store states the same way: a `stores` member in
+its data, over SSE, Echo or a WebSocket ([contract.md](./contract.md#4-the-wire)).
+Each named store takes its state through the same path, `version` included,
+on any bus, then the event is emitted. A push is not a command: it is
+never sent, and the store's `persist` saves the pushed state.
+A store that keeps steps (`undo: true`) keeps a pushed state through a
+rollback, as it keeps an answer. `tests/inbound-push.test.ts`.
 
 Two writes in flight can be answered in any order. The server may apply them
 in either order, and the replies may arrive in either order. Only the server
@@ -199,40 +229,39 @@ defineChamberStore('cart', {
 ```
 
 The store writes an answer only when its version is higher than the one it
-holds, the rule `share` uses between tabs. An ETag cannot do this: RFC 9110
+holds. An ETag cannot do this: RFC 9110
 defines it for equality, not order. A version that is not a number is written
 in arrival order, and development warns once. Without `version` the last
-answer to arrive wins. One `serialize` lane per store makes that safe too. It
-sends the store's server commands one at a time, so the server applies and
-answers them in the order they were sent. It orders the store's reads as
-well as its writes: a read in flight cannot land after a write's answer and
-put the older state back.
+answer to arrive wins. `exclusive: true` makes that safe too. It sends the
+store's sent actions one at a time, so the server applies and answers them
+in the order they were sent. It orders the store's reads as well as its
+writes: a read in flight cannot land after a write's answer and put the
+older state back.
 
 ```ts
-const writes = ['cartAdd', 'cartClear'];             // what the bridge sends
-const toServer = new Set([...writes, 'cartLoad']);  // and the read, which fetches in its own handler
-// The lane first: at equal `priority` the first plugin installed runs outermost.
-bus.use(serialize({ key: (cmd) => (toServer.has(cmd.action) ? 'cart' : null) }));
-bus.use(createHttpBridge({ endpoint: '/vc', actions: writes }));
+const bus = createAsyncCommandBus({ transport: { 'cart*': httpTransport({ endpoint: '/vc' }) } });
+const useCart = defineChamberStore('cart', { state, reducers, answer, exclusive: true });
 ```
 
-Lane only the commands that reach the server: the reads that fetch, and the
-store's bridged writes. A lane has no re-entry: a command that waits for
-another in its own lane queues it behind itself. So the reducer a read
-writes through, such as `cartLanded`, is keyed to `null` and runs at once
-inside the read's slot. In the lane, an awaited one waits for ever, and one
-not awaited lands its old answer after a write already queued behind the
-read. That is why the key is a function, not `actions: ['cart*']`, which
-catches those reducers. The default key is the action, which orders an
-action only against itself. A write can wait for its store's read in
-flight, one round trip at most. While it waits, it already reads as loading
-in `isLoading()`, from its dispatch: a spinner bound to it lights through
-the wait. An answer with no `state` (the server's
+Only the actions a transport sends take the store's turn. An action that
+runs locally runs at once: queued behind a server command, a reducer that
+command's handler wrote through would wait on itself. A write can wait for
+its store's read in flight, one round trip at most. While it waits, it
+already reads as pending in `commandState(bus).pending()`, from its dispatch: a spinner bound
+to it lights through the wait. An answer with no `state` (the server's
 handler returned nothing) writes nothing.
-`tests/store-answer-version.test.ts`, `tests/store-serialize-order.test.ts`.
+`tests/store-answer-version.test.ts`, `tests/store-optimistic.test.ts`.
 
-The store's `answer` is `register`'s `answer` option, which any handler can
-take: the bus calls it when a transport answered in place of the handler.
+`optimistic: true` shows a sent action at once. Its reducer applies before
+the server answers: a failure rolls it back (the later steps rebased), the
+answer replaces it, and a plugin's refusal never shows it. The dispatch
+answers an `Accepted`, whose `done` settles with the server's answer. The
+change shows even while `exclusive` holds the command for its turn. History
+undoes it only when the store also declares `undo`.
+
+The store's `answer` is `register`'s `answer` option: the bus calls it when a
+transport answered. A `null` reducer is `register(action, null, { answer })`,
+the options of a sent action with no handler.
 
 ## The bus is always an argument
 
@@ -252,8 +281,8 @@ for two deliberate reasons:
 
 The first draft defaulted the argument and paid both costs while claiming not
 to. It measured 16.7 KB raw against a design estimate of 1-2 KB. With the bus
-a mandatory argument, it is <!-- vc:sizeStoreRaw -->5.5<!-- /vc:sizeStoreRaw --> KB minified
-(<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB brotli), the `./store` row of
+a mandatory argument, it is <!-- vc:sizeStoreRaw -->15.6<!-- /vc:sizeStoreRaw --> KB minified
+(<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli), the `./store` row of
 [BUNDLE-SIZES.md](./BUNDLE-SIZES.md). `tests/chamber-store.test.ts` asserts the
 built entry imports only `vue` and the store's base, and the base only
 `./failure.js` and `./applied-remotely.js`. The failure module mints the store's
@@ -281,6 +310,22 @@ that mutates and returns the same object does not notify, which is why
 getter and no setter, so `cart.state.value = x` throws in strict mode: the bus
 is the only mutation channel.
 
+`deep: true` (the Vue entry) makes `state.value` Vue's reactive view of the
+state, for a form whose nested fields a `v-model` mutates in place. Vue
+readers track those fields. The store keeps the raw state, so a mutation in
+place is not a write: reducers get the raw state, and persist, tab sharing
+and field events follow the store's actions. `tests/store-deep.test.ts`.
+
+`coalesce: true` writes the state once per microtask: each of the store's
+actions and `$reset` chains on the pending state, and an action's result is
+the pending state. For a list that a burst of dispatches fills, read by a
+`v-for`. A state from outside the store (a server's, another tab's, a seed)
+is written at once, after the pending state lands, so a seeded store reads
+its seed when it is created and `storeStates` reads a write made in the same
+tick. Refused with `undo: true` (`store:invalid:coalesce`): the undo ring
+records each write as it lands. `tests/store-coalesce.test.ts`,
+`tests/store-facts-lane.test.ts`.
+
 ## Reading one field
 
 A component that reads `cart.state.value.count` re-renders on every write of
@@ -294,9 +339,10 @@ cart.$onField('count', (n) => announce(n)); // or a plain callback; returns the 
 ```
 
 Each fires only when a write changes that field (compared by identity). A
-store nobody subscribes to pays nothing on its writes. The first subscriber
-starts one synchronous Vue effect on the store's state, stopped by
-`$dispose()`. A `computed` per field re-evaluates on every write of the store.
+store nobody subscribes to pays nothing on its writes. A store has one watcher,
+a synchronous Vue effect on its state, started by the first subscriber or by
+`share` and stopped by `$dispose()`. It feeds the field events and the tab
+send (`tests/store-one-watcher.test.ts`). A `computed` per field re-evaluates on every write of the store.
 `fieldRef` costs the writes the same however many fields are read. With one
 reader a `computed` is a little faster, and with several `fieldRef` is (log
 section 35.125). `$reset` and an undo notify like any action.
@@ -313,40 +359,65 @@ subscriber ends on the store's state.
 ## Across tabs
 
 ```ts
-import { createFastLane } from 'vapor-chamber/fast-lane';
-import { createChannel } from 'vapor-chamber';
+import { defineChamberStore, shareTabs } from 'vapor-chamber/store';
 
-const lane = createFastLane();
-createChannel({ channel: 'my-app', lane, events: ['cart$state'] });
-const useCart = defineChamberStore('cart', { state, reducers, share: lane });
+const useCart = defineChamberStore('cart', { state, reducers, share: shareTabs() });
 ```
 
-Each local write sends the new state, with a version, as `cart$state`. Another
-tab applies a newer one through the `cart$sync` command, marked
-`origin: 'sync'`. Its plugins and listeners hear it and `persist` saves it.
-`history` does not record it: a change made in another tab is not undone here.
-The newer version wins and a tie goes to one tab's id, so two tabs writing at
-once end on the same state. A state received is not sent back, even when an
-async plugin delays its `cart$sync` past the next message
-(`tests/store-share-held.test.ts`). A store
-without `share` writes exactly as without it. A shared one pays an effect and
-the send on each write (log section 35.129).
+`shareTabs()` opens one `BroadcastChannel` per shared store, named
+`vc:store:<id>`, and `shareTabs('name')` names it. Each write crosses as the
+command it came from: its action, target, payload and `meta.id`. Every other
+tab applies it with the store's own reducer, with no dispatch.
+No plugin, listener, reaction or transport runs it again, so the server never
+gets it twice. The tab's `history` records the same command, and its
+`persist` saves the state. A received command is not sent back.
 
-A tab opened later asks for the current state when it opens. A tab that has
-written answers it. The new tab applies the answer by the same version rule,
-so its next write builds on the others. With Node's `BroadcastChannel`
-it caught up a median 1.2 ms after opening, 9.3 ms at most (30 runs, measured
-2026-10-06). A write made before then is a concurrent write: every tab still
-ends on one state. A tab of 1.26 never applies the ask, since its version is
-below every tab's. `tests/store-share-late-tab.test.ts`.
+Undo follows the command, not the tab. With tea in the cart, tab A adds
+coffee, and both tabs show tea and coffee. An undo in either tab names the
+coffee command. It crosses as that command's id, and every tab undoes it
+itself, so both show tea. A redo crosses as the command again, and every
+history moves it back. `tests/store-propagate-undo.test.ts`.
 
-What it does not do: the state crosses by structured clone, so it carries data.
-A function fails to send, and a class instance arrives as a plain object
-without its methods. With no `BroadcastChannel` (SSR) nothing is
-sent. Undo is per tab. Undoing in one tab changes its state, which then
-reaches the others as a write. A rollback of an older step keeps the states
-the tab received. `tests/store-share.test.ts`,
-`tests/store-rollback-rebase.test.ts`.
+Two tabs that write at once end on one state, with both writes kept. The
+store also takes a Web Lock named like its channel, and the tab the browser
+grants it (the lead) runs every tab's command and posts it on. Every other tab
+runs only what the lead posts. So two writes that set one field, two appends
+or a `$reset` against an add end the same in every tab: the lead's run of
+them. A write still shows at once in its own tab. The lead's command may reach
+a tab before the lead has run that tab's own write. The tab then runs its own
+write again over the lead's, so its state becomes the lead's. Its history
+records the lead's command under its own write, as the other tabs' do, so
+Undo and Redo take the same step in every tab. Each tab runs the reducer, so
+mint ids and times in the call, as for `undo: true`.
+`tests/store-share-converge.test.ts`, `tests/store-share-history.test.ts`.
+
+A tab sends only while another tab is there. It asks when it opens, and the
+lead answers with the store's state. Until then the new tab holds its own
+writes. Over the answer it runs them again and sends them. What the lead sent
+before its answer is in that answer, so it is not applied again. A tab that
+leaves says so on `pagehide` and frees the lock, and asks again when the page
+comes back from the back-forward cache. When the lead leaves, the browser
+grants the lock to a waiting tab. Every other tab asks it and sends its own
+writes again, so none is lost. An undo stops at a state another tab sent, an
+answer or a server's state. The other tabs do not hold the commands under it,
+so the tab takes the state the undo reached. A tab alone sends its
+ask and, granted the lock, its `lead`, then nothing, so a store in one tab
+writes at a plain store's cost. `tests/store-share-late-tab.test.ts`,
+`tests/store-propagate-undo.test.ts`.
+
+A new tab reads `state()` until the lead's answer, so `await cart.$ready`
+before a check that reads the state: it resolves once the tab took the answer
+or, alone, was granted the lock (Saved state, below).
+`tests/store-ready.test.ts`.
+
+What it does not do: a command crosses by structured clone, so it carries
+data. A function fails to send: the change stays in its tab, and development
+warns. A class instance arrives as a plain object without its methods. With
+no `BroadcastChannel` (SSR) nothing opens. Without Web Locks nothing opens
+either: no tab could run the commands for the others, so tabs could end on two
+states. Development warns `store:missing:locks`. A tab that does not hold an undone
+command (it opened later, or its ring moved past it) takes the state the undo
+reached. `tests/store-share.test.ts`, `tests/store-rollback-rebase.test.ts`.
 
 ## URL-backed fields
 
@@ -394,8 +465,8 @@ same store and the first to unmount does not take it away from the second.
 Called outside a scope there is no lifetime to hook and nothing is counted.
 The caller owns `$dispose()`, the same contract as every other composable here.
 
-`$dispose()` always finishes. A cleanup that throws, such as a `share` lane's
-unsubscribe, is logged. The other cleanups still run and the store leaves the
+`$dispose()` always finishes. A cleanup that throws, such as an app's own `share`
+closing its channel, is logged. The other cleanups still run and the store leaves the
 registry, so the next `useCart(bus)` builds a new one.
 `tests/store-dispose-cleanup-throw.test.ts`.
 
@@ -404,16 +475,25 @@ with the same id takes over, the rule `register()` follows for a handler. That
 second one may be an edited store module re-run by hot reload, or a module that
 picked the same id. The new definition builds its own store from its `state()`
 and registers its actions over the old ones. In development, `register()` warns
-once per action it overwrites, which is how a clash shows. The old store's
-`$dispose()` removes only what it still owns. A component that holds a store
-needs none of this on a hot reload: Vue disposes it first, so the new
-definition starts clean. Pinned in `tests/store-redefine.test.ts` and
-`tests/vapor/store-hmr.test.ts`.
+once per action it overwrites, which is how a clash shows, except inside a hot
+update the plugin marks, where the re-run is the update. The old store's
+`$dispose()` removes only what it still owns. `tests/store-redefine.test.ts`.
+
+A hot update keeps the store's state, in development under
+`vaporChamberHMR()`. The plugin marks the update, and a store built inside it
+starts from the state of the store it replaces: the one it takes over (a
+store created at module load), or the one its component disposed before the
+reloaded setup. The state is matched to the new `state()` by key, at every
+level of plain objects: a new key starts from its declared value, a key the
+edit removed goes, and a key the app added at runtime stays, so a dictionary
+declared `{}` keeps its entries. Outside the mark, a takeover builds from
+`state()`, in development and production alike. `tests/vapor/store-hmr.test.ts`,
+`tests/store-hot-update.test.ts`.
 
 `$reset()` is a command like any action: it dispatches `<id>$reset`
-(`cart$reset`). So `persist` saves the reset state, `history` records it, a
+(`cart$reset`). So the store's `persist` saves the reset state, `history` records it, a
 listener hears it and a plugin can refuse it. But `cache` and `idempotent`
-never answer it from memory, and `debounce` never postpones it
+never answer it from memory, and the sender's `pace` runs it at once
 (`tests/library-commands-memory.test.ts`). It returns the dispatch result.
 On an async bus that is a promise, and the state is reset once it settles. The
 `$` keeps the name apart from an action of your own called `reset`, which is
@@ -424,49 +504,93 @@ the member, so `defineChamberStore` throws and names the key.
 
 `$reset()` goes back to whatever `state()` returns at that moment, so keep
 `state()` the default. A `state()` that reads storage makes the reset hand
-back the saved record, and `persist` then saves it again: the reset does
-nothing. Load a saved record through an action instead, and the reset goes
-back to the default:
+back the saved record: the reset does nothing. Pinned in
+`tests/store-reset-command.test.ts`.
+
+### Saved state
+
+`persist: saveTo({ key })` (from `vapor-chamber` or the store entries) saves the store's state under a key and reads it back when the store
+is created:
 
 ```ts
-const cartPersist = persist({ key: 'vc:cart', getState: () => cart.state.value });
 const useCart = defineChamberStore('cart', {
   state: () => ({ items: [] as number[] }),               // the default, never storage
-  reducers: {
-    load: (s, saved: { items: number[] } | null) => saved ?? s,
-    add:  (s, id: number) => ({ items: [...s.items, id] }),
-  },
+  reducers: { add: (s, id: number) => ({ items: [...s.items, id] }) },
+  persist: saveTo({ key: 'vc:cart' }),                            // localStorage by default
 });
-const cart = useCart(bus);
-bus.use(cartPersist);
-cart.load(cartPersist.load());   // the saved record, as a command
-cart.$reset();                   // back to { items: [] }, and saved as that
+const cart = useCart(bus);   // the saved record is its first state
+cart.add(1);                 // saved after it, once per microtask
+cart.$reset();               // back to { items: [] }, and saved as that
 ```
 
-Both behaviours are pinned in `tests/store-reset-command.test.ts`.
+The saved state is the store's first state. With none, or one the rules below
+refuse, the store starts on `state()`, and `$reset()` always goes back to it.
+The store saves after any of its writes, whatever wrote it: an action, `$reset`,
+an undo, a server's answer or push, another tab's state. A burst of writes in
+one task is saved once, with the last state, one microtask after it. A state
+the store already read or saved is not saved again.
+`tests/store-persist.test.ts`.
 
-### Loading saved state
+- **`key`** is needed: `saveTo` throws without it.
+- **`storage`**: `localStorage` by default, `sessionStorage`, or any object with
+  `getItem` and `setItem`. Blocked site data, a full quota or a storage that
+  throws is warned, and the write it follows still succeeds.
+- **`validate(state)`**: a check of the read state's shape. False refuses it,
+  with a warning, and the store starts on `state()`.
+- **`serialize`, `deserialize`**: JSON by default.
 
-A store has no setter, so saved state enters it the way every change does:
-through an action it declares, like `load` above. The source does not
-change the pattern:
+`indexedDbStorage()` answers with promises, so the store cannot have the
+saved state when it is created. It starts on `state()` and takes the saved
+state when the read lands, with the writes made before then replayed on top
+by the undo ring's rule: a reducer runs again, a state set whatever came
+before (`$reset`, a server's state) is kept. Nothing is saved before the read
+lands. An undo cannot take back a write made before it.
+`tests/store-persist-idb.test.ts`.
+
+`store.$ready` resolves once the store holds the state it starts from: the
+saved state read, and with `share` the other tabs' state taken. Await it
+before a check that reads the state, or a new visit's "empty? add the
+starter lines" runs on `state()` and adds them again over the saved cart:
 
 ```ts
-cart.load(cartPersist.load(), { __origin: 'replay' });   // from storage
+const cart = useCart(bus);
+await cart.$ready;
+if (cart.state.value.items.length === 0) cart.add(starter);
+```
+
+It never waits on a field event, so it resolves when nothing was saved, when
+the saved state equals `state()`, when the read fails and when the store is
+disposed first. A store with neither `persist` on an async storage nor
+`share` is ready at once. `tests/store-ready.test.ts`.
+
+### Loading state from the server
+
+A store has no setter, so a state from the server enters it the way every
+change does: through an action it declares.
+
+```ts
 cart.load(window.__CART__, { __origin: 'replay' });      // from the server
 ```
 
-From the server, send the store's **state**, not the commands that built
-it: serialize `store.state.value` into the page and load it on the client.
-The state is a fact, so the client ends exactly where the server did.
-Replaying the commands instead (`createSSRPlugin` and `rehydrate`) runs every
-reducer again on the client. Any reducer that is not deterministic (an id, a
-timestamp, a counter) then ends somewhere else.
+From the server, send the stores' **states**, not the commands that built
+them: `storeStates(bus)` reads every store the request wrote into the page,
+a store still on its first state left out so the client's own load stands,
+and `seedStores(bus, states)` gives them to the client's stores
+(`vapor-chamber/ssr`). The state is a fact, so the client ends exactly where
+the server did, a reducer that mints an id or a timestamp included. A store
+created later starts from its state; one already there takes it through its
+own write, so its `persist` saves it. `tests/ssr-store-states.test.ts`.
+
+`liveStores(bus)`, beside them, lists the stores in use on a bus in the order
+they were created, as a new array, so a loop may dispose or create stores. A
+disposed store and a seeded id with no store are left out. It reads the
+registry the bus keeps, so no dispatch or write pays for it.
+`tests/live-stores.test.ts`.
 
 `__origin: 'replay'` marks the dispatch as restored state rather than a user
 action. It arrives as `cmd.meta.origin`, so a listener can tell a load from
-what the user did. `persist` saves what was loaded, and `$reset()` still goes
-back to `state()`. Pinned in `tests/store-load-saved.test.ts`.
+what the user did. The store's `persist` saves what was loaded, and
+`$reset()` still goes back to `state()`. Pinned in `tests/store-load-saved.test.ts`.
 
 ## Without Vue
 
@@ -503,5 +627,5 @@ Not answered yet:
 
 - **The SSR shape.** Stores are already keyed per bus, so a per-request bus
   gets per-request state and the isolation exists. Hydration has its one story
-  ("Loading saved state" above). What is missing is the server-side warning
+  ("Loading state from the server" above). What is missing is the server-side warning
   class.

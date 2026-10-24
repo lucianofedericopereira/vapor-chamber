@@ -9,7 +9,8 @@
  * hit: served instantly while the caller attaches a background revalidation
  * (see http.ts). Past `staleUntil` -> a miss, but the entry is NOT deleted -
  * `getAny` still finds it as a last resort for `cache.serveStaleOnError`.
- * Only LRU size pressure or an explicit `invalidate` removes it.
+ * Only LRU size pressure, an invalidation (a write, a group), `clearCache()`
+ * or a `no-store` answer removes it.
  *
  * PER-CLIENT, NOT MODULE-GLOBAL. The cache key holds the request's headers
  * (Authorization, Accept-Language) but not cookies, so under concurrent SSR a
@@ -20,7 +21,6 @@
  * factory-closure shape the bus-level `cache()` plugin uses.
  */
 
-import { DEV } from './dev';
 import { freezeCached } from './freeze';
 
 // ---------------------------------------------------------------------------
@@ -37,9 +37,6 @@ export type CacheHit = { data: any; stale: boolean };
 /** See ResponseCache.read. */
 export type ReadTicket = { url: string; stale: boolean };
 
-/** Regex metacharacters - escaped so a string pattern matches literally. */
-export const REGEX_METACHARS = /[.*+?^${}()|[\]\\]/g;
-
 export type ResponseCache = {
   /** A fresh or stale hit; `null` on a plain miss. Never deletes on read. */
   get(key: string): CacheHit | null;
@@ -48,10 +45,16 @@ export type ResponseCache = {
   /** `url` is what an invalidation matches: the key also holds the request's headers. */
   set(key: string, data: any, ttl?: number, staleTtl?: number, url?: string): void;
   clear(): void;
-  /** Drop the entries and in-flight reads whose URL matches, and mark the
-   *  matching `read` tickets stale. A function is the client's own match for
-   *  a write: its URL and the URIs its answer names. */
-  invalidate(pattern: string | RegExp | ((url: string) => boolean)): void;
+  /** Drop the entries and in-flight reads whose URL `matches`, and mark the
+   *  matching `read` tickets stale: a write's URL and the URIs its answer
+   *  names (RFC 9111 4.4). */
+  invalidate(matches: (url: string) => boolean): void;
+  /** Drop the entries whose stored response `inGroup` says yes to (RFC 9875
+   *  groups). A read on the wire has groups nobody knows yet: every one is
+   *  marked not to be stored and no longer joined. A fetch, never stale data. */
+  invalidateStored(inGroup: (response: any) => boolean): void;
+  /** Forget one entry: its response said `no-store`. */
+  drop(key: string): void;
   /** A cacheable read going on the wire. A read across an invalidation of ITS
    *  URL may carry the value from before it, so `invalidate` marks its ticket;
    *  an invalidation of another URL leaves it alone. */
@@ -99,8 +102,7 @@ export function createResponseCache(): ResponseCache {
       return entries.get(key) ?? null;
     },
 
-    // No `url`: a `responseType:url` key, its URL the part after the first ':'
-    // (the reading invalidate() used before the key held headers).
+    // No `url`: a `responseType:url` key, its URL the part after the first ':'.
     set(key, data, ttl = CACHE_DEFAULT_TTL, staleTtl = 0, url = key.slice(key.indexOf(':') + 1)) {
       // Evict the oldest (first) entry at max size; there is one, since the
       // size is at least CACHE_MAX_SIZE.
@@ -120,39 +122,11 @@ export function createResponseCache(): ResponseCache {
       for (const r of reads) r.stale = true;
     },
 
-    invalidate(pattern) {
-      // A STRING IS A LITERAL SUBSTRING, not a pattern. `new RegExp(pattern)`
-      // on a plain string threw on this library's own output - `buildFullUrl`
-      // serializes arrays as `ids[0]=`, so a cache key contains a literal `[`
-      // and compiling it is `SyntaxError: unterminated character class` - and
-      // was silently wrong on ordinary URLs (`?` is a quantifier, so
-      // '/api/products?page=1' matched '/api/product' + anything). The
-      // `string | RegExp` signature reads as "substring or pattern"; this
-      // makes the implementation agree. Regex semantics remain available
-      // through the RegExp overload.
-      let matches: (url: string) => boolean;
-      if (typeof pattern === 'function') {
-        matches = pattern;
-      } else {
-        let regex: RegExp;
-        if (pattern instanceof RegExp) {
-          regex = pattern;
-        } else {
-          if (DEV && (pattern.startsWith('^') || pattern.endsWith('$'))) {
-            console.warn(
-              `[vapor-chamber] invalidateCache("${pattern}") - strings are matched as literal ` +
-                'substrings, so anchors are matched literally too. Pass a RegExp for pattern semantics.',
-            );
-          }
-          regex = new RegExp(pattern.replace(REGEX_METACHARS, '\\$&'));
-        }
-        matches = (url) => regex.test(url);
-      }
+    invalidate(matches) {
       for (const r of reads) if (matches(r.url)) r.stale = true;
       const keysToDelete: string[] = [];
       // Matched on the entry's URL, never a parse of its key: the key also
-      // holds the request's headers, so anchored patterns like /^\/api/ keep
-      // working (tests/http-cache-headers.test.ts).
+      // holds the request's headers (tests/http-cache-headers.test.ts).
       for (const [key, entry] of entries) if (matches(entry.url)) keysToDelete.push(key);
       for (const key of keysToDelete) entries.delete(key);
       // A read made after this must not join one already on the wire, which
@@ -160,6 +134,16 @@ export function createResponseCache(): ResponseCache {
       // joining stops. Matched on the read's URL: the dedupe key also holds
       // the request's headers (tests/http-write-stops-join.test.ts).
       for (const [key, read] of inflight) if (matches(read.url)) inflight.delete(key);
+    },
+
+    invalidateStored(inGroup) {
+      for (const [key, entry] of entries) if (inGroup(entry.data)) entries.delete(key);
+      inflight.clear();
+      for (const r of reads) r.stale = true;
+    },
+
+    drop(key) {
+      entries.delete(key);
     },
 
     read(url) {

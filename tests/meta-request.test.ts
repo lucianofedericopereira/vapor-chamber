@@ -1,7 +1,7 @@
 /** `meta.request`: request-level headers a plugin adds, sent by the HTTP bridges (log s35.139). */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 const sent: Record<string, string>[] = [];
 const reply = (body: unknown) => ({ ok: true, status: 200, url: '', redirected: false, headers: { entries: () => [['content-type', 'application/json']], get: () => 'application/json' }, text: async () => JSON.stringify(body) });
@@ -14,14 +14,13 @@ afterEach(() => { vi.unstubAllGlobals(); sent.length = 0; });
 
 // A tracing plugin, as an app writes it: an ordinary bus plugin.
 const trace = (bus: ReturnType<typeof createAsyncCommandBus>) =>
-  bus.use((cmd, next) => { cmd.meta!.request = { headers: { traceparent: `00-${cmd.meta!.id}` } }; return next(); });
+  bus.use({ started: (cmd) => { cmd.meta!.request = { headers: { traceparent: `00-${cmd.meta!.id}` } }; } });
 
 describe('meta.request', () => {
-  it('a bus plugin puts a header on the request createHttpBridge sends', async () => {
+  it('a bus plugin puts a header on the request httpTransport sends', async () => {
     stubFetch();
-    const bus = createAsyncCommandBus({ retry: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', headers: { 'x-app': '1' } }) });
     trace(bus);
-    bus.use(createHttpBridge({ endpoint: '/vc', headers: { 'x-app': '1' } }));
     await bus.dispatch('a', 1);
     expect(sent[0]!['x-app']).toBe('1');
     expect(sent[0]!.traceparent).toMatch(/^00-/);
@@ -30,9 +29,8 @@ describe('meta.request', () => {
   it("never writes into the bridge's own headers", async () => {
     stubFetch();
     const headers = { 'x-app': '1' };
-    const bus = createAsyncCommandBus({ retry: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', headers }) });
     trace(bus);
-    bus.use(createHttpBridge({ endpoint: '/vc', headers }));
     await bus.dispatch('a', 1);
     await bus.dispatch('b', 2);
     expect(headers).toEqual({ 'x-app': '1' });
@@ -41,9 +39,8 @@ describe('meta.request', () => {
 
   it('a batch merges its commands\' headers in queue order, the later winning', async () => {
     stubFetch();
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use((cmd, next) => { cmd.meta!.request = { headers: { 'x-from': cmd.action, [`x-${cmd.action}`]: '1' } }; return next(); });
-    bus.use(createBatchingHttpBridge({ endpoint: '/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', batch: {} }) });
+    bus.use({ started: (cmd) => { cmd.meta!.request = { headers: { 'x-from': cmd.action, [`x-${cmd.action}`]: '1' } }; } });
     await Promise.all([bus.dispatch('a', 1), bus.dispatch('b', 2)]);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ 'x-from': 'b', 'x-a': '1', 'x-b': '1' });
@@ -51,10 +48,9 @@ describe('meta.request', () => {
 
   it('a command no plugin touched keeps the slot undefined and sends the bridge headers only', async () => {
     stubFetch();
-    const bus = createAsyncCommandBus({ retry: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', headers: { 'x-app': '1' } }) });
     let meta: any;
     bus.on('*', (cmd) => { meta = cmd.meta; });
-    bus.use(createHttpBridge({ endpoint: '/vc', headers: { 'x-app': '1' } }));
     await bus.dispatch('a', 1);
     expect('request' in meta).toBe(true);
     expect(meta.request).toBeUndefined();

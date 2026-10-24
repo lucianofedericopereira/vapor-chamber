@@ -84,14 +84,14 @@ describe('postCommand - basic', () => {
 describe('postCommand - retry', () => {
   it("does not re-send a 422: the server's verdict", async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(422));
-    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ context: { status: 422 } });
+    await expect(postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } })).rejects.toMatchObject({ context: { status: 422 } });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
   it('an unkeyed request answered with Retry-After fails once, its retryIn kept', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     (globalThis.fetch as any).mockResolvedValue(mockResponse(409, null, { 'retry-after': '1' }));
-    await expect(postCommand('/api/cmd', {}, { retry: 1 })).rejects.toMatchObject({ context: { status: 409, retryIn: 1000 } });
+    await expect(postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } })).rejects.toMatchObject({ context: { status: 409, retryIn: 1000 } });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
@@ -100,7 +100,7 @@ describe('postCommand - retry', () => {
       .mockResolvedValueOnce(mockResponse(409, null, { 'retry-after': '1' }))
       .mockResolvedValueOnce(mockResponse(200, { state: 1 }));
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1, headers: { 'Idempotency-Key': '"k"' } });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 }, headers: { 'Idempotency-Key': '"k"' } });
     await vi.advanceTimersByTimeAsync(999);
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -115,7 +115,7 @@ describe('postCommand - retry', () => {
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
@@ -127,7 +127,7 @@ describe('postCommand - retry', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(503));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } });
     const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 503 } });
     await vi.runAllTimersAsync();
     await assertion;
@@ -142,7 +142,7 @@ describe('postCommand - retry', () => {
       .mockResolvedValueOnce(mockResponse(200, {}));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(retryAfterMs + 500);
     const res = await promise;
 
@@ -158,7 +158,7 @@ describe('postCommand - retry', () => {
       .mockResolvedValueOnce(mockResponse(200, { done: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1, headers: { 'Idempotency-Key': '"k1"' } });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 }, headers: { 'Idempotency-Key': '"k1"' } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
@@ -168,7 +168,7 @@ describe('postCommand - retry', () => {
 
   it('does not re-send a POST with no reply and no key', async () => {
     (globalThis.fetch as any).mockRejectedValue(new Error('network'));
-    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ code: 'transport:lost:reply' });
+    await expect(postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } })).rejects.toMatchObject({ code: 'transport:lost:reply' });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
@@ -176,13 +176,13 @@ describe('postCommand - retry', () => {
     (globalThis.fetch as any).mockRejectedValue(new Error('network down'));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:lost:reply', cause: { message: 'network down' } });
     await vi.runAllTimersAsync();
     await assertion;
   });
 
-  // postCommand is createHttpBridge's transport, so this is every bus command
+  // postCommand is httpTransport's transport, so this is every bus command
   // dispatched with `retry` configured: a 422 thrown inside the try must not be
   // caught by the retry catch and re-sent - the mutation replay that
   // Idempotency-Key forwarding exists to make survivable.
@@ -190,7 +190,7 @@ describe('postCommand - retry', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(422, { message: 'validation_failed' }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } });
     const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 422 } });
     await vi.runAllTimersAsync();
     await assertion;
@@ -202,7 +202,7 @@ describe('postCommand - retry', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(403));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } });
     const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 403 } });
     await vi.runAllTimersAsync();
     await assertion;
@@ -344,7 +344,7 @@ describe('postCommand - CSRF 419 refresh', () => {
       .mockResolvedValueOnce(mockResponse(200, {}))      // GET /sanctum/csrf-cookie
       .mockResolvedValueOnce(mockResponse(200, { refreshed: true })); // retry -> 200
 
-    const res = await postCommand('/api/cmd', {}, { retry: 0 });
+    const res = await postCommand('/api/cmd', {}, { retry: false });
 
     expect(res.ok).toBe(true);
     // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST
@@ -356,7 +356,7 @@ describe('postCommand - CSRF 419 refresh', () => {
   it('does not retry 419 a second time (csrfRetried guard)', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
 
-    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ context: { status: 419 } });
+    await expect(postCommand('/api/cmd', {}, { retry: false })).rejects.toMatchObject({ context: { status: 419 } });
     // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST -> 419 again -> throw
     expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
   });
@@ -367,7 +367,7 @@ describe('postCommand - CSRF 419 refresh', () => {
       .mockResolvedValueOnce(mockResponse(200, {}))
       .mockResolvedValueOnce(mockResponse(200, {}));
 
-    await postCommand('/api/cmd', {}, { retry: 0, csrfCookieUrl: '/custom/csrf' });
+    await postCommand('/api/cmd', {}, { retry: false, csrfCookieUrl: '/custom/csrf' });
 
     expect((globalThis.fetch as any).mock.calls[1][0]).toBe('/custom/csrf');
   });
@@ -377,7 +377,7 @@ describe('postCommand - CSRF 419 refresh', () => {
       .mockResolvedValueOnce(mockResponse(419))
       .mockResolvedValueOnce(mockResponse(200, {}));
 
-    await postCommand('/api/cmd', {}, { retry: 0, csrfCookieUrl: '' });
+    await postCommand('/api/cmd', {}, { retry: false, csrfCookieUrl: '' });
 
     // Only original POST + retry POST - no csrf-cookie fetch
     expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
@@ -395,7 +395,7 @@ describe('postCommand - CSRF 419 refresh', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
     const onSessionExpired = vi.fn();
 
-    await expect(postCommand('/api/cmd', {}, { onSessionExpired, retry: 0 })).rejects.toBeDefined();
+    await expect(postCommand('/api/cmd', {}, { onSessionExpired, retry: false })).rejects.toBeDefined();
     expect(onSessionExpired).not.toHaveBeenCalled();
   });
 });

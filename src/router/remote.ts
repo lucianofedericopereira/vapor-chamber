@@ -25,24 +25,30 @@
  * stays two lines, not because the router requires them.
  */
 
-import { createHttpClient } from '../http';
+import { _withDefaults, createHttpClient } from '../http';
 import type { HttpClient, HttpRequestConfig } from '../http';
+
+export type RouterHttpOptions = Partial<HttpRequestConfig> & {
+  /** The app's client: the result sends through it, one cache and one set of interceptors. Default: a fresh client. */
+  http?: HttpClient;
+};
 
 /**
  * The chamber http client with an `X-Vapor-Router` marker header, so a backend
- * can tell router traffic from command traffic. Everything else is the client's own default, and any
- * option you pass wins.
+ * can tell router traffic from command traffic. Everything else is the client's
+ * own default, and any option you pass wins. With `http`, the app's client
+ * marked: its cache, in-flight reads and interceptors, shared
+ * (tests/router/one-client.test.ts).
  */
-export function routerHttp(options: Partial<HttpRequestConfig> = {}): HttpClient {
-  return createHttpClient({
-    ...options,
-    headers: { 'X-Vapor-Router': '1', ...options.headers },
-  });
+export function routerHttp(options: RouterHttpOptions = {}): HttpClient {
+  const { http, ...config } = options;
+  const defaults = { ...config, headers: { 'X-Vapor-Router': '1', ...config.headers } };
+  return http ? _withDefaults(http, defaults) : createHttpClient(defaults);
 }
 
 export type BladeFetcherOptions = {
-  /** Reuse an existing client (the one you passed as `http`, typically) rather
-   *  than building a second one. Default: a fresh `routerHttp()`. */
+  /** The client blade rows are fetched through. Default: the router's (its
+   *  `http` option) marked as router traffic, else a fresh `routerHttp()`. */
   http?: HttpClient;
   /** Selector extracted from the fetched HTML. Default: 'main'. */
   bladeRoot?: string;
@@ -56,10 +62,18 @@ export type BladeFetcherOptions = {
  * is the whole reason this is worth shipping instead of leaving every app to
  * hand-roll a DOMParser call.
  */
-export function bladeFetcher(options: BladeFetcherOptions = {}): (href: string) => Promise<string> {
-  const http = options.http ?? routerHttp();
+export function bladeFetcher(options: BladeFetcherOptions = {}): (href: string, http?: HttpClient) => Promise<string> {
   const bladeRoot = options.bladeRoot ?? 'main';
-  return async (href) => {
+  // The router's client marked, or a fresh `routerHttp()` when it has none:
+  // built at the first fetch, again only when the router's client changes.
+  let routerClient: HttpClient | undefined;
+  let marked: HttpClient | undefined;
+  return async (href, router) => {
+    if (!options.http && (marked === undefined || router !== routerClient)) {
+      routerClient = router;
+      marked = routerHttp({ http: router });
+    }
+    const http = options.http ?? (marked as HttpClient);
     const response = await http.get<string>(href, {
       responseType: 'text',
       headers: { Accept: 'text/html' },

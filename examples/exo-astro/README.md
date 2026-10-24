@@ -1,80 +1,65 @@
 # exo on Astro example
 
-Declarative **event-bus directives for Astro pages** over one vapor-chamber bus.
-Astro renders static HTML; the only client JavaScript is the bus plus a
-single-file directive scanner ([src/directives/index.ts](src/directives/index.ts)).
-No framework runtime, no islands, no shared mutable state between sections.
+**Static Astro HTML made live by attributes alone**, over one vapor-chamber bus.
+Astro renders the page at build time. The only client JavaScript is the bus, two
+small stores ([src/store.ts](src/store.ts)) and the library's page bindings. No
+framework runtime, no islands, no scanner of the example's own.
 
-Five directives, one rule:
-
-| Directive | Does |
+| Attribute | Does |
 |---|---|
-| `v-scope='{"open":false}'` | declare reactive local state (inline JSON) |
-| `v-bind-text="cart.count"` | reactive `textContent` via dot-path |
-| `v-show="cart.hasItems"` | toggle `display:none` on truthiness |
-| `v-each="items"` | repeat a row prototype once per array entry, each clone scoped to its item |
-| `v-command="cart.add"` | dispatch a named bus command on click (`v-target` / `v-payload` JSON companions) |
+| `data-vc-command="cartAdd"` | dispatch that command on click (`data-vc-target` and `data-vc-payload` hold JSON) |
+| `data-vc-text="cart.count"` | set the text from a store field (`<store id>.<field>`) |
+| `data-vc-show="cart.count"` | hide the element unless the field is truthy and not an empty array |
+| `data-vc-each="cart.items"` | clone the `<template>` child once per entry, each row reading its own entry |
 
-`v-each` takes its row prototype from a `<template>` child, or - for table
-sections, where parsers disagree about `<template>` and a dropped one silently
-becomes a real row - from the first element child, which it detaches:
+`bindCommands(root, { bus })` gives a `data-vc-command` element what a Vue
+`v-vc-command` has: it ignores a press in flight, sets `aria-disabled` and
+`vc-loading` meanwhile, sets `vc-error` and announces a failure. `bindDisplay`
+draws the text, show and each attributes from a store, once at bind time and
+again on each write of the field. Both are the library's own, so the example
+carries no reactivity of its own.
 
-```html
-<tbody v-each="items">
-  <tr><td v-bind-text="name"></td><td v-bind-text="price"></td></tr>
-</tbody>
-```
+**The only write path is a command.** Section A dispatches named commands onto
+the bus without knowing who handles them. Section B reads the cart store without
+knowing who wrote it. Even the Details toggle is a command (`uiToggleDetails`),
+and its state, whether the note is open, lives in a small `ui` store. Clear is
+the store's own `cart$reset`.
 
-**An element that starts hidden must say so in the HTML** - `style="display:none"`
-next to its `v-show`. The script is a module, so it runs after parse; without
-that inline style, the empty cart's table and buttons paint first and vanish a
-frame later. The markup owns the initial state; the directive owns every state
-after it.
+**Whatever starts hidden says so in the HTML**: a `hidden` attribute next to its
+`data-vc-show`. The script is a module, so it runs after parse. Without the
+attribute the empty cart's table would paint first and vanish a frame later. The
+markup owns the first paint and the binding owns every state after it.
 
-**The only write path is `v-command`** - every mutation goes through a named
-command handler. Sector A dispatches named commands onto the bus without knowing
-who handles them; Sector B reads reactive state without knowing who wrote it.
-The two sectors are fully decoupled, and because the bus instance is already
-there, the whole vapor-chamber plugin pipeline (logging, validation, history,
-persist) applies automatically.
-
-Local state is not an exception to that rule: a binding reads from the nearest
-`v-scope` that **declared** its head key and falls through to the global bus
-state otherwise, so one subtree mixes both freely - and the handler that flips
-local state writes it via `scopeOf(el)`, never the click site.
-
-Two properties worth knowing if you copy the file: reactivity is **deep**
-(`cart.count = 7` re-runs the same effects a top-level write does, which is what
-keeps dot-path bindings live), and `scan()` is **idempotent** - re-running it on
-`astro:page-load` after a client-side page swap re-wires new nodes without
-double-binding clicks or resetting live scope state.
-
-The scanner's contract is pinned by
-[`tests/examples/exo-astro-directives.test.ts`](../../tests/examples/exo-astro-directives.test.ts)
-in the repo suite - `npm test` from the repo root covers this example too.
+A reducer formats what the page prints (`$8.00`), because a display binding only
+prints the string it is handed.
 
 ## The headline: dispatch before hydration
 
-The demo registers its handlers **2 seconds late** on purpose. Clicks made
-before that are not lost - the bus is created with:
+The demo creates its stores **2 seconds late** on purpose. Clicks made before
+that are not lost. The bus is created with:
 
 ```ts
 const bus = createCommandBus({
-  onMissing: 'buffer',     // queue commands with no handler yet
-  bufferTTL: 30_000,       // reap commands that wait > 30s
-  onBufferOverflow: (action, dropped) => console.warn(action, dropped),
+  buffer: createBuffer({     // hold commands with no handler yet
+    ttl: 30_000,             // drop commands that wait > 30s
+    onDrop: (action, dropped) => console.warn(action, dropped),
+  }),
 });
+bindCommands(document.body, { bus });   // wired at load, before any store
 ```
 
-Buffered commands replay in order as soon as `register()` runs. `bufferTTL`
-keeps a section that never hydrates from pinning stale clicks in memory, and
-`onBufferOverflow` makes every drop observable. Buffer mode was built for
-exactly this case.
+A store registers its actions when `useCart(bus)` runs, and the held commands
+run then, in order. A held click answers an `Accepted`, whose `done` settles
+with the handler's result. `ttl` keeps a section that never hydrates from
+pinning stale clicks in memory, and `onDrop` makes every drop observable.
+`bindDisplay` runs after the stores exist, so it draws the state the replay
+reached. A display bound before its store is a development warning
+(`bind:missing:store`).
 
 ## Run
 
-Needs **Node ≥ 22.12**, which is Astro 7's own floor and also the library's
-(the root `engines.node` is `>=22.12.0`).
+Needs **Node 22.23.4 or later**, which is Astro 7.4's floor. The library's own
+floor is 22.12.
 
 ```bash
 cd examples/exo-astro
@@ -83,26 +68,26 @@ npm run dev
 ```
 
 Astro's dev toolbar will report **"No islands detected"**. That is intended:
-this page ships no framework component and no `client:*`
-directive - just static HTML plus one plain `<script>` module holding the bus
-and the scanner. The toolbar's audit only knows how to look for islands.
+this page ships no framework component and no `client:*` directive, just static
+HTML plus one plain `<script>` module holding the bus and the stores. The
+toolbar's audit only knows how to look for islands.
 
-Open `http://localhost:8890` and click "Add" **during the first 2 seconds** -
-watch the buffered clicks land when the hydration note flips to ✅. Each
-change is also spoken through the library's shared live region (`announce()`),
-so a screen reader user hears what a sighted one sees change. Then hit
-"Details": that toggle is local `v-scope` state written by a bus handler, while
-the text inside it reads bus state through the same binding.
+Open `http://localhost:8890` and click "Add" **during the first 2 seconds**.
+Watch the buffered clicks land when the note under the title says "Hydrated".
+Add `?delay=8000` to widen the window. Each change is also spoken through the
+library's shared live region (`announce()`), so a screen reader user hears what
+a sighted one sees change. Then press "Details": that toggle is the `ui` store's
+`open` field, while the text inside it reads the cart store.
 
 The example links to the repo's working tree via `file:../..`, so it always runs
-against the latest library code; `predev`/`prebuild` hooks build the lib `dist/`
-on demand (the repo root also builds it via its `prepare` script on install).
+against the latest library code. The `predev` and `prebuild` hooks build the
+library's `dist/` on demand.
 
 To use this pattern standalone (outside this repo), install vapor-chamber
-straight from its git repo - the authoritative source while releases lag:
+straight from its git repo, the authoritative source while releases lag:
 
 ```bash
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-and copy `src/directives/index.ts` into your Astro project.
+and copy `src/store.ts` and the page's `<script>` into your Astro project.

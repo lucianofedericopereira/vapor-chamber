@@ -74,7 +74,9 @@ describe('vapor-chamber/vapor on a Vue build without Vapor', () => {
     // to the other. Identity is the cheapest possible proof that cannot happen.
     const vapor = await import('../src/vapor');
     const root = await import('../src/index');
-    expect(vapor.createVaporChamberApp).toBe(root.createVaporChamberApp);
+    const chamberVapor = await import('../src/chamber-vapor');
+    expect(vapor.createVaporChamberApp).toBe(chamberVapor.createVaporChamberApp);
+    expect(vapor.defineVaporCommand).toBe(root.defineVaporCommand);
     expect(vapor.useCommand).toBe(root.useCommand);
   });
 });

@@ -14,6 +14,6 @@ class ClearCart
     {
         session()->forget('vc.cart');
 
-        return ['count' => 0, 'total' => 0, 'lastAdded' => ''];
+        return ['count' => 0, 'total' => 0, 'totalText' => '0.00', 'lastAdded' => ''];
     }
 }

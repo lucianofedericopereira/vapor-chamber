@@ -23,6 +23,7 @@
  */
 
 import type { BaseBus } from './command-bus';
+import { _report } from './report';
 import { type Delay, delayOption } from './bounds';
 import { signal as chamberSignal, tryAutoCleanup } from './chamber';
 import { resolveBus } from './shared-bus';
@@ -186,8 +187,8 @@ function buildHooks(
       settled = true;
       clearTimeout(timer);
       if (timedOut && DEV) {
-        console.warn(
-          `[vapor-chamber] transition "${action}" did not settle within ${timeout}ms; ` +
+        _report('warn', 'transition:timeout:settle',
+          `transition "${action}" did not settle within ${timeout}ms; ` +
             'calling done() so the element is not stuck mid-transition. Raise `timeout` ' +
             'if the handler is legitimately slow.',
         );
@@ -329,12 +330,13 @@ export function createTransitionBridge(
 ): TransitionBridge {
   const { bus, namespace } = options;
 
-  // Plain signal - no Vue dependency in the factory path
+  // Plain signal - no Vue dependency in the factory path. Typed as the
+  // backing's cell, the one TransitionBridge type both factories return.
   let _phase: TransitionPhase = 'idle';
-  const phase: Signal<TransitionPhase> = {
+  const phase = {
     get value() { return _phase; },
     set value(v: TransitionPhase) { _phase = v; },
-  };
+  } as Signal<TransitionPhase>;
 
   const hooks = buildHooks(bus, namespace, phase, resolveTimeout(options.timeout));
 

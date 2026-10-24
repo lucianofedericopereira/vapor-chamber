@@ -25,7 +25,7 @@
 // (session, PreventRequestForgery, etc.).
 //
 // Client tip: without Sanctum there is no /sanctum/csrf-cookie endpoint, so
-// pass `csrfCookieUrl: ''` to createHttpBridge/postCommand. The 419
+// pass `csrfCookieUrl: ''` to httpTransport/postCommand. The 419
 // auto-refresh then skips that fetch, which would answer 404. Either way the
 // retry reads the XSRF-TOKEN cookie first, and the meta tag only when there
 // is no cookie (readCsrfAfterRefresh in src/http.ts).
@@ -33,6 +33,15 @@
 \Illuminate\Support\Facades\Route::post('/api/vc', \App\Http\Controllers\VaporChamberController::class)
     ->middleware(['web'])
     ->name('api.vc');
+
+// A read the router's loaders fetch. `cache.headers` (Laravel's SetCacheHeaders)
+// sends an ETag and answers a matching If-None-Match with a 304. `Cache-Groups`
+// (RFC 9875) names its group, which AddToCart's answer invalidates.
+\Illuminate\Support\Facades\Route::get('/api/cart', fn (\Illuminate\Http\Request $request) => response()
+    ->json(($request->user()?->cart() ?? \App\Models\Cart::session())->toArray())
+    ->header('Cache-Groups', '"cart"'))
+    ->middleware(['web', 'cache.headers:private;no_cache;etag'])
+    ->name('api.cart');
 
 
 // ─────────────────────────────────────────────────────────────────────────────

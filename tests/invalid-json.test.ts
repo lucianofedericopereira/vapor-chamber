@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, postCommand } from '../src/http';
-import { createBatchingHttpBridge, createHttpBridge, createWsBridge } from '../src/transports';
+import type { Transport } from '../src/command-bus';
+import { httpTransport, wsTransport } from '../src/transports';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -47,17 +48,13 @@ describe('the http client', () => {
   });
 });
 
-describe('the bridges', () => {
-  /** An async bus that re-sends `save` as idempotent, through `plugin`. */
-  const bus = (plugin: Parameters<ReturnType<typeof createAsyncCommandBus>['use']>[0]) => {
-    const b = createAsyncCommandBus({ retry: { actionPolicies: { save: 'idempotent' }, baseDelay: 1 } });
-    b.use(plugin);
-    return b;
-  };
+describe('the transports', () => {
+  /** An async bus that re-sends `save` as idempotent, through `transport`. */
+  const bus = (transport: Transport) => createAsyncCommandBus({ transport, retry: { actionPolicies: { save: 'idempotent' }, baseDelay: 1 } });
 
   for (const [name, make] of [
-    ['createHttpBridge', () => createHttpBridge({ endpoint: '/vc' })],
-    ['createHttpBridge with an httpClient', () => createHttpBridge({ endpoint: '/vc', httpClient: createHttpClient() })],
+    ['httpTransport', () => httpTransport({ endpoint: '/vc' })],
+    ['httpTransport with an httpClient', () => httpTransport({ endpoint: '/vc', httpClient: createHttpClient() })],
   ] as const) {
     it(`${name}: invalid:json, never re-sent, nothing sent`, async () => {
       const seen = backend();
@@ -70,8 +67,8 @@ describe('the bridges', () => {
   }
 
   for (const [name, make] of [
-    ['createBatchingHttpBridge', () => createBatchingHttpBridge({ endpoint: '/b' })],
-    ['createBatchingHttpBridge with an httpClient', () => createBatchingHttpBridge({ endpoint: '/b', httpClient: createHttpClient() })],
+    ['httpTransport with batch', () => httpTransport({ endpoint: '/b', batch: {} })],
+    ['httpTransport with batch and an httpClient', () => httpTransport({ endpoint: '/b', httpClient: createHttpClient(), batch: {} })],
   ] as const) {
     it(`${name}: the bad command fails alone, its neighbour is sent`, async () => {
       const seen = backend();
@@ -84,7 +81,7 @@ describe('the bridges', () => {
     });
   }
 
-  it('createWsBridge: invalid:json, not a plugin failure', async () => {
+  it('wsTransport: invalid:json, not a send failure', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     class EchoWs {
       static CONNECTING = 0; static OPEN = 1; static CLOSED = 3;
@@ -96,7 +93,7 @@ describe('the bridges', () => {
       close() {}
     }
     vi.stubGlobal('WebSocket', EchoWs);
-    const ws = createWsBridge({ url: 'ws://x', reconnect: false });
+    const ws = wsTransport({ url: 'ws://x', reconnect: false });
     const b = bus(ws);
     ws.connect();
     EchoWs.last.readyState = 1;

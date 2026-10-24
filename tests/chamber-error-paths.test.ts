@@ -10,62 +10,66 @@ import {
   useCommandHistory,
   setCommandBus,
   resetCommandBus,
+  getCommandBus,
 } from '../src/chamber';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
 
-describe('runDispatch (via useCommand)', () => {
-  it('captures a synchronously-thrown dispatch into lastError', () => {
+describe('runCommand (via useCommand)', () => {
+  it('a synchronously-thrown dispatch is a failed result, nothing left pending', () => {
     setCommandBus(createCommandBus({ onMissing: 'throw' })); // dispatch throws on miss
-    const { dispatch, loading, lastError } = useCommand();
+    const { dispatch, pending } = useCommand();
+    const key = pending('missing', {});
     const r = dispatch('missing', {}) as any;
     expect(r).toFailWith('core:missing:handler');
-    expect(loading.value).toBe(false);
-    expect(lastError.value).toBeInstanceOf(Error);
+    expect(key.value).toBe(false);
   });
 
-  it('async success clears loading and leaves no error', async () => {
+  it('async success: the result, nothing left pending', async () => {
     const bus = createAsyncCommandBus();
     bus.register('ok', async () => 'done');
-    const { dispatch, loading, lastError } = useCommand({ bus });
+    const { dispatch, pending } = useCommand({ bus });
+    const key = pending('ok', {});
     const r = await dispatch('ok', {});
     expect(r.ok).toBe(true);
-    expect(loading.value).toBe(false);
-    expect(lastError.value).toBeNull();
+    expect(key.value).toBe(false);
   });
 
-  it('async failed result is recorded in lastError', async ({ asyncBus: bus }) => {
+  it("async failed result is the result, and lands in the bus's errors", async ({ asyncBus: bus }) => {
     bus.register('boom', async () => { throw new Error('handler failed'); });
-    const { dispatch, loading, lastError } = useCommand({ bus });
+    const shared = useSharedCommandState({ bus });
+    const { dispatch } = useCommand({ bus });
     const r = await dispatch('boom', {});
     expect(r.ok).toBe(false);
-    expect(loading.value).toBe(false);
-    expect(lastError.value).toBeInstanceOf(Error);
+    expect(shared.lastError.value).toBeInstanceOf(Error);
+    shared.dispose();
   });
 });
 
 describe('useSharedCommandState - error recording', () => {
   beforeEach(() => setCommandBus(createCommandBus({ onMissing: 'throw' })));
 
-  it('records a synchronously-thrown dispatch and decrements in-flight', () => {
+  it('records a dispatch that throws (onMissing: throw) and leaves nothing pending', () => {
     const shared = useSharedCommandState();
-    const r = shared.dispatch('missing', {}) as any;
-    expect(r).toFailWith('core:missing:handler');
-    expect(shared.errorCount.value).toBeGreaterThan(0);
+    void shared.anyPending;
+    expect(() => getCommandBus().dispatch('missing', {})).toThrow();
+    expect(shared.errors.value.map((e) => (e as { code?: string }).code)).toEqual(['core:missing:handler']);
     expect(shared.lastError.value).toBeInstanceOf(Error);
-    expect(shared.inFlight.value).toBe(0);     // decrement ran in the catch
-    expect(shared.isAnyLoading.value).toBe(false);
+    expect(shared.anyPending.value).toBe(false);
+    shared.dispose();
   });
 
   it('async failed result is recorded', async ({ asyncBus: bus }) => {
     bus.register('boom', async () => { throw new Error('x'); });
     const shared = useSharedCommandState({ bus });
-    const r = await shared.dispatch('boom', {});
+    void shared.anyPending;
+    const r = await bus.dispatch('boom', {});
     expect(r.ok).toBe(false);
-    expect(shared.errorCount.value).toBe(1);
-    expect(shared.inFlight.value).toBe(0);
+    expect(shared.errors.value.length).toBe(1);
+    expect(shared.anyPending.value).toBe(false);
+    shared.dispose();
   });
 });
 

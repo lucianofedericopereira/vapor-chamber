@@ -1,47 +1,25 @@
 <!--
-  Top-level Vapor SFC. Composes three smaller components, all using
-  vapor-chamber composables to dispatch and observe a shared bus.
+  Top-level Vapor SFC: three panels on one bus, each showing a different
+  view of it.
 
-  Renders three panels:
-    1. CartPanel - uses useCommand for per-button loading state
-    2. SearchPanel - uses defineVaporCommand for fire-and-forget telemetry
-    3. StatusBar - uses useSharedCommandState for cross-component aggregate state
+    1. CartPanel - a busy state per button, the cart the server confirmed
+    2. SearchPanel - a paced search with its results
+    3. StatusBar - the whole bus: anything in flight, every failure
 -->
 <script setup vapor lang="ts">
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber/vapor';
+// shop.ts builds the bus and shares it (setCommandBus), so importing it here
+// runs it before any panel asks for the bus.
+import './shop';
 import CartPanel from './CartPanel.vue';
 import SearchPanel from './SearchPanel.vue';
 import StatusBar from './StatusBar.vue';
-
-// The handlers below are ASYNC (simulated latency), so the shared bus must be
-// the async bus: its dispatch returns Promise<CommandResult>, which the
-// composables' loading/lastError wiring awaits. On the default SYNC bus an
-// async handler's promise is wrapped as a plain ok-value - rejections escape
-// as unhandled and lastError never fires.
-const bus = createAsyncCommandBus();
-setCommandBus(bus); // share it: useCommand/useSharedCommandState pick it up
-
-// Stateful fake server: the cart accumulates across dispatches, so the UI's
-// confirmed totals actually move.
-const serverCart = { count: 0, cents: 0 };
-bus.register('cartAdd', async (cmd) => {
-  await new Promise(r => setTimeout(r, 250));
-  if (cmd.target?.id < 0) throw new Error('Invalid product id');
-  serverCart.count += cmd.payload?.qty ?? 1;
-  serverCart.cents += 1999;
-  return { count: serverCart.count, total: serverCart.cents / 100, lastAddedId: cmd.target?.id };
-});
-
-// NOTE: 'searchExecute' is deliberately NOT registered here -
-// SearchPanel.vue owns it via defineVaporCommand() (a second registration
-// would overwrite it and warn on every load).
 </script>
 
 <template>
   <h1>vapor-chamber - Vapor SFC example</h1>
   <p>
-    Three components share one command bus. Each demonstrates a different
-    composable pattern.
+    Three components share one command bus. Each reads a different part of
+    its state.
   </p>
 
   <StatusBar />

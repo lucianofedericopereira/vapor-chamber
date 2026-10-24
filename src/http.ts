@@ -35,17 +35,19 @@ export type HttpConfig = {
    */
   timeout?: number;
   /**
-   * Max re-sends of a failure the bus's rule allows (`retryClass`): a
-   * transient one (408, 429, 503) for any method; an uncertain one, or an
-   * answer with a declared wait, only for an idempotent method or an
-   * `Idempotency-Key`. With `retry` above 0, an unidentified request (no
-   * idempotent method, no key) that got no reply, a 502 or a 504 is not
-   * re-sent and fails with `context.outcome: 'unknown'`. **0 through
-   * `postCommand`**, and through a client **2 for reads (GET), 0 for other
-   * methods**. A re-send waits the declared wait, else the async bus's
-   * schedule: random under 200 ms x 2^n, capped at 20 s (docs/retry.md).
+   * Re-sends by the bus's rule (`retryClass`): a transient failure (408, 429,
+   * 503) for any method; an uncertain one, or an answer with a declared wait,
+   * only for an idempotent method or an `Idempotency-Key`. `maxAttempts` is
+   * the bus's bound (`RetryOptions`): attempts in total, the first included,
+   * default 3. `false` sends once. Default: **on for a GET through a client,
+   * off for any other method and through `postCommand`**; `{}` turns it on.
+   * While on, an unidentified request (no idempotent method, no key) that got
+   * no reply, a 502 or a 504 is not re-sent and fails with
+   * `context.outcome: 'unknown'`. A re-send waits the declared wait, else the
+   * async bus's schedule: random under 200 ms x 2^n, capped at 20 s
+   * (docs/retry.md). tests/one-client.test.ts.
    */
-  retry?: number;
+  retry?: Pick<RetryOptions, 'maxAttempts'> | false;
   /** External abort signal (e.g. from component unmount) */
   signal?: AbortSignal;
   /** Read the CSRF token from the DOM and attach it as a header. An app header of that name, in any spelling, goes out once with the token. Default: false */
@@ -115,6 +117,9 @@ const SESSION_EXPIRED_STATUS = [401]; // 419 is CSRF expiry, not session expiry
 const MAX_RETRY_AFTER_MS = 30_000;
 const CSRF_TTL_MS = 300_000; // 5 min
 const DEFAULT_CSRF_COOKIE_URL = '/sanctum/csrf-cookie';
+// What every request asks for: JSON, or an RFC 9457 problem. Laravel 13
+// answers JSON on it (`Request::wantsJson`), as on X-Requested-With (log 36.47).
+const ACCEPT = 'application/json, application/problem+json';
 
 // ---------------------------------------------------------------------------
 // CSRF - multi-source with TTL cache
@@ -187,6 +192,13 @@ function spelledOnce(headers: Record<string, string>): Record<string, string> {
     else kept.set(low, [name, headers[name]]);
   }
   return kept.size === names.length ? headers : Object.fromEntries(kept.values());
+}
+
+// The names lowercased, into a prototype-free dictionary (src/dict.ts), for a key.
+function lowerNames(headers: Record<string, string> | undefined): Record<string, string> {
+  const low = dict<string>();
+  for (const name in headers) low[name.toLowerCase()] = headers[name];
+  return low;
 }
 
 /** Delete every spelling of each lowercase name (the Fetch Standard's "delete"). */
@@ -339,7 +351,7 @@ function httpDate(value: string): number {
 }
 
 /**
- * @internal - also read by the bridges (transports.ts), for `context.retryIn`.
+ * @internal - Retry-After's grammar, for `_declaredWait`.
  * RFC 9110: `delay-seconds = 1*DIGIT`, else an HTTP-date; anything else is
  * ignored. `Number()` alone would read `-5`, `1.5`, `1e1`, `0x10` as waits.
  * No ceiling of its own (Retry-After is a minimum, RFC 9110): each caller
@@ -366,12 +378,13 @@ export type CombinedSignal = { signal: AbortSignal; detach: () => void };
  * @internal - `AbortSignal.any([a, b])`, and the same result where a platform
  * lacks it (Chrome before 116, Firefox before 124, Safari before 17.4): an
  * input already aborted gives a result already aborted, else the first input
- * to abort aborts it, each with that input's `reason`. The client, both
- * bridges and supersede combine through it (tests/combine-signals.test.ts).
+ * to abort aborts it, each with that input's `reason`. The client, the
+ * transports, the bus's tickets and supersede combine through it
+ * (tests/combine-signals.test.ts).
  *
  * The native result's listeners are the platform's: nothing to detach. The
  * fallback's sit on both inputs until one aborts; a caller whose result
- * outlives its use (one request on a bridge's signal) calls `detach` when it
+ * outlives its use (one request on a transport's signal) calls `detach` when it
  * settles, or they accrete once per request.
  */
 export function _combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
@@ -398,7 +411,8 @@ function abortedRequest(url: string): BusError {
   return transportFail('aborted:request', `"${url}" was aborted.`, { context: { url } });
 }
 
-function sleepMs(ms: Delay, signal?: AbortSignal): Promise<void> {
+/** @internal - a wait the signal cuts short with a rejection: the client's re-send and a transport's poll. */
+export function _sleepMs(ms: Delay, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(id);
@@ -457,7 +471,7 @@ export function _remoteProblem(p: ProblemDetails, status?: number, retryIn?: num
 
 /** @internal - a non-2xx: its problem, or, for a body that is not one, the status alone. */
 export function _answered(status: number, data: unknown, headers?: Record<string, string>): BusError {
-  const retryIn = _parseRetryAfter(headers?.['retry-after']);
+  const retryIn = headers && _declaredWait(headers);
   return data !== null && typeof data === 'object' && !Array.isArray(data)
     ? _remoteProblem(data as ProblemDetails, status, retryIn)
     : remoteFail(`${conditionOfStatus(status)}:http` as FailCode, `HTTP ${status}`, { context: { status, retryIn } });
@@ -484,7 +498,7 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
 // Core: postCommand
 //
 // Sends a single POST request with retry, CSRF, timeout and session detection.
-// Used by createHttpBridge - not intended as a general-purpose HTTP client.
+// Used by httpTransport - not intended as a general-purpose HTTP client.
 // ---------------------------------------------------------------------------
 
 /**
@@ -545,27 +559,122 @@ function parseJson(text: string, ok: boolean): unknown {
 function resendable(failure: BusError, method: string, headers: Record<string, string>, declared?: number): boolean {
   const cls = retryClass(failure);
   return cls === 'transient' || ((cls === 'uncertain' || declared !== undefined)
-    && (IDEMPOTENT_METHODS.has(method) || Object.keys(headers).some((k) => k.toLowerCase() === 'idempotency-key')));
+    && (IDEMPOTENT_METHODS.has(method) || _headerOf(headers, 'idempotency-key') !== undefined));
 }
 
 /**
- * The wait an answer declares: Retry-After (RFC 9110 10.2.3), else the
- * RateLimit field's `t` seconds for a policy with no quota left (`r=0`),
- * else `X-RateLimit-Reset` (docs/retry.md). draft-ietf-httpapi-
- * ratelimit-headers-11: a List of items, each `"policy";r=<n>;t=<s>`.
- * Retry-After "MUST take precedence". tests/retry-unidentified.test.ts.
+ * The re-sends a request may make, from its `retry`: the bus's bound less the
+ * first attempt for an object (`maxAttempts` by the count rule: NaN the
+ * default 3, at least 1, a fraction truncated), none for `false`, else
+ * `fallback`, its method's default. tests/one-client.test.ts,
+ * tests/http-retry-count.test.ts.
  */
-function declaredWait(headers: Record<string, string>): number | undefined {
-  let t: number | undefined;
-  for (const item of headers.ratelimit?.split(',') ?? []) {
-    const m = /;\s*t=(\d+)/.exec(item);
-    if (m && /;\s*r=0\b/.test(item)) t = Math.max(t ?? 0, +m[1]);
-  }
-  return _parseRetryAfter(headers['retry-after'] ?? (t === undefined ? headers['x-ratelimit-reset'] : String(t)));
+function resendsOf(retry: HttpConfig['retry'], fallback: number): number {
+  return retry ? countOption(retry.maxAttempts, _RETRY_ATTEMPTS, 1) - 1 : retry === false ? 0 : fallback;
 }
 
-async function doFetch<T>(url: string, serialized: string, headers: Record<string, string>, signal: AbortSignal): Promise<HttpResponse<T>> {
-  const raw = await fetch(url, { method: 'POST', headers, body: serialized, credentials: 'same-origin', signal });
+/**
+ * @internal - the wait an answer declares, its `context.retryIn`: Retry-After
+ * (RFC 9110 10.2.3), else the RateLimit field's `t` seconds for a policy with
+ * no quota left (`r=0`), else `X-RateLimit-Reset` (docs/retry.md).
+ * draft-ietf-httpapi-ratelimit-headers-11: a List of items, each
+ * `"policy";r=<n>;t=<s>`. Retry-After "MUST take precedence". Names in lower
+ * case. The one reader: the client and every bridge, through `_answered`, and
+ * a batched result's own headers. tests/declared-wait.test.ts.
+ */
+export function _declaredWait(headers: Record<string, string>): number | undefined {
+  let t: number | undefined;
+  // Scanned only when sent: a failure with no RateLimit field builds no array.
+  const limits = headers.ratelimit;
+  if (limits !== undefined) {
+    for (const item of limits.split(',')) {
+      const m = /;\s*t=(\d+)/.exec(item);
+      if (m && /;\s*r=0\b/.test(item)) t = Math.max(t ?? 0, +m[1]);
+    }
+  }
+  const after = headers['retry-after'];
+  return after !== undefined || t !== undefined ? _parseRetryAfter(after ?? String(t)) : resetWait(headers['x-ratelimit-reset']);
+}
+
+/**
+ * @internal - headers an app's own client or a batched result carries, read
+ * as a response's: names in lower case (RFC 9110 5.1), the first spelling
+ * kept, string values only. The client's own are lower case already
+ * (`headersToObject`). tests/declared-wait.test.ts, tests/batch-retry-after.test.ts.
+ */
+export function _headersOf(headers: unknown): Record<string, string> | undefined {
+  if (headers === null || typeof headers !== 'object') return undefined;
+  const out: Record<string, string> = dict();
+  for (const k of Object.keys(headers)) {
+    const value = (headers as Record<string, unknown>)[k];
+    const name = k.toLowerCase();
+    if (typeof value === 'string' && !Object.hasOwn(out, name)) out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * @internal - one header of those `_headersOf` reads, by its lower-case name,
+ * with no copy: `_headersOf`'s rule (any case, the first spelling, a string
+ * value) for one name. A 202's answer reads only its `Location`: the copy cost
+ * every 202 about 115 ns (log 36.49). tests/accepted.test.ts.
+ */
+export function _headerOf(headers: unknown, name: string): string | undefined {
+  if (headers === null || typeof headers !== 'object') return undefined;
+  for (const k of Object.keys(headers)) {
+    if (k.length === name.length && k.toLowerCase() === name) {
+      const value = (headers as Record<string, unknown>)[k];
+      if (typeof value === 'string') return value;
+    }
+  }
+  return undefined;
+}
+
+// One member of an RFC 9651 List, for the reader below: a String (captured)
+// or another bare item, its parameters (a String in one may hold a comma), the
+// separator. An inner list is no group, and its field is ignored whole.
+const SF_MEMBER = /(?:"((?:[ !#-[\]-~]|\\["\\])*)"|[^\s",;()][^",;]*)(?:;[^",;]*(?:"(?:[^"\\]|\\.)*"[^",;]*)*)*[ \t]*(?:,[ \t]*|$)/y;
+
+/**
+ * @internal - the groups a `Cache-Groups` or `Cache-Group-Invalidation` field
+ * names (RFC 9875): a Structured Field List of Strings (RFC 9651). Parameters
+ * and a member that is not a String are skipped unread. A String that does not
+ * parse, two members with no comma, a trailing comma or an inner list ignore
+ * the field whole (RFC 9651 4.2: a failed parse ignores the field).
+ * The one reader: the client,
+ * the transports and fetchLoaders. tests/cache-groups.test.ts.
+ */
+export function _groupsOf(value: string | undefined): string[] {
+  const groups: string[] = [];
+  if (!value || /,[ \t]*$/.test(value)) return groups;
+  let i = /^ */.exec(value)![0].length;
+  while (i < value.length) {
+    SF_MEMBER.lastIndex = i;
+    const m = SF_MEMBER.exec(value);
+    if (!m) return [];
+    if (m[1] !== undefined) groups.push(m[1].replace(/\\(["\\])/g, '$1'));
+    i = SF_MEMBER.lastIndex;
+  }
+  return groups;
+}
+
+// `Cache-Control: no-store` (RFC 9111 5.2.2.5): the response is not kept.
+const NO_STORE = /(?:^|,)[ \t]*no-store[ \t]*(?:,|$)/i;
+
+/**
+ * `X-RateLimit-Reset`, which no standard defines: draft -11 lists four
+ * readings. Digits a timer can wait are delay seconds. Larger ones are Unix
+ * seconds, as Laravel 13 (`availableAt`) and GitHub send them: read as a
+ * delay, such a value was past every timer and dropped (log 36.42).
+ */
+function resetWait(value: string | undefined): number | undefined {
+  if (value === undefined || !/^\d+$/.test(value) || Number(value) * 1000 <= MAX_TIMEOUT_MS) return _parseRetryAfter(value);
+  const ms = Number(value) * 1000 - Date.now();
+  return ms > 0 && ms <= MAX_TIMEOUT_MS ? ms : undefined;
+}
+
+async function doFetch<T>(url: string, method: string, serialized: string | undefined, headers: Record<string, string>, signal: AbortSignal): Promise<HttpResponse<T>> {
+  const raw = await fetch(url, { method, headers, body: serialized, credentials: 'same-origin', signal });
   const resHeaders = headersToObject(raw.headers);
   const data = parseJson(await raw.text(), raw.ok) as T;
   return { data, status: raw.status, headers: resHeaders, ok: raw.ok, url: raw.url, redirected: raw.redirected };
@@ -604,7 +713,7 @@ async function runWithRetry<T>(
   let csrfRetried = false;
 
   // Every attempt ends in a return, a throw, or a re-send while `attempt <
-  // retry` (a count by countOption): the loop needs no test of its own.
+  // retry` (the re-sends left, by resendsOf): the loop needs no test of its own.
   for (let attempt = 0; ; attempt++) {
     if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
 
@@ -628,7 +737,8 @@ async function runWithRetry<T>(
         continue;
       }
       failure = _answered(res.status, res.data, res.headers);
-      declared = declaredWait(res.headers);
+      // The wait the failure carries is the one slept: one reading.
+      declared = failure.context?.retryIn as number | undefined;
     } catch (e) {
       // A failure thrown above was already judged; it leaves as it is.
       if (e instanceof BusError) throw e;
@@ -649,7 +759,7 @@ async function runWithRetry<T>(
     if (attempt < retry && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
       if (resendable(failure, opts.method, headers, declared)) {
         try {
-          await sleepMs(delayOption(declared ?? _backoff(attempt), 0), userSignal);
+          await _sleepMs(delayOption(declared ?? _backoff(attempt), 0), userSignal);
         } catch {
           throw asSilent(abortedRequest(url), silent);
         }
@@ -685,48 +795,68 @@ export function postCommand<T = unknown>(
   config: HttpConfig = {},
 ): Promise<HttpResponse<T>> {
   const serialized = _encodeJson(body, url);
-  return typeof serialized === 'string' ? _postJson<T>(url, serialized, config) : Promise.reject(asSilent(serialized, config.silent));
+  return typeof serialized === 'string' ? _postJson<T>(url, serialized, config, resendsOf(config.retry, 0)) : Promise.reject(asSilent(serialized, config.silent));
 }
 
-/** @internal - postCommand with its body already JSON: the batching bridge joins its commands' parts. */
-export async function _postJson<T = unknown>(
+/**
+ * @internal - postCommand with its body already JSON: a batching transport
+ * joins its commands' parts. `retry` is the re-sends, already read: a
+ * transport sends once (the bus re-sends), so it reads no `retry` option.
+ * Not `async`: it returns runWithRetry's promise itself, and a throw in its
+ * body is a rejection by its `try` (tests/post-json-turns.test.ts).
+ */
+export function _postJson<T = unknown>(
   url: string,
   serialized: string,
   config: HttpConfig = {},
+  retry = 0,
 ): Promise<HttpResponse<T>> {
-  const { timeout: rawTimeout = 10_000, retry: rawRetry, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
-  // A count by the count rule: NaN is the default, a negative 0, a fraction
-  // truncated. Unchecked, a NaN or negative `retry` sent nothing
-  // (tests/http-retry-count.test.ts).
-  const retry = countOption(rawRetry, 0);
-  // setTimeout fires a delay it cannot hold AT ONCE: NaN reads as 0, and past
-  // MAX_TIMEOUT_MS Node clamps to 1ms and browsers wrap. So `timeout: NaN`
-  // (a failed `Number(config.x)`) and `timeout: Infinity` ("no timeout")
-  // aborted every request as it started. NaN takes the default, a larger
-  // value the ceiling, 0 and negatives fire now (delayOption, the rule every
-  // timer takes: tests/timer-delays.test.ts). Pinned by
-  // tests/http-timeout-bounds.test.ts.
-  const timeout = delayOption(rawTimeout, 10_000);
+  try {
+    const { timeout: rawTimeout = 10_000, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
+    // setTimeout fires a delay it cannot hold AT ONCE: NaN reads as 0, and past
+    // MAX_TIMEOUT_MS Node clamps to 1ms and browsers wrap. So `timeout: NaN`
+    // (a failed `Number(config.x)`) and `timeout: Infinity` ("no timeout")
+    // aborted every request as it started. NaN takes the default, a larger
+    // value the ceiling, 0 and negatives fire now (delayOption, the rule every
+    // timer takes: tests/timer-delays.test.ts). Pinned by
+    // tests/http-timeout-bounds.test.ts.
+    const timeout = delayOption(rawTimeout, 10_000);
 
-  const merged: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
-    ...extra,
-  };
-  if (csrf) attachCsrf(merged);
-  const headers = oneSpelling(merged);
+    const merged: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': ACCEPT,
+      ...extra,
+    };
+    if (csrf) attachCsrf(merged);
+    const headers = oneSpelling(merged);
 
+    return runWithRetry<T>(
+      (signal) => doFetch<T>(url, 'POST', serialized, headers, signal),
+      headers,
+      { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, method: 'POST', silent, notModified: config.resolveNotModified },
+    );
+  } catch (e) { return Promise.reject(e); }
+}
+
+/**
+ * @internal - one GET outside a client: the client's headers (`X-Requested-With`
+ * kept, log 36.47) and its 30 s, the command's fetch and JSON reader, so a body
+ * that is not JSON (a sign-in page) fails as `remote:unexpected:json`, and the
+ * one loop, with no re-send. A transport's poll of a status monitor (src/accepted.ts).
+ */
+export function _getJson<T = unknown>(url: string, config: HttpConfig): Promise<HttpResponse<T>> {
+  const headers = oneSpelling({ 'Accept': ACCEPT, 'X-Requested-With': 'XMLHttpRequest', ...config.headers });
   return runWithRetry<T>(
-    (signal) => doFetch<T>(url, serialized, headers, signal),
+    (signal) => doFetch<T>(url, 'GET', undefined, headers, signal),
     headers,
-    { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, method: 'POST', silent, notModified: config.resolveNotModified },
+    { retry: 0, timeout: delayOption(undefined, DEFAULT_CLIENT_TIMEOUT), userSignal: config.signal, csrfCookieUrl: DEFAULT_CSRF_COOKIE_URL, onSessionExpired: config.onSessionExpired, url, method: 'GET' },
   );
 }
 
 // ---------------------------------------------------------------------------
 // Multi-method HTTP client - createHttpClient
 //
-// postCommand is the wire contract's POST, used by the bridges.
+// postCommand is the wire contract's POST, used by the transports.
 // ---------------------------------------------------------------------------
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -766,6 +896,16 @@ export type HttpRequestConfig = HttpConfig & {
    * (`tests/silent-dedupe.test.ts`).
    */
   dedupe?: boolean;
+  /**
+   * Fetch's cache mode for this request (`RequestInit.cache`), for the
+   * browser's cache and the client's own store (`cache`) alike. `'no-cache'`
+   * asks the server before a stored copy is used, sending its `ETag`: a router
+   * refresh reads so. `'reload'` reads past a stored copy and stores the
+   * answer. `'no-store'` neither reads nor stores. Absent: Fetch's default. A
+   * read in one mode never joins a read in another.
+   * tests/http-cache-mode.test.ts, tests/cache-groups.test.ts.
+   */
+  cacheMode?: RequestCache;
   /** @internal marks a CSRF-retried request */
   _csrfRetried?: boolean;
 };
@@ -821,7 +961,20 @@ export type HttpClient = {
   };
   create(defaults?: Partial<HttpRequestConfig>): HttpClient;
   clearCache(): void;
-  invalidateCache(pattern: string | RegExp): void;
+  /**
+   * Drop the cached reads whose response named one of `groups` in its
+   * `Cache-Groups` (RFC 9875), and tell each group to `onInvalidateGroup`'s
+   * listeners. `groups`: the names, or a `Cache-Group-Invalidation` field
+   * value as received. A write's answer runs it, and a transport runs it for a
+   * batched result's or a frame's field, so the field reader stays in the
+   * client. tests/cache-groups.test.ts.
+   */
+  invalidateGroups(groups: readonly string[] | string): void;
+  /**
+   * Hear each group the client invalidates. A listener's throw is logged and
+   * the rest still hear. Returns the unsubscribe. The router listens here.
+   */
+  onInvalidateGroup(listener: (group: string) => void): () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -851,23 +1004,27 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 // ---------------------------------------------------------------------------
 
 import { type Delay, MAX_TIMEOUT_MS, countOption, delayOption } from './bounds';
+import { _report } from './report';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
 import { classifyError, type ProblemDetails } from './http-errors';
-import { BusError, _backoff, _failures, _heldBack, conditionOfStatus, retryClass, type FailCode } from './failure';
+import { BusError, _RETRY_ATTEMPTS, _backoff, _failures, _heldBack, conditionOfStatus, retryClass, type FailCode } from './failure';
+import type { RetryOptions } from './command-bus';
 import { buildFullUrl } from './http-query';
+import { keyTextFor } from './canonical';
+import { dict } from './dict';
 
 // ---------------------------------------------------------------------------
 // Constants for multi-method client
 // ---------------------------------------------------------------------------
 
-/** A read: retried by default and cached; any other method invalidates its URL. */
+/** A read: re-sent by default and cached; any other method invalidates its URL. */
 const READ_METHODS: HttpMethod[] = ['GET'];
 const MUTATION_METHODS: HttpMethod[] = ['POST', 'PUT', 'PATCH', 'DELETE'];
 /** RFC 9110 9.2.2: safe to send twice, so the retry rule may re-send an uncertain failure. */
 const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
-const DEFAULT_GET_RETRY = 2;
-const DEFAULT_MUTATION_RETRY = 0;
 const DEFAULT_CLIENT_TIMEOUT = 30_000;
+/** The request headers' key writer, built once (./canonical keyTextFor). */
+const headersKeyText = /* @__PURE__ */ keyTextFor(String);
 
 // ---------------------------------------------------------------------------
 // Internal: generic fetch with retry, CSRF, timeout (multi-method)
@@ -880,9 +1037,11 @@ async function doClientFetch<T>(
   body: string | FormData | undefined,
   responseType: ResponseType,
   signal: AbortSignal,
+  cacheMode: RequestCache | undefined,
 ): Promise<HttpResponse<T>> {
   const init: RequestInit = { method, headers, credentials: 'same-origin', signal };
   if (body !== undefined) init.body = body;
+  if (cacheMode !== undefined) init.cache = cacheMode;
 
   const raw = await fetch(fullUrl, init);
   const resHeaders = headersToObject(raw.headers);
@@ -927,13 +1086,14 @@ async function clientRequest<T>(
   csrfCookieUrl: string,
   onSessionExpired?: (status: number) => void,
   notModified?: boolean,
+  cacheMode?: RequestCache,
 ): Promise<HttpResponse<T>> {
   // Attach CSRF for mutation methods
   if (csrf && MUTATION_METHODS.includes(method)) attachCsrf(headersObj);
   const headers = oneSpelling(headersObj);
 
   return runWithRetry<T>(
-    (signal) => doClientFetch<T>(fullUrl, method, headers, body, responseType, signal),
+    (signal) => doClientFetch<T>(fullUrl, method, headers, body, responseType, signal, cacheMode),
     headers,
     { retry: maxRetries, timeout, userSignal, csrfCookieUrl, onSessionExpired, url: fullUrl, method, notModified },
   );
@@ -1019,6 +1179,12 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
   // once every caller holding it has aborted (`live` reaches 0). A read with
   // no entry here is one some caller holds without a signal: nothing cancels it.
   const shares = new WeakMap<Promise<unknown>, { ctrl: AbortController; live: number }>();
+  // The client's hub for invalidated groups (record revision 23 item 3). A
+  // stored response is in a group when its own `Cache-Groups` names it.
+  const groups = _groupHub((named) => cache.invalidateStored((res: HttpResponse) => {
+    const own = res.headers['cache-groups'];
+    return own !== undefined && _groupsOf(own).some((g) => named.includes(g));
+  }));
 
   // One caller's promise on a shared read: its own signal rejects it, and only
   // it. The last holder to abort cancels the fetch and removes the in-flight
@@ -1045,12 +1211,14 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
   }
 
   async function request<T = unknown>(url: string, options: HttpRequestConfig = {}): Promise<HttpResponse<T>> {
-    // Merge instance defaults with per-call options
+    // Merge instance defaults with per-call options. X-Requested-With stays on
+    // the client's requests: Laravel 13's StartSession stores a GET without it
+    // as the session's previous URL, so `back()` lands on a JSON read (log 36.47).
     let config: HttpRequestConfig = {
       ...instanceDefaults,
       ...options,
       headers: {
-        'Accept': 'application/json, application/problem+json',
+        'Accept': ACCEPT,
         'X-Requested-With': 'XMLHttpRequest',
         ...instanceDefaults.headers,
         ...options.headers,
@@ -1067,14 +1235,19 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // Same bounds as postCommand's (timeout and retry), normalized once before clientRequest's loop.
     const timeout = delayOption(config.timeout, DEFAULT_CLIENT_TIMEOUT);
     const isRead = READ_METHODS.includes(method);
-    const defaultRetries = isRead ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY;
-    const maxRetries = countOption(config.retry ?? defaultRetries, defaultRetries);
+    // A read is on by default (the bus's bound), any other method off.
+    const maxRetries = resendsOf(config.retry, isRead ? _RETRY_ATTEMPTS - 1 : 0);
     const responseType: ResponseType = config.responseType ?? 'json';
     const csrf = config.csrf ?? false;
     const csrfCookieUrl = config.csrfCookieUrl ?? DEFAULT_CSRF_COOKIE_URL;
-    const dedupe = config.dedupe ?? true;
+    // Only a read joins one in flight or reads the cache.
+    const joins = isRead && (config.dedupe ?? true);
+    const cacheEnabled = isRead && !!config.cache;
 
     const fullUrl = buildFullUrl(url, config.baseURL, config.params);
+    // Keys only for a read that dedupes or caches: a write, or a read doing
+    // neither, builds none (plan-transport-owned.md revision 9 F,
+    // tests/one-client.test.ts).
     // responseType is part of both keys - a concurrent get(url) (json) and
     // get(url, { responseType: 'blob' }) must not collapse to one request or
     // one cache slot, or the loser receives the wrong data type.
@@ -1089,18 +1262,23 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // handed a silent failure (tests/silent-dedupe.test.ts). (`config.headers`
     // is always the merged object, the instance's defaults included.)
     // Encoded once for both keys below: two encodings per request was 1.30's.
-    const headersKey = JSON.stringify(config.headers);
-    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${config.silent ? 'silent:' : ''}${headersKey}:${fullUrl}`;
+    // Names lowercased (RFC 9110 5.1: case-insensitive, and `oneSpelling`
+    // left one per name) and sorted (./canonical keyTextFor), so one request
+    // on the wire is one key in any spelling or order
+    // (tests/http-cache-headers.test.ts).
+    // A value goes out as its text, so a stray number keys as that text.
+    const headersKey = joins || cacheEnabled ? headersKeyText(lowerNames(config.headers)) : '';
+    const dedupeKey = joins ? `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${config.silent ? 'silent:' : ''}${config.cacheMode ? `${config.cacheMode}:` : ''}${headersKey}:${fullUrl}` : '';
     // The cache holds the same answer the dedupe would share, so it keys by the
     // same headers: one client whose Authorization or Accept-Language changed
     // must not be served the earlier answer (tests/http-cache-headers.test.ts).
-    const cacheKey = `${responseType}:${headersKey}:${fullUrl}`;
+    const cacheKey = cacheEnabled ? `${responseType}:${headersKey}:${fullUrl}` : '';
 
     // Request deduplication for GET. A caller joins the read in flight, but its
     // signal stays its own: it cancels its promise, never another caller's.
     // A caller with no signal holds the read until it lands.
     const userSignal = config.signal;
-    if (isRead && dedupe) {
+    if (joins) {
       const inflight = cache.getInflight(dedupeKey) as Promise<HttpResponse<T>> | undefined;
       if (inflight) {
         if (!userSignal) {
@@ -1117,14 +1295,25 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // LRU cache for GET. A fresh hit short-circuits; a stale hit (within
     // cache.staleTtl) is captured and served below with a background
     // revalidation attached - the stale-while-revalidate path.
-    const cacheEnabled = config.cache && isRead;
+    // Fetch's `cacheMode` means the same here as in the browser's cache:
+    // `no-cache` asks the server before using the stored copy (its ETag the
+    // validator), `reload` reads past it, `no-store` neither reads nor stores.
+    // tests/http-cache-mode.test.ts.
     const cacheCfg = typeof config.cache === 'object' ? config.cache : {};
     let staleResponse: HttpResponse | null = null;
+    let validated: HttpResponse | null = null;
     if (cacheEnabled) {
-      const cached = cache.get(cacheKey);
-      if (cached && !cached.stale) return cached.data as HttpResponse<T>;
-      if (cached) staleResponse = cached.data as HttpResponse;
+      const mode = config.cacheMode;
+      if (mode !== 'no-cache' && mode !== 'reload' && mode !== 'no-store') {
+        const cached = cache.get(cacheKey);
+        if (cached && !cached.stale) return cached.data as HttpResponse<T>;
+        if (cached) staleResponse = cached.data as HttpResponse;
+      } else if (mode === 'no-cache') {
+        validated = (cache.getAny(cacheKey)?.data as HttpResponse | undefined) ?? null;
+      }
     }
+    // The copy a 304 confirms: the stale one served now, or the one validated.
+    const stored = staleResponse ?? validated;
 
     // Build headers and body. One spelling per name is settled in
     // clientRequest, after the interceptors, so they see what they always saw.
@@ -1146,17 +1335,32 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       }
     }
 
+    // Decision B (.probes/plan-router.md): a stale entry's refresh asks with the
+    // stored `ETag`, unless the app asks itself. Fetch hands the 304 to the page
+    // (4.6: a conditional header runs the request in "no-store" mode).
+    // tests/http-etag-refresh.test.ts.
+    const tag = stored?.headers.etag;
+    const conditional = tag !== undefined && _headerOf(headersObj, 'if-none-match') === undefined;
+    if (conditional) headersObj['If-None-Match'] = tag;
+
     // Execute request. `ticket`: see ResponseCache.read.
-    const ticket = cacheEnabled ? cache.read(fullUrl) : null;
+    const ticket = cacheEnabled && config.cacheMode !== 'no-store' ? cache.read(fullUrl) : null;
     // A read others may join, started by a signalled caller, fetches under a
     // controller of its own: this caller's abort is then one holder leaving.
     // An already aborted caller is not joinable; it fails on its own below.
-    const joinable = isRead && dedupe && !userSignal?.aborted;
+    const joinable = joins && !userSignal?.aborted;
     const share = joinable && userSignal ? { ctrl: new AbortController(), live: 1 } : null;
     const fetchPromise = clientRequest<T>(
       fullUrl, method, headersObj, body, responseType, maxRetries, timeout,
-      share ? share.ctrl.signal : userSignal, csrf, csrfCookieUrl, config.onSessionExpired, config.resolveNotModified,
+      share ? share.ctrl.signal : userSignal, csrf, csrfCookieUrl, config.onSessionExpired, config.resolveNotModified || conditional, config.cacheMode,
     ).then((res) => {
+      // Our conditional refresh answered 304: what the entry holds is current.
+      // The stored response is the answer (it passed the interceptors when
+      // stored), so its data stays the same object, and it opens a new window.
+      if (conditional && res.status === 304) {
+        if (ticket !== null && cache.done(ticket)) cache.set(cacheKey, stored, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0, fullUrl);
+        return stored as HttpResponse<T>;
+      }
       // Run response interceptors
       let response = res as HttpResponse;
       responseInterceptors.forEach(({ onFulfilled }) => {
@@ -1164,14 +1368,22 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       });
 
       // Cache successful GET responses, unless an invalidation of this URL
-      // happened while it was on the wire: it is returned, not stored.
+      // happened while it was on the wire: it is returned, not stored. A
+      // response that says `no-store` is not kept, nor the copy it refreshed.
       if (ticket && cache.done(ticket) && response.ok) {
-        cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0, fullUrl);
+        const control = res.headers['cache-control'];
+        if (control !== undefined && NO_STORE.test(control)) cache.drop(cacheKey);
+        else cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0, fullUrl);
       }
       // A write that resolved invalidates its URL and the URIs its answer
-      // names (invalidatedBy). Only a non-error answer gets here: the retry
-      // loop throws the rest. The answer as received, before interceptors.
-      if (!isRead) cache.invalidate(invalidatedBy(fullUrl, res));
+      // names (invalidatedBy), and the groups it names (RFC 9875). Only a
+      // non-error answer gets here: the retry loop throws the rest. The answer
+      // as received, before interceptors.
+      if (!isRead) {
+        cache.invalidate(invalidatedBy(fullUrl, res));
+        const named = res.headers['cache-group-invalidation'];
+        if (named !== undefined) groups.invalidateGroups(named);
+      }
 
       return response as HttpResponse<T>;
     }).catch((err) => {
@@ -1227,6 +1439,62 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     return own;
   }
 
+  return clientOver(request, {
+    interceptors: {
+      request: requestInterceptors,
+      response: responseInterceptors,
+    },
+    create: (newDefaults) => createHttpClient(underDefaults(instanceDefaults, newDefaults)),
+    clearCache: () => cache.clear(),
+    invalidateGroups: groups.invalidateGroups,
+    onInvalidateGroup: groups.onInvalidateGroup,
+  });
+}
+
+/**
+ * @internal One group namespace's hub (RFC 9875): every source calls
+ * `invalidateGroups`, every reader listens with `onInvalidateGroup`. A client
+ * is one, and a bus's transport client is that bus's hub; a bus with no
+ * client gets its own from its first reader (`cache()`).
+ */
+export type GroupHub = Pick<HttpClient, 'invalidateGroups' | 'onInvalidateGroup'>;
+
+/**
+ * @internal A hub: `drop` first, with the groups (a client's stored reads),
+ * then each listener per group. A listener's throw is logged and the rest
+ * still hear. No listener emits, so nothing loops.
+ * tests/cache-groups.test.ts, tests/cache-groups-hub.test.ts.
+ */
+export function _groupHub(drop?: (groups: readonly string[]) => void): GroupHub {
+  const listeners = new Set<(group: string) => void>();
+  return {
+    invalidateGroups(named) {
+      const groups = typeof named === 'string' ? _groupsOf(named) : named;
+      if (groups.length === 0) return;
+      drop?.(groups);
+      for (const group of groups) {
+        for (const listener of listeners) {
+          try { listener(group); } catch (e) { _report('error', 'http:failed:listener', `an onInvalidateGroup listener threw on "${group}"`, e, { group }); }
+        }
+      }
+    },
+    onInvalidateGroup(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+
+/** Defaults under a call's config: the call wins, headers merged by name. */
+function underDefaults(defaults: Partial<HttpRequestConfig>, config: Partial<HttpRequestConfig> = {}): HttpRequestConfig {
+  return { ...defaults, ...config, headers: { ...defaults.headers, ...config.headers } };
+}
+
+type ClientState = Pick<HttpClient, 'interceptors' | 'create' | 'clearCache' | 'invalidateGroups' | 'onInvalidateGroup'>;
+
+// The public methods over one `request`: a client's own, or `_withDefaults`'s
+// over another client's, which then shares that client's state.
+function clientOver(request: HttpClient['request'], state: ClientState): HttpClient {
   // Safe mode wrapper
   async function safeRequest<T>(method: HttpMethod, url: string, data?: unknown, config: HttpRequestConfig = {}): Promise<SafeResult<T>> {
     try {
@@ -1284,16 +1552,27 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       patch:  <T>(url: string, data?: unknown, config?: HttpRequestConfig) => safeRequest<T>('PATCH', url, data, config),
       delete: <T>(url: string, config?: HttpRequestConfig) => safeRequest<T>('DELETE', url, undefined, config),
     },
-    interceptors: {
-      request: requestInterceptors,
-      response: responseInterceptors,
-    },
-    create: (newDefaults) => createHttpClient({
-      ...instanceDefaults,
-      ...newDefaults,
-      headers: { ...instanceDefaults.headers, ...newDefaults?.headers },
-    }),
-    clearCache: () => cache.clear(),
-    invalidateCache: (pattern) => cache.invalidate(pattern),
+    interceptors: state.interceptors,
+    create: state.create,
+    clearCache: state.clearCache,
+    invalidateGroups: state.invalidateGroups,
+    onInvalidateGroup: state.onInvalidateGroup,
   };
+}
+
+/**
+ * @internal - `client` with `defaults` under every call, as `create` merges
+ * them (the call wins, headers by name), but on `client`'s own state: its
+ * cache, its in-flight reads and its interceptors. A write through either
+ * invalidates a read cached through the other: one client.
+ * `routerHttp({ http })` (router/remote.ts). tests/router/one-client.test.ts.
+ */
+export function _withDefaults(client: HttpClient, defaults: Partial<HttpRequestConfig>): HttpClient {
+  return clientOver((url, config) => client.request(url, underDefaults(defaults, config)), {
+    interceptors: client.interceptors,
+    create: (newDefaults) => client.create(underDefaults(defaults, newDefaults)),
+    clearCache: client.clearCache,
+    invalidateGroups: client.invalidateGroups,
+    onInvalidateGroup: client.onInvalidateGroup,
+  });
 }

@@ -117,34 +117,30 @@ describe('defineVaporCommand', () => {
 // ---------------------------------------------------------------------------
 
 describe('useCommand - register/on/emit/dispose', () => {
-  it('dispatches commands and tracks loading/error reactively', () => {
+  it('dispatches commands, and pending tracks the key', () => {
     const bus = getCommandBus();
-    bus.register('vaporAdd', (cmd) => cmd.target.id);
+    let during = false;
+    bus.register('vaporAdd', (cmd) => { during = key.value; return cmd.target.id; });
 
-    const { dispatch, loading, lastError, dispose } = useCommand();
+    const { dispatch, pending, dispose } = useCommand();
+    const key = pending('vaporAdd', { id: 42 });
 
-    expect(loading.value).toBe(false);
-    expect(lastError.value).toBe(null);
-
+    expect(key.value).toBe(false);
     const result = dispatch('vaporAdd', { id: 42 });
     expect(result).toSucceedWith(42);
-    // After sync dispatch, loading is back to false
-    expect(loading.value).toBe(false);
-    expect(lastError.value).toBe(null);
+    expect({ during, after: key.value }).toEqual({ during: true, after: false });
 
     dispose();
   });
 
-  it('captures errors in lastError signal', () => {
+  it('a failure is the dispatch\'s own result', () => {
     const bus = getCommandBus();
     bus.register('vaporFail', () => { throw new Error('vapor-boom'); });
 
-    const { dispatch, lastError, dispose } = useCommand();
+    const { dispatch, dispose } = useCommand();
 
-    const result = dispatch('vaporFail', {});
-    expect((result as { ok: boolean }).ok).toBe(false);
-    expect(lastError.value).toBeInstanceOf(Error);
-    expect(lastError.value?.message).toBe('vapor-boom');
+    const result = dispatch('vaporFail', {}) as { ok: boolean; error?: Error };
+    expect({ ok: result.ok, message: result.error?.message }).toEqual({ ok: false, message: 'vapor-boom' });
 
     dispose();
   });
@@ -212,7 +208,7 @@ describe('useCommand - register/on/emit/dispose', () => {
     dispose();
   });
 
-  it('loading stays true until async handler resolves', async () => {
+  it('pending stays true until the async handler resolves', async () => {
     const asyncBus = createAsyncCommandBus();
     setCommandBus(asyncBus as any);
 
@@ -221,16 +217,16 @@ describe('useCommand - register/on/emit/dispose', () => {
       return 'fetched';
     });
 
-    const { dispatch, loading, lastError, dispose } = useCommand();
+    const { dispatch, pending, dispose } = useCommand();
+    const key = pending('asyncFetch', {});
 
     const resultPromise = dispatch('asyncFetch', {});
-    expect(loading.value).toBe(true);
+    expect(key.value).toBe(true);
 
     const result = await resultPromise;
 
-    expect(loading.value).toBe(false);
+    expect(key.value).toBe(false);
     expect(result.ok).toBe(true);
-    expect(lastError.value).toBeNull();
 
     dispose();
   });
@@ -303,50 +299,44 @@ describe('defineVaporAsyncComponent', () => {
 describe('useVaporAsyncCommand', () => {
   beforeEach(() => resetCommandBus());
 
-  it('dispatches async commands with reactive loading', async () => {
+  it('dispatches async commands, and pending tracks the key', async () => {
     const asyncBus = createAsyncCommandBus();
     asyncBus.register('orderCreate', async () => {
       await new Promise(r => setTimeout(r, 10));
       return { orderId: 123 };
     });
 
-    const { dispatch, loading, lastError, dispose } = useVaporAsyncCommand(asyncBus);
+    const { dispatch, pending, dispose } = useVaporAsyncCommand(asyncBus);
+    const key = pending('orderCreate', { items: [1, 2] });
 
     const resultPromise = dispatch('orderCreate', { items: [1, 2] });
-    expect(loading.value).toBe(true);
+    expect(key.value).toBe(true);
 
     const result = await resultPromise;
-    expect(loading.value).toBe(false);
+    expect(key.value).toBe(false);
     expect(result).toSucceedWith({ orderId: 123 });
-    expect(lastError.value).toBeNull();
 
     dispose();
   });
 
-  it('captures async errors in lastError', async () => {
+  it('an async failure is the dispatch\'s own result', async () => {
     const asyncBus = createAsyncCommandBus();
     asyncBus.register('fail', async () => { throw new Error('async fail'); });
 
-    const { dispatch, loading, lastError, dispose } = useVaporAsyncCommand(asyncBus);
+    const { dispatch, dispose } = useVaporAsyncCommand(asyncBus);
 
     const result = await dispatch('fail', {});
-    expect(loading.value).toBe(false);
-    expect(result.ok).toBe(false);
-    expect(lastError.value?.message).toBe('async fail');
+    expect({ ok: result.ok, message: result.error?.message }).toEqual({ ok: false, message: 'async fail' });
 
     dispose();
   });
 
-  it('falls back to result.error ?? null when a failed result carries no error object', async () => {
-    // A non-throwing failure with no `error` field - distinct from the thrown-
-    // error case above, which always produces a truthy result.error.
-    const asyncBus = { dispatch: async () => ({ ok: false as const }) };
+  it('a dispatch that rejects is a failed result', async () => {
+    const boom = new Error('rejected');
+    const asyncBus = { dispatch: () => Promise.reject(boom) };
 
-    const { dispatch, lastError } = useVaporAsyncCommand(asyncBus as never); // a stub bus: only `dispatch` is exercised
-    const result = await dispatch('missingError', {});
-
-    expect(result.ok).toBe(false);
-    expect(lastError.value).toBeNull();
+    const { dispatch } = useVaporAsyncCommand(asyncBus as never); // a stub bus: only `dispatch` is exercised
+    expect(await dispatch('x', {})).toEqual({ ok: false, error: boom, value: undefined });
   });
 
   it('defaults to the shared command bus when no asyncBus is given', async () => {

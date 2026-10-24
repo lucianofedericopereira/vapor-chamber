@@ -3,10 +3,10 @@
  * vapor-chamber - example queued-command action.
  *
  * For commands that take more than a few hundred ms, dispatch a queued job
- * and return optimistic state. The client gets an immediate response with
- * `status: 'queued'` and receives a Reverb push when the job completes. To
- * follow the job instead, return `['accepted' => [...]]` (a 202 the client's
- * `pollWith` follows): docs/integrations/laravel.md, "Queued commands".
+ * and answer 202 Accepted (RFC 9110 15.3.3): the controller sends `Location`,
+ * the job's status monitor, and `Retry-After`. The client's dispatch resolves
+ * at once with an `Accepted`, whose `done` polls the monitor to the job's end.
+ * The monitor route: docs/integrations/laravel.md, "Queued commands".
  *
  * Register in config/vapor-chamber.php:
  *   'checkoutProcess' => \App\Actions\Order\ProcessCheckout::class,
@@ -39,13 +39,10 @@ class ProcessCheckout
             'status'          => 'queued',
         ]);
 
-        // Long-running work happens in the background. The HTTP response
-        // returns immediately; the client sees `status: 'queued'`.
+        // Long-running work happens in the background. The answer is the 202:
+        // the monitor answers 202 while the job runs, then `{ state }`.
         ProcessOrderJob::dispatch($order);
 
-        return [
-            'orderId' => $order->id,
-            'status'  => 'queued',
-        ];
+        return ['accepted' => ['location' => url("/jobs/{$order->id}"), 'retryAfter' => 2]];
     }
 }

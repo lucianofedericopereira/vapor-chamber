@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 /**
  * examples/vue-vapor-component.vue, compiled and mounted (handoff finding 19,
- * log s35.125): it renders, adds, and undoes and redoes through the store.
+ * log s35.125) as a VDOM component, the form its header names: it renders,
+ * adds, and undoes and redoes through the store. The Vapor mount runs in a
+ * Vite host (.probes/step-9-pickup.md, Batch 2); this project has no Vapor Vue.
  * Its package imports are pointed at the source, so the composables, the store
  * and the root share one shared bus, as they do in an app.
  */
@@ -17,7 +19,9 @@ const root = resolve(import.meta.dirname, '..');
 const src = (p: string) => resolve(root, 'src', p);
 
 async function mountExample() {
-  const sfc = readFileSync(resolve(root, 'examples/vue-vapor-component.vue'), 'utf8');
+  const vapor = readFileSync(resolve(root, 'examples/vue-vapor-component.vue'), 'utf8');
+  const sfc = vapor.replace('<script setup vapor lang', '<script setup lang');
+  expect(sfc).not.toBe(vapor); // the example is a Vapor component, and the attribute is all that differs
   const { descriptor } = parse(sfc, { filename: 'vue-vapor-component.vue' });
   const code = compileScript(descriptor, { id: 'vvc', inlineTemplate: true }).content
     .replace("from 'vapor-chamber/vue'", `from '${src('vue.ts')}'`)
@@ -72,6 +76,7 @@ describe('examples/vue-vapor-component.vue', () => {
   it('an empty todo is refused by the validator, and the message is shown', async () => {
     resetCommandBus();
     const { el, app } = await mountExample();
+    expect(el.querySelector('.error')).toBeNull(); // no box while there is nothing to say
     (el.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit'));
     await nextTick();
     expect(items(el)).toEqual([]);

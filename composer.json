@@ -1,0 +1,22 @@
+{
+  "name": "lucianofedericopereira/vapor-chamber",
+  "description": "vapor-chamber's Laravel side: the wire contract's development routes and test commands.",
+  "type": "library",
+  "license": "LGPL-2.1-only",
+  "require": {
+    "php": "^8.3",
+    "laravel/framework": "^13.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "VaporChamber\\": "php/src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "VaporChamber\\Contract\\ContractServiceProvider"
+      ]
+    }
+  }
+}

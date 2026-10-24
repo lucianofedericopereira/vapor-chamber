@@ -1,0 +1,166 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "batch-1",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc/batch",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "commands": [
+              {
+                "id": "1",
+                "command": "vcContractEcho",
+                "target": {},
+                "payload": {
+                  "n": 1
+                }
+              },
+              {
+                "id": "2",
+                "command": "vcContractFail",
+                "target": {},
+                "payload": {
+                  "status": 404,
+                  "code": "gone"
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "results": [
+              {
+                "id": "1",
+                "status": 200,
+                "headers": {},
+                "state": {
+                  "n": 1
+                }
+              },
+              {
+                "id": "2",
+                "status": 404,
+                "headers": {},
+                "problem": {
+                  "status": 404,
+                  "code": "gone",
+                  "detail": "Any text."
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.results[1].problem.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "batch-2",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc/batch",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "commands": [
+              {
+                "id": "1",
+                "command": "vcContractFail",
+                "target": {},
+                "payload": {
+                  "status": 429,
+                  "code": "busy",
+                  "retryAfter": 3
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "results": [
+              {
+                "id": "1",
+                "status": 429,
+                "headers": {
+                  "Retry-After": "3"
+                },
+                "problem": {
+                  "status": 429,
+                  "code": "busy",
+                  "detail": "Any text."
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.results[0].problem.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

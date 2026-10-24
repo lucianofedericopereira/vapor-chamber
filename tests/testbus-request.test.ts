@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
-import type { BusError, CommandResult, Plugin } from '../src/command-bus';
+import type { BusError, CommandResult } from '../src/command-bus';
 
 const code = (r: CommandResult): string | undefined => (r.error as BusError | undefined)?.code;
 
@@ -24,7 +24,7 @@ describe('TestBus request()/respond()', () => {
     const bus = createTestBus();
     const after = vi.fn();
     bus.onAfter(after);
-    bus.use((cmd, next) => { (cmd as any).seenByPlugin = true; return next(); });
+    bus.use({ started: (cmd) => { (cmd as any).seenByPlugin = true; } });
     bus.respond('q', (cmd) => `answer for ${cmd.target}`);
 
     const r = await bus.request('q', 42, { p: 1 });
@@ -87,8 +87,7 @@ describe('TestBus request()/respond()', () => {
   it('dispose() runs plugin dispose() like a real bus, and drops responders', async () => {
     const bus = createTestBus();
     const spy = vi.fn();
-    const passThrough: Plugin = (_c, next) => next();
-    bus.use(Object.assign(passThrough, { dispose: spy }));
+    bus.use({ settled: () => {}, dispose: spy });
     bus.respond('q', () => 'answer');
 
     bus.dispose();

@@ -6,6 +6,9 @@
   in-flight state, busy-while-in-flight (aria-disabled, so keyboard focus
   stays put), error class and announcement, optimistic rollback.
 
+  The cart is a store. A handler writes it through the store's own action, so
+  the count a button shows is the store's state, read with fieldRef.
+
   RUNNABLE, no build step. From the repo root:
 
       npm run build                       # once, so dist/ exists
@@ -20,8 +23,9 @@
   This page uses the vDOM plugin. In a <script setup vapor> component the same
   three directives come from vapor-chamber/directives as `vcCommandVapor`,
   `vcPayloadVapor` and `vcOptimisticVapor`. Import them aliased to the WHOLE camelCased directive name
-  - vVcCommand, vVcPayload, vVcOptimistic - or register them app-wide with
-  app.directive('vc-command', vcCommandVapor) and so on. A shorter alias
+  - vVcCommand, vVcPayload, vVcOptimistic - or register them app-wide on
+  createVaporChamberApp(App) from vapor-chamber/vapor, with
+  .directive('vc-command', vcCommandVapor) and so on. A shorter alias
   compiles and silently stops being used.
 -->
 <!DOCTYPE html>
@@ -81,7 +85,7 @@
     <h2>1 - dispatch on click</h2>
     <div class="row">
       <button type="button" v-vc-command="'cartAdd'">Add to cart</button>
-      <span class="count">{{ cart.count }} in cart</span>
+      <span class="count">{{ count }} in cart</span>
     </div>
     <p class="muted">The handler sleeps 400ms, so the loading state is actually visible.</p>
   </div>
@@ -119,7 +123,7 @@
       <button type="button" v-vc-command="'cartAddFailing'" v-vc-optimistic="bumpOptimistically">
         Add optimistically (fails -> rolls back)
       </button>
-      <span class="count">{{ cart.count }} in cart</span>
+      <span class="count">{{ count }} in cart</span>
     </div>
     <p class="muted">
       The count jumps immediately, then snaps back when the dispatch fails:
@@ -146,8 +150,8 @@
   // Straight from the built package - the same files npm publishes.
   import { createAsyncCommandBus, setCommandBus, logger } from '/dist/index.js';
   import { createDirectivePlugin } from '/dist/directives.js';
+  import { defineChamberStore, fieldRef } from '/dist/store.js';
 
-  const cart = reactive({ count: 0 });
   const log = reactive([]);
   const lastError = ref('');
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -156,10 +160,19 @@
   // .vc-loading window observable at all.
   const bus = createAsyncCommandBus();
 
+  // The cart is a store: its state changes only through its own action.
+  const useBasket = defineChamberStore('basket', {
+    state: () => ({ count: 0 }),
+    reducers: { add: (s, qty) => ({ count: s.count + qty }) },
+  });
+  const basket = useBasket(bus);
+  const count = fieldRef(basket, 'count');
+
+  // The handlers slow the answer down and write the cart through the store.
   bus.register('cartAdd', async (cmd) => {
     await sleep(400);
-    cart.count += cmd.payload?.qty ?? 1;
-    return { count: cart.count };
+    await basket.add(cmd.payload?.qty ?? 1);
+    return { count: count.value };
   });
 
   bus.register('cartAddFailing', async () => {
@@ -167,8 +180,8 @@
     throw new Error('Out of stock');
   });
 
-  bus.use(logger());
-  bus.on('*', (cmd, result) => {
+  bus.use(logger({ actions: ['cart*'] }));
+  bus.on('cart*', (cmd, result) => {
     const ts = new Date().toTimeString().slice(0, 8);
     log.unshift(`[${ts}] ${cmd.action} -> ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
     if (!result.ok) lastError.value = result.error?.message ?? 'failed';
@@ -185,10 +198,10 @@
       // Returning a function = the rollback the directive runs on failure.
       const bumpOptimistically = (cmd) => {
         const added = cmd.payload?.qty ?? 1;
-        cart.count += added;
-        return () => { cart.count -= added; };
+        basket.add(added);
+        return () => { basket.add(-added); };
       };
-      return { cart, log, qty, lastError, bumpOptimistically };
+      return { count, log, qty, lastError, bumpOptimistically };
     },
   })
     .use(createDirectivePlugin())

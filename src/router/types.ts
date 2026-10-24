@@ -60,8 +60,6 @@ export type RouteRecord = {
 /** Envelope for a delivered route table. */
 export type RoutesPayload = {
   base?: string;
-  /** Cache-busting tag (deploy version). */
-  version?: string;
   routes: readonly RouteRecord[];
 };
 

@@ -51,22 +51,22 @@ const REF_DIR = resolve(HERE, '__ref', 'history-redo');
 // biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/ledger.ts byte for byte, not templates
 const REVERT_FIX: Array<[string, string]> = [
   [
-    "      if (origin === 'redo' || origin === 'undo' || origin === 'sync' || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) {",
-    '      if (_replaying || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) {',
+    "      if (_unrecorded(cmd.meta?.origin) || !result.ok || result.value instanceof Accepted || skip?.(cmd) || (inside !== null && !inside(cmd.action))) {",
+    '      if (_replaying || !result.ok || result.value instanceof Accepted || skip?.(cmd) || (inside !== null && !inside(cmd.action))) {',
   ],
   ['  let inFlight = false;\n', '  let inFlight = false;\n  let _replaying = false;\n'],
   [
-    "        () => (handler ? onSettledValue(_undo(bus as LedgerBus, cmd)) : undefined));",
-    '        () => { _replaying = true; try { return handler ? handler(cmd) : undefined; } finally { _replaying = false; } });',
+    "      () => (handler ? onSettledValue(_undo(bus, cmd)) : undefined), 'Undo handler', cmd.action);",
+    "      () => { _replaying = true; try { return handler ? handler(cmd) : undefined; } finally { _replaying = false; } }, 'Undo handler', cmd.action);",
   ],
   [
-    "        () => (bus ? _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)) : undefined));",
-    '        () => { _replaying = true; try { return bus ? bus.dispatch(cmd.action, cmd.target, cmd.payload) : undefined; } finally { _replaying = false; } });',
+    "      () => _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)), 'Redo dispatch', cmd.action);",
+    "      () => { _replaying = true; try { return bus.dispatch(cmd.action, cmd.target, cmd.payload); } finally { _replaying = false; } }, 'Redo dispatch', cmd.action);",
   ],
 ];
 // biome-ignore-end lint/suspicious/noTemplateCurlyInString: end of the verbatim-source block
 
-const toSrc = (src: string): string => src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
+const toSrc = (src: string): string => src.replace(/from '\.\/([\w/-]+)'/g, "from '../../../src/$1'");
 
 /** The arm's ledger: shipped, or with the fix reverted. */
 function deriveLedger(revert: boolean): string {
@@ -105,7 +105,7 @@ const gc = (globalThis as { gc?: () => void }).gc;
 /** ns per command: sync dispatch with a recording history() installed. */
 function syncRecordNs(m: Mod, n: number): number {
   const bus = createCommandBus();
-  bus.use(m.history({ bus }));
+  m.history({ bus });
   bus.register('t', (c) => c.target);
   const t0 = process.hrtime.bigint();
   for (let j = 0; j < n; j++) bus.dispatch('t', j);
@@ -115,7 +115,7 @@ function syncRecordNs(m: Mod, n: number): number {
 /** ns per command: async dispatch with a recording history() installed. */
 async function asyncRecordNs(m: Mod, n: number): Promise<number> {
   const bus = createAsyncCommandBus();
-  bus.use(m.history({ bus: bus as any }));
+  m.history({ bus });
   bus.register('t', async (c) => c.target);
   const t0 = process.hrtime.bigint();
   for (let j = 0; j < n; j++) await bus.dispatch('t', j);
@@ -126,7 +126,6 @@ async function asyncRecordNs(m: Mod, n: number): Promise<number> {
 function syncCycleNs(m: Mod, n: number): number {
   const bus = createCommandBus();
   const h = m.history({ bus });
-  bus.use(h);
   bus.register('t', (c) => c.target, { undo: () => {} });
   bus.dispatch('t', 1);
   const t0 = process.hrtime.bigint();
@@ -159,8 +158,7 @@ describe('history() async-redo fix - real path A/B', () => {
     const cartRun = (m: Mod) => {
       const bus = createCommandBus();
       const cart = { count: 0 };
-      const h = m.history({ maxSize: 50, bus, filter: (cmd) => cmd.action === 'cartAdd', undoAction: 'cartUndo', redoAction: 'cartRedo' });
-      bus.use(h);
+      const h = m.history({ maxSize: 50, bus, actions: ['cartAdd'], undoAction: 'cartUndo', redoAction: 'cartRedo' });
       bus.register('cartAdd', () => { cart.count += 1; }, { undo: () => { cart.count -= 1; } });
       const seen: unknown[] = [];
       // `$undo` commands (s35.114) are not this A/B's subject; the arms differ there on purpose.
@@ -175,7 +173,6 @@ describe('history() async-redo fix - real path A/B', () => {
       const bus = createAsyncCommandBus();
       bus.register('add', async () => 'ok');
       const h = m.history({ bus: bus as any });
-      bus.use(h);
       await bus.dispatch('add', 1);
       h.undo();
       h.redo();

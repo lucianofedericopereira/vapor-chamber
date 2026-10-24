@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/mcp';
 
 ### busToMcpTools
 
-**Function** - [src/mcp.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L85)
+**Function** - [src/mcp.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L86)
 
 ```ts
 busToMcpTools(schema: BusSchema) => McpTool[]
@@ -48,7 +48,7 @@ const tools = busToMcpTools({
 
 ### createMcpHandler
 
-**Function** - [src/mcp.ts:188](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L188)
+**Function** - [src/mcp.ts:189](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L189)
 
 ```ts
 createMcpHandler(bus: McpBus, options?: McpHandlerOptions) => (message: unknown) => Promise<object | null>
@@ -89,7 +89,7 @@ const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 
 ### serveMcpStdio
 
-**Function** - [src/mcp.ts:387](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L387)
+**Function** - [src/mcp.ts:388](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L388)
 
 ```ts
 serveMcpStdio(bus: McpBus, options?: McpStdioOptions) => () => void
@@ -128,7 +128,7 @@ process.on('SIGTERM', dispose);
 
 ### McpBus
 
-**Type alias** - [src/mcp.ts:94](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L94)
+**Type alias** - [src/mcp.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L95)
 
 ```ts
 export type McpBus = {
@@ -141,7 +141,7 @@ Minimal bus surface the MCP layer needs - any schema bus (sync or async) satisfi
 
 ### McpHandlerOptions
 
-**Type alias** - [src/mcp.ts:99](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L99)
+**Type alias** - [src/mcp.ts:100](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L100)
 
 ```ts
 export type McpHandlerOptions = {
@@ -169,7 +169,7 @@ export type McpHandlerOptions = {
 
 ### McpStdioOptions
 
-**Type alias** - [src/mcp.ts:336](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L336)
+**Type alias** - [src/mcp.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L337)
 
 ```ts
 export type McpStdioOptions = McpHandlerOptions & {
@@ -197,7 +197,7 @@ export type McpStdioOptions = McpHandlerOptions & {
 
 ### McpTool
 
-**Type alias** - [src/mcp.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L44)
+**Type alias** - [src/mcp.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L45)
 
 ```ts
 export type McpTool = {
@@ -219,10 +219,10 @@ An MCP tool definition, as returned by the `tools/list` method.
 
 ### MCP_SERVER_VERSION
 
-**Variable** - [src/mcp.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L129)
+**Variable** - [src/mcp.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L130)
 
 ```ts
-MCP_SERVER_VERSION: "1.31.0"
+MCP_SERVER_VERSION: "1.32.0"
 ```
 
 Version reported by the MCP `initialize` handshake.

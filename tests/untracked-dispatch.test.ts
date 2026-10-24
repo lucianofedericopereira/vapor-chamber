@@ -21,7 +21,7 @@
  * built, so paying a per-dispatch runtime check for it is the wrong trade.
  *
  * The default therefore covers every path a component actually uses -
- * `useCommand`, `useCommandGroup`, `useSharedCommandState`, `useCommandQuery`,
+ * `useCommand`, `useCommandGroup`, `useCommandQuery`,
  * and the two Vapor ones, `defineVaporCommand` and `useVaporAsyncCommand` - at
  * zero cost to the core and zero bytes to consumers without Vue. The one gap,
  * calling a **raw bus** from inside an effect, has a documented one-line
@@ -44,7 +44,6 @@ import {
   resetCommandBus,
   useCommand,
   useCommandGroup,
-  useSharedCommandState,
   waitForVueDetection,
 } from '../src/chamber';
 import { defineVaporCommand, useVaporAsyncCommand } from '../src/chamber-vapor';
@@ -167,27 +166,6 @@ describe('composables untrack by default', () => {
     scope.stop();
   });
 
-  it('useSharedCommandState().dispatch does not leak', async () => {
-    const { shallowRef, watchEffect, nextTick, effectScope } = vue;
-    const bus = createCommandBus();
-    setCommandBus(bus);
-    const unrelated = shallowRef('a');
-    bus.register('probe', () => unrelated.value);
-
-    let runs = 0;
-    const scope = effectScope();
-    scope.run(() => {
-      const { dispatch } = useSharedCommandState({ bus });
-      watchEffect(() => { runs++; dispatch('probe', {}); });
-    });
-    await nextTick();
-    expect(runs).toBe(1);
-
-    unrelated.value = 'b';
-    await nextTick();
-    expect(runs).toBe(1);
-    scope.stop();
-  });
 
   it('the caller keeps its OWN dependencies - untracking is scoped to the dispatch', async () => {
     const { shallowRef, watchEffect, nextTick, effectScope } = vue;
@@ -230,7 +208,7 @@ describe('composables untrack by default', () => {
     scope.run(() => watchEffect(() => { runs++; observed = state.value; }));
     await nextTick();
 
-    // This is the shape useCommandState relies on. If untracking broke it,
+    // This is the shape command-driven state relies on. If untracking broke it,
     // reducer-driven state would stop reaching the UI entirely.
     const scope2 = vue.effectScope();
     scope2.run(() => { const { dispatch } = useCommand(); dispatch('bump' as never, {} as never); });

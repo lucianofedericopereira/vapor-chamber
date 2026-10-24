@@ -8,10 +8,11 @@
 # consecutive commits are listed: a change only moves the paths that run it
 # (rule 12), so this names what a measurement can attribute to it.
 set -euo pipefail
-OUT=$1
+# Absolute: the build runs after a `cd` into the worktree and writes its log here.
+mkdir -p "$1"
+OUT=$(cd "$1" && pwd)
 shift
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-mkdir -p "$OUT"
 WT="$OUT/.wt"
 prev=""
 for c in "$@"; do

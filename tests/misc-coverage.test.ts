@@ -160,7 +160,7 @@ describe('createReaction - target dispatch throws', () => {
     expect(() => bus.dispatch('src', {})).not.toThrow();
 
     expect(errorSpy).toHaveBeenCalledOnce();
-    expect(errorSpy.mock.calls[0]![0]).toMatch(/Reaction src -> dst error/);
+    expect(errorSpy.mock.calls[0]![0]).toMatch(/^\[vapor-chamber\] \[ FAIL \] reaction:failed:dispatch: Reaction "src" -> "dst" threw/);
     expect(errorSpy.mock.calls[0]![1]).toBeInstanceOf(Error);
     expect((errorSpy.mock.calls[0]![1] as Error).message).toBe('reaction target boom');
 
@@ -200,20 +200,18 @@ describe('buildFullUrl - nested object params', () => {
 // ---------------------------------------------------------------------------
 
 describe('useVaporAsyncCommand - dispatch rejects', () => {
-  it('catches a rejected dispatch, sets lastError, and returns { ok: false, error }', async () => {
+  it('catches a rejected dispatch and returns { ok: false, error }', async () => {
     const thrown = new Error('transport rejected');
     const bus = {
       dispatch: vi.fn(async () => { throw thrown; }),
     };
 
-    const { dispatch, loading, lastError } = useVaporAsyncCommand(bus);
+    const { dispatch } = useVaporAsyncCommand(bus);
 
     const result = await dispatch('orderCreate', { items: [1] });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toBe(thrown);       // line 263 return value
-    expect(lastError.value).toBe(thrown);    // line 262
-    expect(loading.value).toBe(false);       // finally still ran
+    expect(result.error).toBe(thrown);
     expect(bus.dispatch).toHaveBeenCalledOnce();
   });
 });

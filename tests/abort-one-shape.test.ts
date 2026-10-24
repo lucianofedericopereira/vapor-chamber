@@ -44,12 +44,12 @@ describe('a mid-flight rethrow of the dispatch signal reason', () => {
     expect((r.error as Error).cause).toBe(ac.signal.reason);
   });
 
-  it('from a plugin: core:aborted:dispatch, no plugin bug, no DEV "Fix the plugin"', async () => {
+  it('from a plugin part: core:aborted:dispatch, no plugin bug, no DEV "Fix the part"', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createAsyncCommandBus({ retry: false });
     const ac = new AbortController();
     bus.register('x', async () => 1);
-    bus.use(async (cmd) => abortedMidFlight(ac)(cmd) as never);
+    bus.use({ reuse: (cmd) => abortedMidFlight(ac)(cmd) as never });
     const r = await bus.dispatch('x', null, undefined, { signal: ac.signal });
     expect(r.error).toMatchObject({ name: 'AbortError', code: 'core:aborted:dispatch' });
     expect(conditionOf(r.error)).toBe('aborted');
@@ -86,11 +86,11 @@ describe('a mid-flight rethrow of the dispatch signal reason', () => {
     expect(failureCondition(r.error)).toBe('aborted');
   });
 
-  it('control: an unrelated plugin throw stays plugin:failed:plugin with its DEV message', async () => {
+  it('control: an unrelated part throw stays plugin:failed:plugin with its DEV message', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createAsyncCommandBus({ retry: false });
     bus.register('x', async () => 1);
-    bus.use(async () => { throw new Error('bug'); });
+    bus.use({ reuse: async () => { throw new Error('bug'); } });
     const r = await bus.dispatch('x', null, undefined, { signal: new AbortController().signal });
     expect((r.error as BusError).code).toBe('plugin:failed:plugin');
     expect(r.error!.name).toBe('BusError');

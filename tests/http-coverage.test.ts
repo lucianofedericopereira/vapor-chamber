@@ -122,7 +122,7 @@ describe('refreshCsrfOnce - failure path', () => {
       .mockResolvedValueOnce(mockResponse(419)) // original request -> 419
       .mockResolvedValueOnce(mockResponse(200, {})); // csrf-cookie GET succeeds
 
-    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
+    await expect(postCommand('/api/cmd', {}, { retry: false })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
   });
 });
 
@@ -153,8 +153,8 @@ describe('refreshCsrfOnce - coalescing', () => {
     vi.stubGlobal('fetch', smartFetch);
 
     const [r1, r2] = await Promise.all([
-      postCommand('/api/a', {}, { retry: 0 }),
-      postCommand('/api/b', {}, { retry: 0 }),
+      postCommand('/api/a', {}, { retry: false }),
+      postCommand('/api/b', {}, { retry: false }),
     ]);
 
     expect(r1.ok).toBe(true);
@@ -184,8 +184,8 @@ describe('refreshCsrfOnce - coalescing', () => {
     vi.stubGlobal('fetch', smartFetch);
 
     const results = await Promise.allSettled([
-      postCommand('/api/x', {}, { retry: 0 }),
-      postCommand('/api/y', {}, { retry: 0 }),
+      postCommand('/api/x', {}, { retry: false }),
+      postCommand('/api/y', {}, { retry: false }),
     ]);
 
     // Both reject - one from the primary refresh, one from the coalesced wait.
@@ -209,7 +209,7 @@ describe('parseRetryAfter - HTTP-date Retry-After', () => {
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(2500);
     const res = await promise;
 
@@ -223,7 +223,7 @@ describe('parseRetryAfter - HTTP-date Retry-After', () => {
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
@@ -238,7 +238,7 @@ describe('parseRetryAfter - HTTP-date Retry-After', () => {
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 2 } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
@@ -291,7 +291,7 @@ describe('sleepMs - abort during retry backoff', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(503, { message: 'busy' }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 3, signal: ctrl.signal });
+    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 4 }, signal: ctrl.signal });
     const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
 
     // Let the first fetch reject and enter the backoff sleep.
@@ -308,7 +308,7 @@ describe('sleepMs - abort during retry backoff', () => {
     (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
 
     vi.useFakeTimers();
-    const promise = createHttpClient().get('/api/q', { retry: 3, signal: ctrl.signal });
+    const promise = createHttpClient().get('/api/q', { retry: { maxAttempts: 4 }, signal: ctrl.signal });
     const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -401,7 +401,7 @@ describe('createHttpClient - network error retry', () => {
 
     vi.useFakeTimers();
     const http = createHttpClient();
-    const promise = http.get('/api/data', { retry: 1 });
+    const promise = http.get('/api/data', { retry: { maxAttempts: 2 } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
@@ -583,61 +583,26 @@ describe('cache.set at capacity (50 entries)', () => {
 });
 
 describe('cache.invalidate', () => {
-  it('removes entries whose URL (not the responseType prefix) matches a RegExp', () => {
+  it('removes entries whose URL (not the responseType prefix) matches', () => {
     const cache = createResponseCache();
     cache.set('json:/api/users/1', { id: 1 }, 60_000);
     cache.set('json:/api/users/2', { id: 2 }, 60_000);
     cache.set('json:/api/orders/1', { id: 1 }, 60_000);
 
-    cache.invalidate(/^\/api\/users/);
+    cache.invalidate((url) => url.startsWith('/api/users'));
 
     expect(cache.getAny('json:/api/users/1')).toBeNull();
     expect(cache.getAny('json:/api/users/2')).toBeNull();
     expect(cache.getAny('json:/api/orders/1')).not.toBeNull(); // untouched
   });
 
-  it('treats a plain string as a literal substring', () => {
-    const cache = createResponseCache();
-    cache.set('json:/api/orders/1', { id: 1 }, 60_000);
-    cache.invalidate('/api/orders');
-    expect(cache.getAny('json:/api/orders/1')).toBeNull();
-  });
-
   it('is a no-op when nothing matches', () => {
     const cache = createResponseCache();
     cache.set('json:/api/orders/1', { id: 1 }, 60_000);
-    cache.invalidate(/^\/api\/nothing-here/);
+    cache.invalidate((url) => url === '/api/nothing-here');
     expect(cache.getAny('json:/api/orders/1')).not.toBeNull();
   });
 
-  // Item 9: `new RegExp(pattern)` on a plain string threw on this library's
-  // OWN output - buildFullUrl serializes arrays as `ids[0]=`, so the key holds
-  // a literal `[`.
-  it('does not throw on a URL containing regex metacharacters', () => {
-    const cache = createResponseCache();
-    cache.set('json:/api/products?ids[0]=1&ids[1]=2', { ok: true }, 60_000);
-
-    expect(() => cache.invalidate('/api/products?ids[0]=1&ids[1]=2')).not.toThrow();
-    expect(cache.getAny('json:/api/products?ids[0]=1&ids[1]=2')).toBeNull();
-  });
-
-  it('matches a query string literally instead of treating ? as a quantifier', () => {
-    const cache = createResponseCache();
-    cache.set('json:/api/products?page=1', { page: 1 }, 60_000);
-    cache.set('json:/api/productsage=1', { decoy: true }, 60_000);
-
-    cache.invalidate('/api/products?page=1');
-
-    expect(cache.getAny('json:/api/products?page=1')).toBeNull();
-    // `?` as a quantifier made '/api/product' + 'sage=1' a match - it is not.
-    expect(cache.getAny('json:/api/productsage=1')).not.toBeNull();
-  });
-
-  it('warns in dev when an anchored string looks like an intended regex', () => {
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    createResponseCache().invalidate('^/api/users');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('literal'));
-  });
 });
 
 describe('cached responses are immutable in dev (item 8)', () => {

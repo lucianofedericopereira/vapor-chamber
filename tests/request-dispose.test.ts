@@ -2,7 +2,7 @@
  * dispose() settles waiting request()s at once, and the sync request()
  * honours its caller's signal.
  *
- * Before: dispose() cancelled only throttle timers. A request() still
+ * Before: dispose() cancelled only its own throttle timers. A request() still
  * waiting on its responder kept its timer (default 5000 ms), which held a
  * Node process open - SSR is dispose()'s named use case - and then resolved
  * as core:timeout:request, which the registry marks retryable, inviting a
@@ -141,7 +141,7 @@ describe('sync bus: request() honours the caller signal', () => {
     expect(result?.value).toBe('late'); // settled once; the abort reached nothing
   });
 
-  it('the sync command carries no signal - the four fields every sync command has', async ({ bus }) => {
+  it('the sync command carries no signal: its slot stays undefined, the five fields every command has', async ({ bus }) => {
     // The engine's own map check for this sits in tests/v8-shapes.test.ts.
     let requested: Command | undefined;
     bus.respond('q', (cmd) => { requested = cmd; return 'answer'; });
@@ -150,7 +150,8 @@ describe('sync bus: request() honours the caller signal', () => {
     const r = await bus.request('q', {}, undefined, { signal: caller.signal });
 
     expect(r.value).toBe('answer');
-    expect(Object.keys(requested!)).toEqual(['action', 'target', 'payload', 'meta']);
+    expect(Object.keys(requested!)).toEqual(['action', 'target', 'payload', 'meta', 'signal']);
+    expect(requested!.signal).toBeUndefined();
   });
 });
 

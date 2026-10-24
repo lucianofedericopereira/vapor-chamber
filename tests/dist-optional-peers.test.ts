@@ -10,6 +10,11 @@
  * in the browser, and a dev-server reload loop. `@vite-ignore` does not save
  * it, because the pre-bundled dep is re-analyzed.
  *
+ * `vue` is under the same rule. The root's probe was exempt until 36.F26, on
+ * the premise that an app pulling in a Vue library has Vue installed. The root
+ * has to work with no Vue in the tree, and the literal gave a Vue-less app a
+ * 500 under the Vite dev server (tests/root-no-vue-dev-server.test.ts).
+ *
  * The peer list is read from package.json, so marking a new peer optional
  * automatically puts it under this guard.
  */
@@ -21,33 +26,29 @@ import { requireDist } from './require-dist';
 const distDir = join(process.cwd(), 'dist');
 requireDist(existsSync(join(distDir, 'index.js')));
 
-/**
- * `vue` is deliberately exempt. Its literal is load-bearing, not an accident:
- * the Vue probe must be rewritten by the bundler into a real URL, because a
- * browser cannot resolve the bare specifier "vue" at runtime. Hiding it would
- * turn Vue detection off everywhere instead of protecting anyone - and an app
- * that pulls in a *Vue* library almost always has Vue installed. The rule
- * applies to peers whose absence must degrade silently.
- */
-const EXEMPT = new Set(['vue']);
-
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
 const optionalPeers: string[] = Object.entries(pkg.peerDependenciesMeta ?? {})
   .filter(([, meta]) => (meta as { optional?: boolean }).optional)
-  .map(([name]) => name)
-  .filter((name) => !EXEMPT.has(name));
+  .map(([name]) => name);
+
+/**
+ * The `<script>`-tag bundles. No bundler pre-bundles them from the package
+ * root, and their minifier inlines the probe's name back into a literal. On a
+ * page it is a bare specifier the browser cannot resolve, caught by the probe.
+ */
+const isIife = (file: string) => /\.iife(\.min)?\.js$/.test(file);
 
 function distFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) return distFiles(full);
-    return entry.isFile() && full.endsWith('.js') ? [full] : [];
+    return entry.isFile() && full.endsWith('.js') && !isIife(full) ? [full] : [];
   });
 }
 
 describe('dist - optional peers are never statically resolvable', () => {
-  it('declares at least one optional peer to guard', () => {
-    expect(optionalPeers).toContain('@vue/devtools-api');
+  it('declares the optional peers it guards', () => {
+    expect(optionalPeers).toEqual(expect.arrayContaining(['@vue/devtools-api', 'vue']));
   });
 
   /**
@@ -59,14 +60,13 @@ describe('dist - optional peers are never statically resolvable', () => {
   const OPT_IN = new Map([['@vue/devtools-api', ['dist/devtools.js']]]);
 
   it.each(optionalPeers)('never emits a literal dynamic import of %s', (peer) => {
-    // `import(` + optional comments/whitespace + the bare specifier as a literal.
-    const literalImport = new RegExp(
-      `import\\(\\s*(?:/\\*[\\s\\S]*?\\*/\\s*)*['"]${peer.replace(/[/@.]/g, '\\$&')}['"]`,
-    );
+    // `import(` + the bare specifier as a string or template literal. Comments
+    // go first: a magic comment may sit inside the call, and prose may quote one.
+    const literalImport = new RegExp(`import\\(\\s*['"\`]${peer.replace(/[/@.]/g, '\\$&')}['"\`]`);
 
     const allowed = OPT_IN.get(peer) ?? [];
     const offenders = distFiles(distDir)
-      .filter((file) => literalImport.test(readFileSync(file, 'utf8')))
+      .filter((file) => literalImport.test(readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')))
       .map((file) => file.slice(process.cwd().length + 1))
       .filter((file) => !allowed.includes(file));
 
@@ -74,5 +74,11 @@ describe('dist - optional peers are never statically resolvable', () => {
       offenders,
       `${peer} may only be statically imported from its opt-in subpath (${allowed.join(', ') || 'none'})`,
     ).toEqual([]);
+  });
+
+  it('the root probe tells webpack to leave its import alone', () => {
+    // webpack folds a module-scope `const` into a literal and resolves it.
+    const chamber = readFileSync(join(distDir, 'chamber.js'), 'utf8');
+    expect(chamber).toMatch(/import\(\s*\/\* webpackIgnore: true \*\/\s*\/\* @vite-ignore \*\/\s*VUE_PKG\s*\)/);
   });
 });

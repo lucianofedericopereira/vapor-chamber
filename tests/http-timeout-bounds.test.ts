@@ -91,7 +91,7 @@ describe('HTTP timeout option - bounds', () => {
     // retry: 0 isolates the timeout - a GET otherwise retries a timeout twice,
     // with jittered backoff, which would blur the moment being measured.
     const get = (timeout: number | undefined) => () =>
-      createHttpClient().get('/api/items', timeout === undefined ? { retry: 0 } : { retry: 0, timeout });
+      createHttpClient().get('/api/items', timeout === undefined ? { retry: false } : { retry: false, timeout });
 
     it('NaN waits the default instead of aborting at once', async () => {
       const { at, error } = await rejectionTime(get(Number.NaN), 30_001);

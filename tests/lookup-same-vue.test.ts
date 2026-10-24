@@ -89,8 +89,9 @@ describe('a Vite SSR build that inlines Vue, run in Node', () => {
         const c = scope.run(() => { const c = useCommand({ bus }); c.on('ping', () => { heard++; }); return c; });
         let runs = 0;
         const watcher = effectScope();
-        watcher.run(() => effect(() => { runs++; void c.loading.value; }));
-        c.loading.value = true;
+        const probe = c.pending('ping');
+        watcher.run(() => effect(() => { runs++; void probe.value; }));
+        probe.value = true;
         watcher.stop();
         // The control: the app's own state is seen by the app's own effect.
         let own = 0;

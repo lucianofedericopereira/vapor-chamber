@@ -8,6 +8,8 @@
  * (docs/contract.md rule 2), one reader for all of them.
  */
 import { DEV } from './dev';
+import { ERRORS_PAGE } from './error-registry';
+import { _report } from './report';
 
 /**
  * What went wrong, from a closed vocabulary the library owns (docs/contract.md 3). The
@@ -30,7 +32,7 @@ export type FailCode = `${Condition}:${string}`;
  * if (result.error instanceof BusError) {
  *   switch (result.error.code) {
  *     case 'core:missing:handler':          // register a handler
- *     case 'core:refused:hook':             // a before-hook cancelled it
+ *     case 'authGuard:unauthenticated:action': // a rule refused it
  *     case 'circuitBreaker:limited:action': // the circuit is open
  *   }
  * }
@@ -61,9 +63,6 @@ export type Fail = (code: FailCode, message: string, opts?: FailOptions) => BusE
 // else mints for 'app'.
 let mintOwner = 'app';
 
-/** A problem's `type`, plus its condition: one section of docs/errors.md each. */
-const PROBLEM_TYPE = 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#';
-
 export class BusError extends Error {
   // Private, so no holder can rewrite it: the owner is the wiring's, and the
   // condition (the retry verdict) is the raiser's. A private field is an
@@ -82,7 +81,7 @@ export class BusError extends Error {
     // one and the stack rule the wrong answer. DEV only, so the pattern folds
     // away with DEV in a production build.
     if (DEV && !/^(missing|already|conflict|invalid|refused|unauthenticated|limited|timeout|lost|aborted|exceeded|failed|unexpected|unknown):[^:]/.test(code)) {
-      console.warn(`[vapor-chamber] BusError code "${code}" is not condition:subject from the condition vocabulary (missing, invalid, refused, limited, timeout, failed, ...); conditionOf() and the async bus's retry cannot read it.`);
+      _report('warn', 'core:invalid:code', `BusError code "${code}" is not condition:subject from the condition vocabulary (missing, invalid, refused, limited, timeout, failed, ...); conditionOf() and the async bus's retry cannot read it.`);
     }
     // Only a bug (`failed`) keeps its stack. An expected refusal is control
     // flow, and V8's stack capture dominated its cost (docs/contract.md rule 4).
@@ -122,7 +121,7 @@ export class BusError extends Error {
    */
   toJSON(): Record<string, unknown> {
     const own = this.code.startsWith('remote:') ? this.context?.type : undefined;
-    return { ...this.context, type: own ?? PROBLEM_TYPE + this.code.split(':')[1], detail: this.message, code: this.code, action: this.action };
+    return { ...this.context, type: own ?? ERRORS_PAGE + this.code.split(':')[1], detail: this.message, code: this.code, action: this.action };
   }
 }
 
@@ -193,6 +192,8 @@ export function retryClass(e: unknown, condition: Condition | undefined = condit
   return condition === 'timeout' || condition === 'lost' || condition === 'unexpected' || condition === 'unknown' || (condition === 'failed' && !_isBug(e)) ? 'uncertain' : 'final';
 }
 
+/** @internal - attempts in total, the first included: the async bus's default `maxAttempts`, the http client's own. */
+export const _RETRY_ATTEMPTS = 3;
 /** @internal - the retry's base and cap in ms: the async bus's default `baseDelay` and `maxDelay`, the http client's own. */
 export const _RETRY_BASE_MS = 200;
 export const _RETRY_MAX_MS = 20_000;
@@ -236,7 +237,7 @@ export function _heldBack(e: unknown, declared: unknown, action: string, url?: s
   const subject = DEV ? (url === undefined ? `"${action}"` : `${action} "${url}"`) : '';
   if (DEV && !(warnedUnidentified ??= new Set()).has(lost + subject)) {
     warnedUnidentified.add(lost + subject);
-    console.warn(`[vapor-chamber] ${subject} is unidentified (${url === undefined ? 'no idempotency key, not declared idempotent' : 'no Idempotency-Key, not an idempotent method'}): the library cannot trace it to its effect. ${lost
+    _report('warn', 'core:missing:key', `${subject} is unidentified (${url === undefined ? 'no idempotency key, not declared idempotent' : 'no Idempotency-Key, not an idempotent method'}): the library cannot trace it to its effect. ${lost
       ? 'It got no reply and may have landed. It is not re-sent, and it cannot be confirmed or safely undone. Check its status on the server.'
       : `The server answered ${(e as BusError).code} with a wait, and it is not re-sent.`} ${url === undefined ? 'Key it (the idempotent plugin) or declare it idempotent (retry: { actionPolicies }).' : 'Send an Idempotency-Key header to let the client re-send it.'}`);
   }

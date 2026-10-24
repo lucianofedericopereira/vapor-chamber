@@ -181,7 +181,7 @@ describe('elements', () => {
   });
 
   it('a getter-only property throws on write in strict mode (SB-2)', () => {
-    'use strict';
+    // Strict mode by construction: a module's code is strict, no directive needed.
     const o = Object.defineProperty({}, 'state', { get: () => 1, enumerable: true });
     expect(() => { (o as { state: number }).state = 2; }).toThrow(TypeError);
   });

@@ -48,8 +48,8 @@ same thing. What no contract covers reads as `unknown`.
 `owner:condition:subject`
 
 - **owner**: `core`, a plugin's declared name, `app`, `remote` (a backend) or
-  `test`. A function that is not a plugin takes its feature's name: `ssr` for
-  `rehydrate()`, `schema` for `synthesize()`, `directive` for `v-vc-command`,
+  `test`. A function that is not a plugin takes its feature's name: `schema` for
+  `synthesize()`, `directive` for `v-vc-command`,
   `router` for the router.
 - **condition**: a small fixed vocabulary the library owns (section 3).
   Whether a failure is re-sent derives from it ([retry.md](./retry.md)).
@@ -90,28 +90,61 @@ only the members that carry something (tests/wire-contract.test.ts,
 tests/wire-envelope.test.ts).
 
 **The request.** One envelope on every wire: `{ id?, command, target,
-payload?, meta? }`. `id` appears where answers are multiplexed (a batch item,
-a WebSocket frame). `meta` appears only with a fact a backend can use:
-`idempotencyKey`, `correlationId`, `causationId`. A batch is `{ commands:
-[envelope, ...] }`. A single request also sends the `Idempotency-Key` header
-for standard tooling. The backend reads `meta`.
+payload?, meta?, headers? }`. `id` appears where answers are multiplexed (a
+batch item, a WebSocket frame). `meta` appears only with the command's own
+data a backend can use: `correlationId`, `causationId`. A command's HTTP
+metadata, its idempotency key, travels once: as the `Idempotency-Key` header
+when the request is that command, and as that name in its `headers` member
+when the command is multiplexed (OData JSON 4.01 19.1). The value is a
+Structured Field String, the key percent-encoded and quoted (cases idem-1 to
+idem-5). A batch is `{ commands: [envelope, ...] }`. A command asks for its
+answer with `Accept: application/json, application/problem+json`.
 
 | Answer | Shape |
 |---|---|
 | single command, success | 2xx `{ state, stores? }`, or `{ redirect }` |
+| single command, accepted, not done | 202 with `Location` (the job's status monitor) and `Retry-After?`. A GET of the monitor answers 202 while the job runs, then `{ state }` or `{ problem }` |
 | single command, failure | non-2xx, `application/problem+json`: `{ status, code, detail, errors?, ...params }` |
-| batch | 200 `{ results: [{ id, state, stores? } \| { id, redirect } \| { id, problem }] }`, each with `headers?` |
-| WebSocket frame | `{ id, state, stores? } \| { id, redirect } \| { id, problem }`, with `headers?` |
+| batch | 200 `{ results: [{ id, status, headers, state, stores? } \| { id, status, headers, redirect } \| { id, status, headers, problem }] }` |
+| WebSocket frame | `{ id, status, headers, state, stores? } \| { id, status, headers, redirect } \| { id, status, headers, problem }` |
+
+A 202 is the answer: the dispatch resolves at once with `{ ok: true, value }`,
+`value` an `Accepted`. Its `done` follows the monitor to the job's end (cases
+accepted-1 to accepted-4). RFC 9110 15.3.3 asks a 202's representation to
+point to a status monitor. 10.2.2 defines `Location` for 201 and 3xx only, so
+on a 202 it is a convention. A batched result carries its own 202 and
+`Location`, followed the same way (accepted-5).
 
 `stores` holds store states by store id. Each store with that id on the
 client's bus takes its state ([store.md](./store.md)).
+
+**Cache groups** (RFC 9875) say which reads a write made stale. A read's
+response names its groups in `Cache-Groups`, beside its `ETag`. A command's
+answer names the groups it changed in `Cache-Group-Invalidation`: on the
+response, or in a batched result's or a frame's `headers` member. Both are
+Structured Field Lists of Strings (`"cart", "stock"`). The client drops its
+cached reads in those groups and the router refreshes the ones on screen,
+when the transport sends through the app's client (`httpTransport({
+httpClient })`). `stores` stays the form with no request: the answer carries
+the new state (tests/cache-groups.test.ts, tests/router/cache-groups.test.ts).
+
+**A push** is what the server sends unasked: a name and data, the two fields
+of an SSE event (WHATWG HTML 9.2). Over SSE it is the event's type and its
+`data` as JSON. Over Echo it is the broadcast's name and payload. Over a
+WebSocket it is a frame `{ event, data }` with no `id`: a frame with an
+`id` is a reply. Each store state under the data's `stores` is written as a
+reply's is, then the event is emitted on the client's bus. A push is never
+dispatched, so it runs no plugin and goes back to no server
+(tests/inbound-push.test.ts).
 
 `errors` is `[{ pointer, detail }]`, the pointer into the envelope the client
 sent: `/payload/<field>`, or `/target/<field>` for a field of the target
 (RFC 6901, `~0` and `~1` escaped). FormBus maps a `/payload/` pointer to its
 field and leaves any other one, by design (src/form.ts:204-214).
-`type` and `title` are not sent: `code` is the identity, and `title` repeated
-the status's reason phrase. There is no `ok` flag. The presence of `problem`
+The reference controller sends no `type` or `title` of its own: `code` is the
+identity, and `title` repeated the status's reason phrase. A backend's own
+`type` and `title`, such as an exception's rendered problem, are kept (case
+core-8). There is no `ok` flag. The presence of `problem`
 is the failure, and an answer without one is the success. Its `state` is the
 value, absent when the handler returned nothing (JSON drops `undefined`). The
 single endpoint reads a 2xx the same way: a body `{ problem }` is that
@@ -120,14 +153,14 @@ cannot set the HTTP status still declares one.
 
 **The client reads, by contract.** A problem becomes
 `remote:<condition>:<code>`. The condition comes from the problem's `status`
-through the status table. A batched result has no HTTP status of its own, and
-the reference controller puts one in each problem. `detail` is the message,
-and everything else is `context`. `Retry-After` (RFC 9110), where a response
-carries it, goes to `context.retryIn`, never from the body. A batched result
-or a frame stands for its own response through its `headers`, as in an OData
-JSON batch response (OData JSON Format 4.01, section 19), so its
-`Retry-After` is read the same way (tests/batch-retry-after.test.ts). The
-owner is the transport's fact.
+through the status table. A batched result or a frame stands for its own
+response through its `status` and `headers`, as in an OData JSON batch
+response (OData JSON Format 4.01, section 19). Its `status` stands for the
+response's when the problem has none (tests/wire-envelope.test.ts). `detail`
+is the message, and everything else is `context`. `Retry-After` (RFC 9110),
+where a response carries it, goes to `context.retryIn`, never from the body.
+A batched result's or a frame's `Retry-After` is read the same way
+(tests/batch-retry-after.test.ts). The owner is the transport's fact.
 
 **The status table** (`conditionOfStatus`, src/failure.ts) says only what RFC
 9110 says of a status, plus the reference backend's 419
@@ -145,11 +178,18 @@ disagree.
 
 **Off the contract:**
 
-- A non-2xx whose body is not a problem is `remote:<condition of its
-  status>:http`.
+- A non-2xx whose body is not a JSON object (HTML, text, a list, none) is
+  `remote:<condition of its status>:http`.
+- A non-2xx JSON object with no `code`, such as Laravel's own `{ message,
+  errors }` from a middleware, is read as a problem with the code `problem`:
+  `remote:<condition>:problem`, its members in `context`, the message
+  `HTTP <status>` with no `detail`. Its `errors` reach no form field unless
+  they are `[{ pointer, detail }]` (tests/silent-csrf-refresh.test.ts,
+  tests/wire-contract.test.ts).
 - A batch that answers nothing for a command is `transport:lost:result`. It
   may have run.
-- A problem with no status is `remote:unknown:<code>`.
+- A problem with no status, on a result with none either, is
+  `remote:unknown:<code>`.
 - No response at all is the transport's own failure: `transport:lost:reply`
   (network), `transport:timeout:reply`, or `core:aborted:dispatch` for the
   caller's abort.
@@ -162,20 +202,45 @@ condition: its code, an HTTP status through the table, a timeout by name, a
 cancel (named `AbortError`, or the signal's own reason), the Fetch standard's
 `TypeError` for no response (`lost`), and `failed` for anything else, a
 handler's own throw included. The async bus re-sends by it
-([retry.md](./retry.md)). The bridges have no retry option of their own.
+([retry.md](./retry.md)). A transport has no retry option of its own.
 
 **The outbox** reads the same condition. The backend's 4xx verdict
 (`invalid`, `refused`, `missing`, `already`, `conflict`) drops a record. An
 expired session (`unauthenticated`, 401 and 419) keeps it. Of the failures
-the library or a plugin raised, only `invalid` drops it: a validator or
-schema gives the same answer on every flush. Anything else keeps it, and so
-does any answer that declares a wait.
+the library raised, only `invalid` drops it: it gives the same answer on
+every flush. Anything else keeps it, and so does any answer that declares a
+wait.
 
 **Kept, and why.** `{ state }` rather than the bare value: one inner shape
 for the single answer, a batched result and a frame, with room for
 `redirect`. `redirect` as a body member rather than a 3xx: a browser's
 `fetch` cannot read a 3xx's `Location`. 419 in the table: Laravel answers an
 expired CSRF token with it before any controller runs.
+
+**Checked on both sides.** This section's cases are data in
+scripts/contract-cases.mjs. `npm run docs` writes them as Pact V4 files in
+`contract/`, one per group: core, batch, redirect, stores, idempotency,
+accepted, middleware and gen. tests/wire-contract.test.ts replays them against the client
+over a real server. `node scripts/verify-contract.mjs --base <url>` (with `--against <git ref>`, that ref's files) replays
+them against a backend with `pact-verifier`, and exits non-zero on a failure.
+
+A backend passes `core`, and each group whose bridge or feature its app uses.
+`gen` is Laravel's own: its generated fixture action. `middleware` checks
+that an action's declared middleware runs, as a route's does: its limit
+spent, `throttle` answers 429 with `Retry-After`. In development the
+backend serves six test commands (`vcContractEcho`, `vcContractFail`,
+`vcContractValidate`, `vcContractAccepted`, `vcContractGen`,
+`vcContractThrottled`), a job monitor and a state route
+under `/api/vc/contract`. Laravel gets them from the Composer package
+`lucianofedericopereira/vapor-chamber` ([laravel.md](./integrations/laravel.md),
+"Check your backend").
+
+**A tab open across a deploy.** It runs a cached copy of the app, so its
+renewal is HTTP's: the document revalidates at its next load, and a chunk the
+deploy removed fails to load and hands that navigation to the browser
+([router.md](./router.md), `HARD_NAV_CODES`). A command it sends is answered
+by the server like any other: a refusal its validation makes, or a redirect
+to load the new build. The library adds nothing on the wire for it.
 
 ## 5. Ownership and the failure object
 

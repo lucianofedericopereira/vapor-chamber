@@ -38,7 +38,7 @@ describe('on a sealed bus', () => {
 describe('controls', () => {
   it('useSharedCommandState on a sealed bus, as released', () => {
     sealedBus();
-    expect(useSharedCommandState().isLoading('x').value).toBe(false);
+    expect(useSharedCommandState().pending('x').value).toBe(false);
   });
 
   it('on an unsealed bus nothing changes: still unsealed', () => {

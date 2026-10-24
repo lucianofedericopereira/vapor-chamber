@@ -1,14 +1,17 @@
 /** A write made while a store's write is delivered is delivered after it, in order, on both runtimes. Rationale at the end. */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { effect, effectScope, shallowRef } from 'vue';
 import { createCommandBus } from '../src/command-bus';
-import { createFastLane } from '../src/fast-lane';
 import { defineChamberStore as defineVue, fieldRef } from '../src/store';
 import { defineChamberStore as defineCore } from '../src/store/core';
+import { shareTabs } from '../src/store-share';
+import { listen, quiet } from './tabs-quiet';
 
 type C = { n: number };
 const state = (): C => ({ n: 0 });
 const reducers = { add: (s: C) => ({ n: s.n + 1 }) };
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as const) {
   describe(`${runtime} store: a write made during a delivery`, () => {
@@ -36,15 +39,20 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       cart.$dispose();
     });
 
-    it('a shared store sends the write made in a subscriber', () => {
-      const lane = createFastLane();
-      const sent: number[] = [];
-      lane.on('cart$state', (m: { ask?: true; state: C }) => { if (!m.ask) sent.push(m.state.n); });
-      const cart = (define as typeof defineCore)('cart', { state, reducers, share: lane })(createCommandBus());
+    it('a shared store sends the write made in a subscriber', async () => {
+      vi.stubGlobal('window', {}); // a page: shareTabs opens only where there are tabs
+      const name = `delivery-${define === defineCore ? 'core' : 'vue'}`;
+      const wire = listen(name);
+      const peer = (define as typeof defineCore)('cart', { state, reducers, share: shareTabs(name) })(createCommandBus());
+      const cart = (define as typeof defineCore)('cart', { state, reducers, share: shareTabs(name) })(createCommandBus());
+      await quiet(wire.heard);
       cart.$onField('n', (v) => { if (v === 1) cart.add(); });
       cart.add();
-      expect(sent).toEqual([1, 2]);
+      await quiet(wire.heard);
+      expect(peer.state.value.n).toBe(2);
       cart.$dispose();
+      peer.$dispose();
+      wire.close();
     });
   });
 }

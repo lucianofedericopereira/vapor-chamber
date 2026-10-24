@@ -14,11 +14,10 @@
 
 import { describe, expect } from 'vitest';
 import { MAX_TIMEOUT_MS, countOption } from '../src/bounds';
-import { history } from '../src/plugins-core';
 import { circuitBreaker, metrics } from '../src/plugins-extra';
 import { StreamParser } from '../src/stream-parser';
 import { it } from '../src/vitest';
-import { wired } from '../src/testing';
+import { history } from '../src/plugins-core';
 
 const NAN = Number('nope');
 
@@ -66,8 +65,7 @@ describe('countOption', () => {
 describe('the bounds that had silently ceased to exist', () => {
   it('history keeps its cap under a NaN maxSize (measured: 500 kept against 50)', ({ bus }) => {
     bus.register('x', () => 'ok');
-    const h = history({ maxSize: NAN });
-    bus.use(h);
+    const h = history({ bus, maxSize: NAN });
     for (let i = 0; i < 500; i++) bus.dispatch('x', {});
     expect(h.getState().past.length).toBe(50);
   });
@@ -126,16 +124,14 @@ describe('windows that never closed', () => {
 
   it('idempotent still collapses a repeat under a NaN ttl', async () => {
     const { idempotent } = await import('../src/plugins-extra');
-    const plugin = wired(idempotent({ ttl: Number('nope'), key: () => 'same' }));
+    const { createAsyncCommandBus } = await import('../src/command-bus');
+    const bus = createAsyncCommandBus({ retry: false });
     let runs = 0;
-    const run = () =>
-      plugin({ action: 'orderCreate', target: 1, meta: {} } as never, () => {
-        runs++;
-        return { ok: true, value: runs } as never;
-      });
+    bus.register('orderCreate', async () => ++runs);
+    bus.use(idempotent({ ttl: Number('nope'), key: () => 'same' }));
 
-    await run();
-    await run();
+    await bus.dispatch('orderCreate', 1);
+    await bus.dispatch('orderCreate', 1);
     // `now - cached.at < ttl` gates COLLAPSING, so a NaN window collapsed
     // nothing and every duplicate re-executed - the guarantee this plugin
     // exists for, silently absent.

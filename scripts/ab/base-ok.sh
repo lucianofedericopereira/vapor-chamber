@@ -29,4 +29,14 @@ if [ "$was" != "$now" ]; then
   echo "base $sha is ${was:-no} release, head is $now: the new release is the baseline, nothing to compare against"
   exit 1
 fi
+# A version already released (its tag is here: upstream tags `v1.31`, the
+# release steps write `vX.Y.Z`): a later commit on it lands no new release,
+# so there is nothing to measure (owner, log 36.32).
+short=${now%.*}
+for tag in "v$now" "v$short"; do
+  if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
+    echo "head is $now, already released (tag $tag): no new release, nothing to measure"
+    exit 1
+  fi
+done
 exit 0

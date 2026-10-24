@@ -20,6 +20,7 @@
  */
 
 import { DEV } from '../dev';
+import { _report } from '../report';
 import { dict } from '../dict';
 import { shallowRef } from 'vue';
 import { isRouterError, routerError } from './errors';
@@ -195,6 +196,9 @@ export function createEngine(ctx: EngineContext) {
         .then((fresh) => {
           const current = snapshot.value;
           if (current.location.fullPath !== to.fullPath) return; // navigated away - drop it
+          // The same object: a 304 kept the copy (decision B). No new
+          // snapshot, so nothing re-renders. tests/router/cache-groups.test.ts.
+          if (current.data.get(recordName) === fresh) return;
           setRouteData(recordName, fresh);
         })
         .catch(() => {
@@ -437,7 +441,7 @@ export function createEngine(ctx: EngineContext) {
       // ctx.onCommit and a throwing subscriber of the snapshot land here
       // after the commit.
       if (committed) {
-        console.error('[vapor-chamber-router] post-commit hook threw (logged, not fatal)', error);
+        _report('error', 'router:failed:commit', 'a post-commit hook or a snapshot subscriber threw; the navigation stands', error);
         return null;
       }
       if (cancelled() || isRouterError(error, 'router:aborted:navigation')) {
@@ -476,7 +480,7 @@ export function createEngine(ctx: EngineContext) {
    * - **Each hook is contained.** One throwing analytics hook must not wrap a
    *   committed navigation as `failed:component`, fire `ctx.onError`, and
    *   `revert()` the URL out from under a live snapshot. The bus's
-   *   `fanOutListeners` does it the same way (logs "Listener error", not fatal).
+   *   `fanOutListeners` does it the same way (reports core:failed:listener, not fatal).
    * - **A removal during the run skips the removed hook, never a neighbour.**
    *   The one-shot pattern (`const off = router.afterEach(() => { off(); ...
    *   })`, "scroll to top on this next navigation") marks its entry; nothing
@@ -493,7 +497,7 @@ export function createEngine(ctx: EngineContext) {
       try {
         entry.fn(to, from);
       } catch (error) {
-        console.error('[vapor-chamber-router] afterEach hook threw (logged, not fatal)', error);
+        _report('error', 'router:failed:hook', `an afterEach hook threw on "${to.fullPath}"; the navigation stands`, error, { path: to.fullPath });
       }
     }
   }
@@ -631,10 +635,11 @@ export function createEngine(ctx: EngineContext) {
     if (DEV) {
       const table = ctx.getTable();
       if (table && !table.getRecord(recordName)) {
-        console.warn(
-          `[vapor-chamber-router] setRouteData("${recordName}") - no route record by that name. ` +
+        _report('warn', 'router:missing:record',
+          `setRouteData("${recordName}"): no route record by that name. ` +
             'The value lands in the snapshot but no outlet reads it (useRouteData resolves by record name). ' +
             'Check the spelling against your route table.',
+          undefined, { record: recordName },
         );
       }
     }

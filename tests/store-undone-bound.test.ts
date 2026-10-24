@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { defineChamberStore } from '../src/store';
+import { history } from '../src/plugins-core';
 
 type Doc = { n: number };
 const useDoc = defineChamberStore('undoneBound', { state: (): Doc => ({ n: 0 }), reducers: { put: (_s: Doc, n: number) => ({ n }) }, undo: true });
@@ -19,7 +19,6 @@ describe('store undo - undone steps past the bound', () => {
   it('300 rounds of an action and its undo, then undo and redo still work', () => {
     const bus = createCommandBus();
     const h = history({ bus, maxSize: 1000 });
-    bus.use(h);
     const store = useDoc(bus);
     for (let i = 1; i <= 300; i++) {
       store.put(i);

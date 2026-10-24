@@ -1,66 +1,111 @@
-// A throwing subscriber on useSharedCommandState's opening writes fails the dispatch, leaves nothing lit; rationale at the end.
-import { beforeAll, describe, expect } from 'vitest';
+// A Vue subscriber that throws on a command-state write is logged; the dispatch runs and nothing stays lit. Rationale at the end.
+import { beforeAll, describe, expect, vi } from 'vitest';
 import { effect, isRef } from 'vue';
 import { createAsyncCommandBus, createCommandBus, useSharedCommandState, waitForVueDetection } from '../src/index';
 import { it } from '../src/vitest';
 
-/** Run a dispatch and keep both what it returned and what escaped it. */
-function attempt(run: () => unknown): { result: unknown; escaped: unknown } {
-  try {
-    return { result: run(), escaped: undefined };
-  } catch (e) {
-    return { result: undefined, escaped: e };
-  }
-}
-
-describe('useSharedCommandState: a throwing subscriber on its opening writes', () => {
+describe('useSharedCommandState: a subscriber that throws on a write', () => {
   beforeAll(async () => {
     await waitForVueDetection();
   });
 
-  for (const signalName of ['inFlight', 'isAnyLoading'] as const) {
-    it(`on \`${signalName}\`, sync bus: a failed result, the handler does not run, nothing stays lit`, () => {
+  for (const read of ['anyPending', 'pending'] as const) {
+    it(`on \`${read}\`, sync bus: the dispatch runs, the throw is logged, nothing stays lit`, () => {
       const bus = createCommandBus();
       let handled = 0;
       bus.register('save', () => { handled++; return 1; });
       const s = useSharedCommandState({ bus });
+      const flag = read === 'anyPending' ? s.anyPending : s.pending('save', null);
       // Control: the signal is Vue's, so the effect is a real subscriber.
-      expect(isRef(s[signalName])).toBe(true);
+      expect(isRef(flag)).toBe(true);
       const boom = new Error('subscriber threw');
-      const runner = effect(() => { if (s[signalName].value) throw boom; });
-      const { result, escaped } = attempt(() => s.dispatch('save', null));
+      const runner = effect(() => { if (flag.value) throw boom; });
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const result = bus.dispatch('save', null);
+      const logged = err.mock.calls.some((c) => c.includes(boom));
+      err.mockRestore();
       runner.effect.stop();
-      expect({ escaped, inFlight: s.inFlight.value, isAnyLoading: s.isAnyLoading.value, handled })
-        .toEqual({ escaped: undefined, inFlight: 0, isAnyLoading: false, handled: 0 });
-      expect(result).toEqual({ ok: false, error: boom });
-      expect(s.lastError.value).toBe(boom);
+      expect({ result, handled, lit: flag.value, any: s.anyPending.value, logged })
+        .toEqual({ result: { ok: true, value: 1, error: undefined }, handled: 1, lit: false, any: false, logged: true });
       s.dispose();
     });
   }
 
-  it('async bus: the failure is a promise, as its type says', async () => {
+  it('on the settle\'s write: logged, the next dispatch lights and settles the key again', () => {
+    const bus = createCommandBus();
+    bus.register('save', () => 1);
+    const s = useSharedCommandState({ bus });
+    const flag = s.pending('save', null);
+    const boom = new Error('subscriber threw');
+    let armed = false;
+    const seen: boolean[] = [];
+    const runner = effect(() => { seen.push(flag.value); if (armed && !flag.value) throw boom; });
+    armed = true;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = bus.dispatch('save', null);
+    armed = false;
+    const second = bus.dispatch('save', null);
+    const logged = err.mock.calls.some((c) => c.includes(boom));
+    err.mockRestore();
+    runner.effect.stop();
+    expect({ ok: first.ok && second.ok, seen, lit: flag.value, logged })
+      .toEqual({ ok: true, seen: [false, true, false, true, false], lit: false, logged: true });
+    s.dispose();
+  });
+
+  it("a key's throwing reader leaves anyPending right", () => {
+    const bus = createCommandBus();
+    let during = false;
+    bus.register('save', () => { during = any.value; return 1; });
+    const s = useSharedCommandState({ bus });
+    const flag = s.pending('save', null);
+    const any = s.anyPending;
+    const runner = effect(() => { if (flag.value) throw new Error('subscriber threw'); });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bus.dispatch('save', null);
+    err.mockRestore();
+    runner.effect.stop();
+    expect({ during, after: any.value }).toEqual({ during: true, after: false });
+    s.dispose();
+  });
+
+  it('on the failure\'s write: logged, the error still lands in the ring', () => {
+    const bus = createCommandBus();
+    bus.register('save', () => { throw new Error('refused'); });
+    const s = useSharedCommandState({ bus });
+    const boom = new Error('subscriber threw');
+    const runner = effect(() => { if (s.lastError.value) throw boom; });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = bus.dispatch('save', null);
+    const logged = err.mock.calls.some((c) => c.includes(boom));
+    err.mockRestore();
+    runner.effect.stop();
+    expect({ ok: result.ok, last: s.lastError.value?.message, ring: s.errors.value.length, logged }).toEqual({ ok: false, last: 'refused', ring: 1, logged: true });
+    s.dispose();
+  });
+
+  it('async bus: the dispatch settles with its own result', async () => {
     const bus = createAsyncCommandBus();
     bus.register('save', async () => 1);
     const s = useSharedCommandState({ bus });
     const boom = new Error('subscriber threw');
-    const runner = effect(() => { if (s.isAnyLoading.value) throw boom; });
-    const { result, escaped } = attempt(() => s.dispatch('save', null));
+    const runner = effect(() => { if (s.anyPending.value) throw boom; });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await bus.dispatch('save', null);
+    err.mockRestore();
     runner.effect.stop();
-    expect(escaped).toBeUndefined();
-    expect(result).toBeInstanceOf(Promise);
-    expect(await result).toEqual({ ok: false, error: boom });
-    expect(s.inFlight.value).toBe(0);
+    expect({ ok: result.ok, value: result.value, any: s.anyPending.value }).toEqual({ ok: true, value: 1, any: false });
     s.dispose();
   });
 });
 
 /*
- * Why this file exists. useSharedCommandState's dispatch wrote `inFlight` and
- * `isAnyLoading` before its try. A synchronous subscriber that throws on one
- * of them escaped the dispatch as a throw, and left the count at 1, so every
- * reader of `isAnyLoading` stayed lit. runDispatch had the same shape and was
- * fixed for useCommand (tests/rundispatch-throwing-subscriber.test.ts). This
- * is the same rule here: the throw is a failed result, the handler does not
- * run, and the count returns to 0. On an async bus the failure is a promise,
- * since the dispatch is typed as one there (log s35.222, s35.227).
+ * Why this file exists. The command state's writes once ran inside a
+ * before-hook or a dispatch wrapper, so a synchronous subscriber that threw on
+ * one cancelled the dispatch, or escaped it and left a count at 1, lighting
+ * every reader for ever (log s35.222, s35.227). It is now the bus's
+ * internal facts observer (plan 1.32 4.4) and catches its writes: the throw is
+ * logged, the dispatch runs with its own result, and the counts move before any write
+ * (`lit` and `ended` in src/command-state.ts), so the settle still ends the
+ * start.
  */

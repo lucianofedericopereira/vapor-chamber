@@ -14,7 +14,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { createFormBus } from '../src/form';
 
 const fields = { email: '', name: '', 'address.city': '' };
@@ -81,8 +81,7 @@ describe('FormBus - errors from outside its rules', () => {
     const problem = { status: 422, code: 'validation_failed', detail: 'The given data was invalid.',
       errors: [{ pointer: '/payload/email', detail: 'The email has already been taken.' }] };
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify(problem), { status: 422, headers: { 'content-type': 'application/problem+json' } }));
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }) });
     const form = createFormBus({
       fields,
       onSubmit: async (values) => { const r = await bus.dispatch('signup', {}, values); if (!r.ok) throw r.error; },

@@ -23,7 +23,7 @@ function reachesVue(file: string, seen = new Set<string>()): boolean {
   if (seen.has(file)) return false;
   seen.add(file);
   const src = readFileSync(file, 'utf8');
-  // A static import, or the root's lookup: import(/* @vite-ignore */ "vue").
+  // A static import, or a literal dynamic one. The root holds neither (36.F26).
   if (/from\s*["'](?:vue|@vue\/reactivity)["']|import\(\s*(?:\/\*[^*]*\*\/\s*)?["']vue["']\s*\)/.test(src)) return true;
   for (const m of src.matchAll(/(?:from|import)\s*["'](\.{1,2}\/[^"']+)["']/g)) {
     if (reachesVue(resolve(dirname(file), m[1]), seen)) return true;
@@ -73,9 +73,10 @@ describe('Vue 3.5', () => {
     expect(m.vapor).toBe(false);
   });
 
-  it('every entry that reaches Vue is checked, the 3.6-only ones included', () => {
+  it('every entry that reaches Vue is checked, the 3.6-only ones included, and the root is not one', () => {
     const keys = entries.map((e) => e.key);
-    for (const k of ['.', './vue', ...ONLY_36]) expect(keys).toContain(k);
+    for (const k of ['./vue', ...ONLY_36]) expect(keys).toContain(k);
+    expect(keys).not.toContain('.');
   });
 
   for (const { key, file } of entries) {
@@ -103,13 +104,14 @@ describe('Vue 3.5', () => {
         bus.register('read', () => src.value);
         const scope = effectScope();
         const c = scope.run(() => useCommand({ bus }));
+        const probe = c.pending('read');
         let wrapped = 0;
         let raw = 0;
         effect(() => { wrapped++; untracked(() => bus.dispatch('read', null)); });
         effect(() => { raw++; bus.dispatch('read', null); });
         src.value = 1;
         scope.stop();
-        return { loadingIsRef: isRef(c.loading), wrapped, raw };
+        return { loadingIsRef: isRef(probe), wrapped, raw };
       }
     `);
     const m = await import(pathToFileURL(built).href);

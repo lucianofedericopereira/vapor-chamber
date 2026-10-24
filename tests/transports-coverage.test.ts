@@ -1,12 +1,13 @@
 /**
  * Coverage-focused tests for src/transports.ts - drives the WebSocket bridge
- * reconnect / queue-expiry / maxQueueSize paths, the HTTP bridge redirect &
+ * reconnect paths and its own outbox (bound, expiry, a close mid-flush), the HTTP bridge redirect &
  * custom-httpClient error paths, the SSE bridge, and the Echo broadcast error
  * path. Reuses the same WS/SSE mock shapes as transports.test.ts.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import type { Accepted } from '../src/accepted';
 import { createAsyncCommandBus, createCommandBus } from '../src/index';
-import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge, createEchoBridge } from '../src/transports';
+import { httpTransport, wsTransport, createSseBridge, createEchoBridge } from '../src/transports';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -14,10 +15,10 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// createHttpBridge - redirect handling and custom httpClient !ok
+// httpTransport - redirect handling and custom httpClient !ok
 // ---------------------------------------------------------------------------
 
-describe('createHttpBridge redirect & error-body paths', () => {
+describe('httpTransport redirect & error-body paths', () => {
   it('calls onRedirect and resolves { ok:false } when body has a redirect', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -25,8 +26,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     }));
 
     const onRedirect = vi.fn();
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', onRedirect }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', onRedirect }) });
 
     const result = await bus.dispatch('go', {});
     expect(onRedirect).toHaveBeenCalledWith('/login');
@@ -40,8 +40,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
       json: async () => ({ redirect: '/checkout' }), text: async () => JSON.stringify(({ redirect: '/checkout' })),
     }));
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
 
     const result = await bus.dispatch('go', {});
     expect(result.ok).toBe(false);
@@ -68,8 +67,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     } as any;
 
     const onRedirect = vi.fn();
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient, onRedirect }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', httpClient, onRedirect }) });
 
     const result = await bus.dispatch('go', {});
     expect(onRedirect).not.toHaveBeenCalled();
@@ -88,8 +86,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
       }),
     } as any;
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', httpClient }) });
 
     const result = await bus.dispatch('save', {});
     expect(result).toFailWith('remote:invalid:validation_failed');
@@ -101,8 +98,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
       post: vi.fn().mockResolvedValue({ ok: false, status: 500, headers: {}, data: '<html>oops</html>' }),
     } as any;
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', httpClient }) });
 
     const result = await bus.dispatch('save', {});
     expect(result).toFailWith('remote:failed:http');
@@ -111,13 +107,13 @@ describe('createHttpBridge redirect & error-body paths', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createBatchingHttpBridge - same !ok-without-throwing gap as createHttpBridge
+// httpTransport with batch - same !ok-without-throwing gap as httpTransport
 // above, but on the batching bridge's own flush(): postCommand() throws on a
 // real HTTP failure, so this branch is likewise only reachable through a
 // custom httpClient that resolves { ok: false, ... } instead.
 // ---------------------------------------------------------------------------
 
-describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
+describe('httpTransport with batch - custom httpClient !ok path', () => {
   it('fails every queued command with the extracted message when httpClient resolves !ok', async () => {
     const httpClient = {
       post: vi.fn().mockResolvedValue({
@@ -128,8 +124,7 @@ describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
       }),
     } as any;
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) });
 
     const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
     expect(a.ok).toBe(false);
@@ -143,8 +138,7 @@ describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
       post: vi.fn().mockResolvedValue({ ok: false, status: 500, headers: {}, data: {} }),
     } as any;
 
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) });
 
     const result = await bus.dispatch('a', {});
     expect(result.ok).toBe(false);
@@ -193,7 +187,7 @@ class MockWebSocket {
   }
 }
 
-describe('createWsBridge reconnect / queue / overflow paths', () => {
+describe('wsTransport reconnect / queue / overflow paths', () => {
   let MockWS: typeof MockWebSocket;
   let sockets: MockWebSocket[];
 
@@ -214,173 +208,60 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     MockWebSocket.autoOpen = true;
   });
 
-  it('drops the oldest queued message on maxQueueSize overflow', async () => {
+  it("the transport's own outbox holds 100: the oldest past that settles coded, the rest go out in order", async () => {
     vi.useFakeTimers();
-    MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    MockWebSocket.autoOpen = false; // hold the socket CLOSED so sends are held
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, reconnect: false });
-    bus.use(ws);
-    ws.connect(); // socket exists but stays CLOSED
-
-    // First dispatch queues (queue length now 1 == maxQueueSize).
-    const first = bus.dispatch('cartAdd', { id: 1 });
-    // Second dispatch overflows -> oldest is shifted out and resolved as overflow error.
-    const second = bus.dispatch('cartUpdate', { id: 2 });
-
-    const firstResult = await first;
-    expect(firstResult.ok).toBe(false);
-    expect(firstResult.error?.message).toContain('queue overflow');
-    expect(firstResult.error?.message).toContain('cartAdd');
-
-    // The second (newer) message is still queued - flush it via reconnect.
-    sockets[0].open();
-    expect(sockets[0].sent.length).toBe(1);
-    const flushed = JSON.parse(sockets[0].sent[0]);
-    expect(flushed.command).toBe('cartUpdate');
-    sockets[0].receive({ id: flushed.id, state: null });
-    expect((await second).ok).toBe(true);
-  });
-
-  it('a request that times out WHILE QUEUED settles once, and overflow does not re-settle it', async () => {
-    // The per-request timer is armed before send(), so it runs while the entry
-    // sits in `queue` waiting for a socket. When it fires, settle() clears the
-    // timer, removes the id from `pending` and resolves - but leaves the entry
-    // in `queue`. A later overflow then shifts out an entry whose `pending`
-    // record is already gone.
-    //
-    // Asserted here as behaviour rather than as a branch: the request settles
-    // exactly once, with its TIMEOUT error (not an overflow error), and the
-    // later overflow neither throws nor re-resolves it. All of that holds
-    // regardless of whether settle() is later taught to remove the entry from
-    // `queue` as well.
-    vi.useFakeTimers();
-    MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
-
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
     ws.connect();
 
-    const first = bus.dispatch('cartAdd', { id: 1 });
+    const first = await bus.dispatch('cartAdd', { id: 0 });
+    for (let i = 1; i <= 100; i++) await bus.dispatch('cartUpdate', { id: i });
+    expect(await (first.value as Accepted).done).toFailWith('outbox:exceeded:queue');
+
+    sockets[0].open();
+    for (let i = 1; i <= 100; i++) {
+      await vi.advanceTimersByTimeAsync(0);
+      const frame = JSON.parse(sockets[0].sent[i - 1]);
+      expect([frame.command, frame.target.id]).toEqual(['cartUpdate', i]);
+      sockets[0].receive({ id: frame.id, state: null });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.outbox.pending.value).toBe(0);
+  });
+
+  it('a command held past the reply timeout settles once, coded, and is never sent', async () => {
+    vi.useFakeTimers();
+    MockWebSocket.autoOpen = false;
+
+    const ws = wsTransport({ url: 'ws://localhost', timeout: 50, reconnect: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
+    ws.connect();
+
+    const held = await bus.dispatch('cartAdd', { id: 1 });
     let settledCount = 0;
-    const firstTracked = first.then((r) => { settledCount++; return r; });
-
-    // Time out while still queued.
+    const done = (held.value as Accepted).done.then((r) => { settledCount++; return r; });
     await vi.advanceTimersByTimeAsync(60);
-    const firstResult = await firstTracked;
-    expect(firstResult.ok).toBe(false);
-    expect(firstResult.error?.message).toContain('timed out');
-    expect(firstResult.error?.message).not.toContain('overflow');
-    expect(settledCount).toBe(1);
+    expect(await done).toFailWith('outbox:timeout:queue');
+    expect(ws.outbox.pending.value).toBe(0); // its slot is free
 
-    // Now overflow. The dead entry is what gets dropped; this must not throw,
-    // and must not resolve the already-settled promise a second time.
-    expect(() => { void bus.dispatch('cartUpdate', { id: 2 }); }).not.toThrow();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(settledCount).toBe(1); // still exactly one settle
-
-    // The live request is the one that survives to be flushed.
+    // A live command held after it is the one sent when the socket opens.
+    const live = await bus.dispatch('cartUpdate', { id: 2 });
     sockets[0].open();
-    const sent = sockets[0].sent.map((raw: string) => JSON.parse(raw).command);
-    expect(sent).toEqual(['cartUpdate']); // the timed-out one is never sent
-  });
-
-  it('a settled request stops occupying a queue slot (maxQueueSize counts LIVE requests)', async () => {
-    // The reason settle() now removes the entry from `queue` as well. Before,
-    // a timed-out request kept its slot until an overflow or a flush evicted
-    // it, so maxQueueSize bounded "entries ever queued" rather than "requests
-    // still waiting" - with maxQueueSize: 1 a single dead entry could evict a
-    // live one. Nothing was lost (flushQueue's elapsed check stopped stale
-    // sends), but two mechanisms owned the same fact.
-    vi.useFakeTimers();
-    MockWebSocket.autoOpen = false;
-
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
-    bus.use(ws);
-    ws.connect();
-
-    const doomed = bus.dispatch('cartAdd', { id: 1 });
-    await vi.advanceTimersByTimeAsync(60); // times out while queued -> slot freed
-    expect((await doomed).error?.message).toContain('timed out');
-
-    // With the slot freed, this live request does NOT evict anything...
-    const live = bus.dispatch('cartUpdate', { id: 2 });
-    let overflowed = false;
-    void live.then((r) => { if (!r.ok && /overflow/.test(String(r.error?.message))) overflowed = true; });
     await vi.advanceTimersByTimeAsync(0);
-    expect(overflowed).toBe(false);
-
-    // ...and it is still there to be flushed when the socket opens.
-    sockets[0].open();
-    const sent = sockets[0].sent.map((raw: string) => JSON.parse(raw).command);
-    expect(sent).toEqual(['cartUpdate']);
+    expect(sockets[0].sent.map((raw: string) => JSON.parse(raw).command)).toEqual(['cartUpdate']);
     sockets[0].receive({ id: JSON.parse(sockets[0].sent[0]).id, state: null });
-    expect((await live).ok).toBe(true);
-  });
-
-  it('rejects queued messages that expired while disconnected, on reconnect', async () => {
-    vi.useFakeTimers();
-    MockWebSocket.autoOpen = false; // hold CLOSED so the message queues
-
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', timeout: 5_000, reconnect: false });
-    bus.use(ws);
-    ws.connect();
-
-    const promise = bus.dispatch('staleCmd', { id: 1 });
-
-    // Advance past the per-message timeout while still disconnected. The
-    // dispatch-level timeout fires first (also 5s) and settles the promise, so
-    // assert the timeout error, then prove flushQueue's expiry branch runs.
-    await vi.advanceTimersByTimeAsync(6_000);
-
-    // Now reconnect -> flushQueue sees elapsed >= timeout and rejects (no send).
-    sockets[0].open();
-    expect(sockets[0].sent.length).toBe(0); // expired message was NOT sent
-
-    const result = await promise;
-    expect(result.ok).toBe(false);
-  });
-
-  it('flushQueue resolves a still-pending expired queued message on reconnect', async () => {
-    // The queued item's timeout equals the dispatch-level wsTimeout, so to hit
-    // the inner expiry branch the pending entry must still be alive
-    // when flushQueue runs. We advance the *wall clock* past expiry (so
-    // elapsed >= timeout) WITHOUT firing the pending dispatch setTimeout, then
-    // open the socket synchronously so flushQueue sees a live pending request.
-    vi.useFakeTimers();
-    const t0 = Date.now();
-    vi.setSystemTime(t0);
-    MockWebSocket.autoOpen = false;
-
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', timeout: 5_000, reconnect: false });
-    bus.use(ws);
-    ws.connect();
-
-    const promise = bus.dispatch('expireMe', { id: 7 });
-
-    // Move the clock past the 5s queued-message timeout without advancing the
-    // timer queue - the dispatch timeout callback has NOT run, so pending still
-    // holds this id.
-    vi.setSystemTime(t0 + 6_000);
-
-    sockets[0].open(); // flushQueue: elapsed (6000) >= timeout (5000) -> 329-331 fire
-    expect(sockets[0].sent.length).toBe(0); // expired -> NOT sent
-
-    const result = await promise;
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toContain('expired');
-    expect(result.error?.message).toContain('expireMe');
+    expect((await (live.value as Accepted).done).ok).toBe(true);
+    expect(settledCount).toBe(1);
   });
 
   it('schedules a reconnect and calls connect() again after backoff delay', async () => {
     vi.useFakeTimers();
 
     const onConnect = vi.fn();
-    const ws = createWsBridge({
+    const ws = wsTransport({
       url: 'ws://localhost',
       reconnect: true,
       reconnectDelay: 1000,
@@ -408,7 +289,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
   it('disconnect() clears a pending reconnect timer', async () => {
     vi.useFakeTimers();
 
-    const ws = createWsBridge({
+    const ws = wsTransport({
       url: 'ws://localhost',
       reconnect: true,
       reconnectDelay: 1000,
@@ -434,7 +315,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
   it('invokes onError when the socket errors', async () => {
     vi.useFakeTimers();
     const onError = vi.fn();
-    const ws = createWsBridge({ url: 'ws://localhost', onError });
+    const ws = wsTransport({ url: 'ws://localhost', onError });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -447,7 +328,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('reconnect: false - an unintentional close never schedules a reconnect', async () => {
     vi.useFakeTimers();
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
     ws.connect();
     await vi.runAllTimersAsync();
     expect(sockets.length).toBe(1);
@@ -466,7 +347,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     // successful connection, so testing the cap needs CONSECUTIVE failures
     // with no open in between.
     MockWebSocket.autoOpen = false;
-    const ws = createWsBridge({
+    const ws = wsTransport({
       url: 'ws://localhost',
       reconnect: true,
       reconnectDelay: 10,
@@ -496,7 +377,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('connect() is a no-op while a socket is already CONNECTING/OPEN', async () => {
     vi.useFakeTimers();
-    const ws = createWsBridge({ url: 'ws://localhost' });
+    const ws = wsTransport({ url: 'ws://localhost' });
     ws.connect();
     expect(sockets.length).toBe(1);
 
@@ -514,21 +395,20 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('re-queues the remainder of a flush if the socket closes mid-loop', async () => {
+  it('a socket closing mid-flush keeps the rest held, sent on the next open', async () => {
     vi.useFakeTimers();
-    MockWebSocket.autoOpen = false; // hold socket CLOSED so both dispatches queue
+    MockWebSocket.autoOpen = false; // hold the socket CLOSED so both are held
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
     ws.connect();
 
-    const first = bus.dispatch('cartAdd', { id: 1 });
-    const second = bus.dispatch('cartUpdate', { id: 2 });
+    const first = await bus.dispatch('cartAdd', { id: 1 });
+    const second = await bus.dispatch('cartUpdate', { id: 2 });
 
-    // Simulate the socket dying mid-flush: the first send "succeeds" but flips
-    // the socket CLOSED as a side effect, so flushQueue's loop must re-queue
-    // the second item rather than send it into a dead socket or drop it.
+    // The first send "succeeds" but flips the socket CLOSED as a side effect:
+    // the second is refused unsent (`transport:limited:socket`), and the
+    // outbox keeps it rather than send it into a dead socket or drop it.
     const realSend = sockets[0].send.bind(sockets[0]);
     let sendCount = 0;
     sockets[0].send = (data: string) => {
@@ -537,29 +417,31 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
       if (sendCount === 1) sockets[0].readyState = MockWebSocket.CLOSED;
     };
 
-    sockets[0].open(); // readyState -> OPEN, fires onopen -> flushQueue()
-    expect(sockets[0].sent.length).toBe(1); // only the first item got out
+    sockets[0].open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets[0].sent.length).toBe(1);
     const sentFirst = JSON.parse(sockets[0].sent[0]);
     expect(sentFirst.command).toBe('cartAdd');
     sockets[0].receive({ id: sentFirst.id, state: null });
-    expect((await first).ok).toBe(true);
+    expect((await (first.value as Accepted).done).ok).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.outbox.pending.value).toBe(1);
 
-    // The second item was re-queued, not lost - a later open flushes it.
     sockets[0].open();
+    await vi.advanceTimersByTimeAsync(0);
     expect(sockets[0].sent.length).toBe(2);
     const sentSecond = JSON.parse(sockets[0].sent[1]);
     expect(sentSecond.command).toBe('cartUpdate');
     sockets[0].receive({ id: sentSecond.id, state: null });
-    expect((await second).ok).toBe(true);
+    expect((await (second.value as Accepted).done).ok).toBe(true);
 
     ws.disconnect();
   });
 
   it('a problem with no detail says its status', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -575,7 +457,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('a stale close from a superseded socket does not null out the current one', async () => {
     vi.useFakeTimers();
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: true, reconnectDelay: 10, maxReconnects: 5 });
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: true, reconnectDelay: 10, maxReconnects: 5 });
     ws.connect();
     await vi.runAllTimersAsync();
     expect(sockets.length).toBe(1);
@@ -602,9 +484,8 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('pre-flight abort resolves immediately without ever sending', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -619,9 +500,8 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('a late timeout after the response already settled is a no-op', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
-    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false, timeout: 50 });
-    bus.use(ws);
+    const ws = wsTransport({ url: 'ws://localhost', reconnect: false, timeout: 50 });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false, transport: ws });
     ws.connect();
     await vi.runAllTimersAsync();
 
@@ -741,7 +621,7 @@ describe('createEchoBridge broadcast error logging', () => {
 
     expect(() => echo._channels.orders._fire('OrderShipped', { id: 1 })).not.toThrow();
     expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining('Echo broadcast error'),
+      expect.stringContaining('transport:failed:onBroadcast'),
       expect.any(Error),
     );
   });
@@ -766,14 +646,14 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     AbortSignal.any = undefined;
     try {
       okFetch();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(
-        createHttpBridge({
+      const bus = createAsyncCommandBus({
+        retry: false,
+        transport: httpTransport({
           endpoint: '/api',
           scopeController: new AbortController(),
           signal: new AbortController().signal, // both present -> merge site
         }),
-      );
+      });
       const result = await bus.dispatch('act', {});
       expect(result.ok).toBe(true);
     } finally {
@@ -787,8 +667,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     AbortSignal.any = undefined;
     try {
       okFetch();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: new AbortController().signal }) });
       // cmd.signal AND effectiveSignal both present -> the second merge site.
       const result = await bus.dispatch('act', {}, undefined, { signal: new AbortController().signal });
       expect(result.ok).toBe(true);
@@ -816,14 +695,15 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
           };
         }),
       );
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(
-        createBatchingHttpBridge({
+      const bus = createAsyncCommandBus({
+        retry: false,
+        transport: httpTransport({
           endpoint: '/api/batch',
           scopeController: new AbortController(),
           signal: new AbortController().signal,
+          batch: {},
         }),
-      );
+      });
       // Assert the RESULT, not merely that we got here. The previous form was
       // `.catch(() => {})` followed by `expect(true).toBe(true)`: if the
       // fallback merge threw, the catch swallowed it, the assertion still
@@ -840,14 +720,10 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) , text: async () => JSON.stringify(({ state: 1 }))});
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus({ retry: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api' }) });
     // Stamp the key the `idempotent` plugin would normally set, so the bridge
     // takes the `idemKey ? {...} : headers` TRUE arm.
-    bus.use((cmd, next) => {
-      if (cmd.meta) cmd.meta.idempotencyKey = 'key-123';
-      return next();
-    }, { priority: 300 });
-    bus.use(createHttpBridge({ endpoint: '/api' }));
+    bus.use({ started: (cmd) => { if (cmd.meta) cmd.meta.idempotencyKey = 'key-123'; } });
 
     const result = await bus.dispatch('act', {});
     expect(result.ok).toBe(true);

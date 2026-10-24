@@ -20,13 +20,13 @@ describe('dispose twice', () => {
   it('control: one dispose per holder, a later holder keeps tracking', async () => {
     const { bus, release } = held();
     const a = useSharedCommandState({ bus });
-    a.isLoading('siteCreate');
+    a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     a.dispose();
     const b = useSharedCommandState({ bus });
     release();
     await p;
-    const flag = b.isLoading('quick');
+    const flag = b.pending('quick');
     const q = bus.dispatch('quick', undefined);
     expect(flag.value).toBe(true);
     await q;
@@ -37,14 +37,14 @@ describe('dispose twice', () => {
     const { bus, release } = held();
     const scope = effectScope();
     const a = scope.run(() => useSharedCommandState({ bus }))!;
-    a.isLoading('siteCreate');
+    a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     a.dispose();
     scope.stop(); // the auto-cleanup calls dispose again
     const b = useSharedCommandState({ bus });
     release();
     await p;
-    const flag = b.isLoading('quick');
+    const flag = b.pending('quick');
     const q = bus.dispatch('quick', undefined);
     expect(flag.value).toBe(true);
     await q;
@@ -72,7 +72,7 @@ describe('dispose twice', () => {
  * calls it twice. Each call took the holder out of refCount again.
  * Mid-flight (the second test): refCount went to -1, the next holder brought
  * it to 0, and the settle that ended the last command released the entry
- * under that holder; its isLoading() never lit again (before-hooks 0).
+ * under that holder; its pending() never lit again (before-hooks 0).
  * Nothing in flight (the third test, older than B3): the second call deleted
  * the NEWER holder's entry from the map, so the holder after it built a
  * second entry: two on('*') observers, two error lists. dispose() now counts

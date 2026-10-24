@@ -240,7 +240,7 @@ describe('createHttpClient - retry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.post('/api/cmd', { qty: -1 }, { retry: 2 })).rejects.toMatchObject({
+    await expect(http.post('/api/cmd', { qty: -1 }, { retry: { maxAttempts: 3 } })).rejects.toMatchObject({
       context: { status: 422 },
     });
     expect(attempts).toBe(1); // was 3 - the mutation was re-sent twice
@@ -254,7 +254,7 @@ describe('createHttpClient - retry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.get('/api/missing', { retry: 2 })).rejects.toThrow();
+    await expect(http.get('/api/missing', { retry: { maxAttempts: 3 } })).rejects.toThrow();
     expect(attempts).toBe(1); // was 3 - every backoff burned before surfacing
   });
 
@@ -267,7 +267,7 @@ describe('createHttpClient - retry', () => {
     });
 
     const http = createHttpClient();
-    const res = await http.post('/api/cmd', {}, { retry: 2 });
+    const res = await http.post('/api/cmd', {}, { retry: { maxAttempts: 3 } });
     expect(res.ok).toBe(true);
     expect(attempts).toBe(3);
   });
@@ -296,7 +296,7 @@ describe('createHttpClient - timeout retry', () => {
 
     vi.useFakeTimers();
     const http = createHttpClient();
-    const promise = http.get('/api/slow', { timeout: 100, retry: 1 });
+    const promise = http.get('/api/slow', { timeout: 100, retry: { maxAttempts: 2 } });
     await vi.advanceTimersByTimeAsync(3000);
     const res = await promise;
 
@@ -313,7 +313,7 @@ describe('createHttpClient - timeout retry', () => {
 
     vi.useFakeTimers();
     const http = createHttpClient();
-    const promise = http.get('/api/slow', { timeout: 50, retry: 1 });
+    const promise = http.get('/api/slow', { timeout: 50, retry: { maxAttempts: 2 } });
     const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:timeout:reply' });
     await vi.advanceTimersByTimeAsync(3000);
     await assertion;
@@ -423,21 +423,6 @@ describe('createHttpClient - cache', () => {
     expect(fetchCount).toBe(2);
   });
 
-  it('invalidateCache() removes matching entries', async () => {
-    let fetchCount = 0;
-    (globalThis.fetch as any).mockImplementation(async () => {
-      fetchCount++;
-      return jsonResponse(200, { n: fetchCount });
-    });
-
-    const http = createHttpClient();
-
-    await http.get('/api/data', { cache: true, dedupe: false });
-    http.invalidateCache(/data/);
-    await http.get('/api/data', { cache: true, dedupe: false });
-
-    expect(fetchCount).toBe(2);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -509,7 +494,7 @@ describe('createHttpClient - serveStaleOnError', () => {
     await http.get('/api/thing', { cache, dedupe: false });
     await new Promise((r) => setTimeout(r, 10)); // entry expires but is retained
 
-    const res = await http.get('/api/thing', { cache, dedupe: false, retry: 0 });
+    const res = await http.get('/api/thing', { cache, dedupe: false, retry: false });
 
     expect(res.servedOnError).toBe(true);
     expect(res.stale).toBe(true);
@@ -541,8 +526,8 @@ describe('createHttpClient - serveStaleOnError', () => {
     await http.get('/api/dedupe-stale', { cache, dedupe: false });
     await new Promise((r) => setTimeout(r, 10)); // entry expires but is retained
 
-    const leader = http.get('/api/dedupe-stale', { cache, retry: 0 });
-    const follower = http.get('/api/dedupe-stale', { cache, retry: 0 });
+    const leader = http.get('/api/dedupe-stale', { cache, retry: false });
+    const follower = http.get('/api/dedupe-stale', { cache, retry: false });
 
     await new Promise((r) => setTimeout(r, 0));
     release?.();
@@ -568,7 +553,7 @@ describe('createHttpClient - serveStaleOnError', () => {
     await http.get('/api/biz', { cache, dedupe: false });
     await new Promise((r) => setTimeout(r, 10));
 
-    await expect(http.get('/api/biz', { cache, dedupe: false, retry: 0 })).rejects.toThrow();
+    await expect(http.get('/api/biz', { cache, dedupe: false, retry: false })).rejects.toThrow();
   });
 
   it('expired entries stay a plain miss without the flag', async () => {

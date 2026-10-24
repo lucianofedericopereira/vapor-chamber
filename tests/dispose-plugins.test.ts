@@ -3,16 +3,16 @@
  *
  * Before: the JSDoc promised "cancels all pending timers/requests" and the
  * bus cancelled only its own throttle timers (and, since q2/1, settled its
- * waiting requests). debounce() and throttle() already exposed a dispose()
- * that nothing on the bus called, so their timers outlived the bus. Now a
+ * waiting requests). The debounce and throttle plugins (now the sender's
+ * `pace`) exposed a dispose() that nothing on the bus called, so their timers
+ * outlived the bus. Now a
  * plugin may carry dispose() (the Plugin and AsyncPlugin types say so), the bus
  * runs every installed one first, and the bus's own retry ends a pending wait
  * as core:aborted:dispatch - a cleared timer alone would have left that
  * dispatch pending forever.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, type BusError, type CommandResult, type Plugin } from '../src/command-bus';
-import { debounce, throttle } from '../src/plugins-core';
+import { createAsyncCommandBus, type BusError, type CommandResult, type PluginParts } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 afterEach(() => {
@@ -23,35 +23,6 @@ afterEach(() => {
 const code = (r: CommandResult | undefined): string | undefined => (r?.error as BusError | undefined)?.code;
 
 describe('dispose() runs plugin dispose()', () => {
-  it('cancels a pending debounce timer', () => {
-    vi.useFakeTimers();
-    const bus = createCommandBus();
-    const handler = vi.fn(() => 1);
-    bus.register('t', handler);
-    bus.use(debounce(['t'], 50));
-    bus.dispatch('t', 1);
-    expect(vi.getTimerCount()).toBe(1);
-
-    bus.dispose();
-
-    expect(vi.getTimerCount()).toBe(0);
-    vi.advanceTimersByTime(100);
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it('cancels a throttle window timer', () => {
-    vi.useFakeTimers();
-    const bus = createCommandBus();
-    bus.register('t', () => 1);
-    bus.use(throttle(['t'], 1000));
-    bus.dispatch('t', 1);
-    expect(vi.getTimerCount()).toBe(1);
-
-    bus.dispose();
-
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it('ends a retry wait mid-sleep as core:aborted:dispatch and stops the attempts', async () => {
     vi.useFakeTimers();
     // The wait is full jitter, Math.random() * 100 ms: a draw under 1 ms ran
@@ -95,11 +66,11 @@ describe('dispose() runs plugin dispose()', () => {
     const first = vi.fn();
     const second = vi.fn();
     let unsubFirst = (): void => {};
-    const a: Plugin = Object.assign(((_c: unknown, next: () => CommandResult) => next()) as Plugin, { dispose: () => { first(); unsubFirst(); } });
-    const b: Plugin = Object.assign(((_c: unknown, next: () => CommandResult) => next()) as Plugin, { dispose: second });
+    const a: PluginParts = { settled: () => {}, dispose: () => { first(); unsubFirst(); } };
+    const b: PluginParts = { settled: () => {}, dispose: second };
     unsubFirst = bus.use(a);
     bus.use(b);
-    bus.use((_c, next) => next()); // a plugin without dispose is fine
+    bus.use({ settled: () => {} }); // a plugin without dispose is fine
 
     bus.dispose();
 
@@ -109,8 +80,7 @@ describe('dispose() runs plugin dispose()', () => {
 
   it('async bus: the same, and the plugins are gone afterwards', async ({ asyncBus: bus }) => {
     const spy = vi.fn();
-    const passThrough: Plugin = (_c, next) => next();
-    bus.use(Object.assign(passThrough, { dispose: spy }));
+    bus.use({ settled: () => {}, dispose: spy });
     bus.register('t', async () => 1);
     bus.dispose();
     expect(spy).toHaveBeenCalledTimes(1);

@@ -47,7 +47,7 @@ const until = async (cond: () => boolean) => {
 };
 
 async function build() {
-  const http = createHttpClient({ baseURL: base, retry: 0 });
+  const http = createHttpClient({ baseURL: base, retry: false });
   const loaders = fetchLoaders({ http, cache: { ttl: 60_000 } });
   const router = createRouter({
     history: createMemoryHistory('/'),
@@ -79,13 +79,13 @@ describe('a cached router loader against the B6 cases', () => {
     router.dispose();
   });
 
-  it('a loader read in flight across an invalidation of its URL: shown, not stored; the revisit fetches', async () => {
+  it('a loader read in flight across a write to its URL: shown, not stored; the revisit fetches', async () => {
     const { http, router, shown, revisit } = await build();
     s.hold = true;
     const going = router.push('/cart');
     await until(() => s.gets === 1);
     s.value = 'new';
-    http.invalidateCache('/cart');
+    await http.post('/cart', {});
     s.release();
     await going;
     const first = shown();

@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { _failures, createAsyncCommandBus, createCommandBus, type BusError } from '../src/command-bus';
-import { ERROR_CODE_REGISTRY } from '../src/schema';
-import { createHttpBridge } from '../src/transports';
+import { ERROR_CODE_REGISTRY } from '../src/error-registry';
+import { httpTransport } from '../src/transports';
 
 const BASE = 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#';
 const SRC = join(import.meta.dirname, '..', 'src');
@@ -13,8 +13,7 @@ const VOCABULARY = [...(/export type Condition =([^;]*);/.exec(readFileSync(join
 
 function bridged(status: number, data: unknown) {
   const httpClient = { post: vi.fn().mockResolvedValue({ ok: false, status, headers: {}, data }) } as never;
-  const bus = createAsyncCommandBus({ retry: false } as never);
-  bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
+  const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', httpClient }) } as never);
   return bus.dispatch('cartAdd', {});
 }
 
@@ -43,9 +42,9 @@ describe('the problem type', () => {
   });
 
   it('survives a JSON round trip unchanged', () => {
-    const e = _failures('core')('limited:handler', 'wait', { context: { retryIn: 5 } });
+    const e = _failures('pace')('limited:dispatch', 'wait', { context: { retryIn: 5 } });
     const once = JSON.parse(JSON.stringify(e));
-    expect(once).toEqual({ retryIn: 5, type: `${BASE}limited`, detail: 'wait', code: 'core:limited:handler' });
+    expect(once).toEqual({ retryIn: 5, type: `${BASE}limited`, detail: 'wait', code: 'pace:limited:dispatch' });
   });
 });
 
@@ -75,6 +74,6 @@ describe('docs/errors.md, the page every type resolves to', () => {
  * part an RFC client acts on (retry, sign in, show a validation message). The
  * exact code stays the `code` extension. A backend's own `type` is its
  * identity and is kept. `title` is left out: RFC 9457 makes it optional, and
- * the summaries live in ERROR_CODE_REGISTRY (schema.ts), which the core does
+ * the summaries live in ERROR_CODE_REGISTRY (error-registry.ts), which the core does
  * not carry.
  */

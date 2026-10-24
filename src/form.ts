@@ -6,7 +6,7 @@
  * createFormBus wraps a command bus around a typed form, giving you:
  *   - Reactive values, errors, dirty, valid, and submitting state
  *   - Per-field validation rules
- *   - Full plugin pipeline on every form command (logger, throttle, authGuard, etc.)
+ *   - Full plugin pipeline on every form command (logger, authGuard, etc.)
  *
  * `history()` records form commands, but its undo restores no field: the
  * form registers no inverse (an undo without one only moves the stacks).
@@ -29,7 +29,11 @@
 import { signal } from './signal';
 import type { Signal, CreateSignal } from './signal';
 import { createCommandBus } from './command-bus';
-import type { CommandBus, Plugin, PluginOptions } from './command-bus';
+import type { CommandBus, PluginParts } from './command-bus';
+import { _busStores } from './applied-remotely';
+import { _fieldCell } from './store-base';
+import { _registerLocal } from './library-names';
+import { _definePlainStore } from './store/core';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,17 +102,28 @@ export type FieldAria = {
   'aria-describedby': string | undefined;
 };
 
+/** A form's one state, held by its store: what the five commands and `submit()` write. */
+type FormState<T extends Record<string, any>> = {
+  values: T;
+  errors: Partial<Record<keyof T, string>>;
+  touched: Partial<Record<keyof T, boolean>>;
+  /** Errors from outside the rules, by field; merged over the rule errors. */
+  outside: Partial<Record<keyof T, string>>;
+  isDirty: boolean;
+  isValid: boolean;
+};
+
 export type FormBus<T extends Record<string, any>> = {
-  /** Reactive current field values. */
-  values: Signal<T>;
+  /** Reactive current field values. Read-only: `set()` writes them. */
+  readonly values: { readonly value: T };
   /** Reactive per-field error messages. Empty when all fields pass. */
-  errors: Signal<Partial<Record<keyof T, string>>>;
+  readonly errors: { readonly value: Partial<Record<keyof T, string>> };
   /** Reactive set of fields the user has interacted with. */
-  touched: Signal<Partial<Record<keyof T, boolean>>>;
+  readonly touched: { readonly value: Partial<Record<keyof T, boolean>> };
   /** True when any field differs from its initial value. */
-  isDirty: Signal<boolean>;
+  readonly isDirty: { readonly value: boolean };
   /** True when no validation errors exist. */
-  isValid: Signal<boolean>;
+  readonly isValid: { readonly value: boolean };
   /** True while onSubmit is in flight. */
   isSubmitting: Signal<boolean>;
   /** True while async validation is running. */
@@ -131,14 +146,21 @@ export type FormBus<T extends Record<string, any>> = {
    * problem carries `errors`.
    */
   setErrors(errors: FormErrorsInput): void;
-  /** `aria-invalid` / `aria-describedby` for a field, set only while its error is shown. */
-  aria<K extends keyof T>(field: K): FieldAria;
+  /**
+   * `aria-invalid` / `aria-describedby` for a field: invalid only while its
+   * error is shown. `describedBy`, the input's own ids (a hint), stays named,
+   * and the error's id follows it while shown, since `aria-describedby` is an
+   * ID reference list (WAI-ARIA 1.2). Spread it in place of a static
+   * `aria-describedby`: the spread's value overrides the attribute.
+   * tests/form-aria-render.test.ts.
+   */
+  aria<K extends keyof T>(field: K, describedBy?: string): FieldAria;
   /** The id for the element holding a field's message: stable, unique per form, a valid id. */
   errorId<K extends keyof T>(field: K): string;
   /** The first field, in declaration order, whose error is shown - the one to focus after a failed submit. */
   firstInvalid(): keyof T | undefined;
   /** Attach a plugin to the form's internal command bus. */
-  use(plugin: Plugin, options?: PluginOptions): void;
+  use(plugin: PluginParts): void;
   /** The underlying command bus - for advanced use (DevTools, testing). */
   bus: CommandBus;
   /**
@@ -241,7 +263,7 @@ function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
  * createFormBus - reactive form state manager built on the command bus.
  *
  * All form mutations go through the internal bus, so plugins (logger,
- * throttle, authGuard, etc.) intercept them like any other command.
+ * authGuard, etc.) intercept them like any other command.
  */
 export function createFormBus<T extends Record<string, any>>(
   options: FormBusOptions<T>,
@@ -252,18 +274,12 @@ export function createFormBus<T extends Record<string, any>>(
 
   const bus = options.bus ?? createCommandBus();
 
-  // Claim the prefix on this bus, or say precisely what went wrong. An isolated
-  // bus cannot collide with anything, so only an injected one is tracked.
-  // The claim set lives ON THE BUS, not in a module-level WeakMap: the bus is
-  // exactly the scope a claim belongs to (it dies with the bus, no registry to
-  // leak).
-  const holder = options.bus as unknown as { __vcFormIds?: Set<string> };
-  const claimed = options.bus ? (holder.__vcFormIds ??= new Set<string>()) : null;
-  if (claimed?.has(id)) {
-    // The explanation lives in the `id` docblock.
+  // A second form with this id on the bus, or any store holding it, would
+  // write over this one: the explanation lives in the `id` docblock. An
+  // isolated bus cannot collide with anything.
+  if (options.bus && _busStores.get(options.bus)?.entries.has(id)) {
     throw new Error(`[vapor-chamber] form id "${id}" already on this bus - pass a distinct id.`);
   }
-  claimed?.add(id);
 
   const ACTION_SET = `${id}Set`;
   const ACTION_TOUCH = `${id}Touch`;
@@ -271,21 +287,32 @@ export function createFormBus<T extends Record<string, any>>(
   const ACTION_VALIDATE = `${id}Validate`;
   const ACTION_ERRORS = `${id}Errors`;
   const domPrefix = `vc-${id}-${++formSeq}`;
-  /** Errors from outside the rules, by field; merged over the rule errors. */
-  let outside: Partial<Record<keyof T, string>> = {};
-
-  // When reactive: false, use plain get/set wrappers instead of Vue signals.
-  // Saves eight signal allocations per form in headless/batch/SSR contexts.
-  const sig: CreateSignal = useReactive ? signal : <V>(v: V): Signal<V> => {
-    let _val = v;
-    return { get value() { return _val; }, set value(v: V) { _val = v; } };
+  const fresh = (): FormState<T> => ({ values: { ...initial }, errors: {}, touched: {}, outside: {}, isDirty: false, isValid: true });
+  /** Every field touched, so every error shows. */
+  const allTouched = (): Partial<Record<keyof T, boolean>> => {
+    const all: Partial<Record<keyof T, boolean>> = {};
+    for (const k in initial) all[k as keyof T] = true;
+    return all;
   };
+  /** The command `submit()`'s writes are a step of: a `$` name, the library's, never dispatched. */
+  const SUBMIT = { action: `${id}$submit`, target: undefined };
 
-  const values    = sig<T>({ ...initial });
-  const errors    = sig<Partial<Record<keyof T, string>>>({});
-  const touched   = sig<Partial<Record<keyof T, boolean>>>({});
-  const isDirty   = sig(false);
-  const isValid   = sig(true);
+  // The form's state is one store (plan 1.32 4.2): values, errors, touched,
+  // the errors from outside the rules, and isDirty / isValid derived where
+  // each write builds it. Each command writes it once, through the store's
+  // own write (a step of that command), so no reader sees a half-written
+  // form. Each public cell is its own signal over the store's field events
+  // (`_fieldCell`, as `fieldRef`): a reader of `isValid` re-runs when it
+  // flips, not on every keystroke. reactive: false makes them plain cells.
+  // tests/form-on-store.test.ts.
+  const store = _definePlainStore(id, { state: fresh, reducers: {} })(bus);
+  const write = (_busStores.get(bus)!.entries.get(id) as { write: (cmd: { action: string; target: any; payload?: any }, next: FormState<T>) => void }).write;
+  const sig: CreateSignal = useReactive ? signal : <V>(v: V): Signal<V> => ({ value: v }) as Signal<V>;
+  const values = _fieldCell(store, 'values', sig);
+  const errors = _fieldCell(store, 'errors', sig);
+  const touched = _fieldCell(store, 'touched', sig);
+  const isDirty = _fieldCell(store, 'isDirty', sig);
+  const isValid = _fieldCell(store, 'isValid', sig);
   const isSubmitting = sig(false);
   const isValidating = sig(false);
   const isBusy   = sig(false);
@@ -303,71 +330,57 @@ export function createFormBus<T extends Record<string, any>>(
 
   // ---- formSet -----------------------------------------------------------
   const offs: Array<() => void> = [];
-  offs.push(bus.register(ACTION_SET, (cmd) => {
+  offs.push(_registerLocal(bus, ACTION_SET, (cmd) => {
     const { field, value } = cmd.payload as { field: keyof T; value: T[keyof T] };
-    const next = { ...values.value, [field]: value } as T;
-    // The other three writes are in the `finally`: a sync subscriber that
-    // throws on `values` does not leave them stale (pinned by
-    // tests/form-throwing-subscriber.test.ts, which also pins that one
-    // throwing on `errors` or `isDirty` still does).
-    try {
-      values.value = next;
-    } finally {
-      if (Object.hasOwn(outside, field)) {
-        outside = { ...outside };
-        delete outside[field];
-      }
-      const errs = { ...runRulesSync(rules, next), ...outside };
-      errors.value = errs;
-      isDirty.value = hasDiff(initial, next);
-      isValid.value = Object.keys(errs).length === 0;
+    const s = store.state.value;
+    const next = { ...s.values, [field]: value } as T;
+    let outside = s.outside;
+    if (Object.hasOwn(outside, field)) {
+      outside = { ...outside };
+      delete outside[field];
     }
+    const errs = { ...runRulesSync(rules, next), ...outside };
+    write(cmd, { values: next, errors: errs, touched: s.touched, outside, isDirty: hasDiff(initial, next), isValid: Object.keys(errs).length === 0 });
     return next;
   }));
 
   // ---- formTouch ---------------------------------------------------------
-  offs.push(bus.register(ACTION_TOUCH, (cmd) => {
+  offs.push(_registerLocal(bus, ACTION_TOUCH, (cmd) => {
     const { field } = cmd.payload as { field: keyof T };
-    touched.value = { ...touched.value, [field]: true };
-    return touched.value;
+    const s = store.state.value;
+    const shown = { ...s.touched, [field]: true };
+    write(cmd, { ...s, touched: shown });
+    return shown;
   }));
 
   // ---- formReset ---------------------------------------------------------
-  offs.push(bus.register(ACTION_RESET, () => {
+  offs.push(_registerLocal(bus, ACTION_RESET, (cmd) => {
     resets++;
-    outside = {};
-    values.value   = { ...initial };
-    errors.value   = {};
-    touched.value  = {};
-    isDirty.value  = false;
-    isValid.value  = true;
+    const next = fresh();
+    write(cmd, next);
     isSubmitting.value = false;
     isValidating.value = false;
     isBusy.value   = false;
-    return values.value;
+    return next.values;
   }));
 
   // ---- formValidate (internal) ------------------------------------------
-  offs.push(bus.register(ACTION_VALIDATE, () => {
+  offs.push(_registerLocal(bus, ACTION_VALIDATE, (cmd) => {
     // Touch all fields so errors become visible
-    const allTouched: Partial<Record<keyof T, boolean>> = {};
-    for (const k in initial) allTouched[k as keyof T] = true;
-    touched.value = allTouched;
-
-    const errs   = { ...runRulesSync(rules, values.value), ...outside };
-    errors.value = errs;
-    isValid.value = Object.keys(errs).length === 0;
-    return { valid: isValid.value, errors: errs };
+    const s = store.state.value;
+    const errs = { ...runRulesSync(rules, s.values), ...s.outside };
+    const valid = Object.keys(errs).length === 0;
+    write(cmd, { ...s, touched: allTouched(), errors: errs, isValid: valid });
+    return { valid, errors: errs };
   }));
 
-  offs.push(bus.register(ACTION_ERRORS, (cmd) => {
-    outside = normalizeErrors(cmd.payload as FormErrorsInput, initial) as Partial<Record<keyof T, string>>;
-    const shown: Partial<Record<keyof T, boolean>> = { ...touched.value };
+  offs.push(_registerLocal(bus, ACTION_ERRORS, (cmd) => {
+    const s = store.state.value;
+    const outside = normalizeErrors(cmd.payload as FormErrorsInput, initial) as Partial<Record<keyof T, string>>;
+    const shown: Partial<Record<keyof T, boolean>> = { ...s.touched };
     for (const k in outside) shown[k as keyof T] = true;
-    touched.value = shown;
-    const errs = { ...runRulesSync(rules, values.value), ...outside };
-    errors.value = errs;
-    isValid.value = Object.keys(errs).length === 0;
+    const errs = { ...runRulesSync(rules, s.values), ...outside };
+    write(cmd, { ...s, touched: shown, outside, errors: errs, isValid: Object.keys(errs).length === 0 });
     return errs;
   }));
 
@@ -409,11 +422,10 @@ export function createFormBus<T extends Record<string, any>>(
   }
 
   async function runSubmit(): Promise<boolean> {
-    // Touch all fields so errors become visible
-    const allTouched: Partial<Record<keyof T, boolean>> = {};
-    for (const k in initial) allTouched[k as keyof T] = true;
-    touched.value = allTouched;
-    outside = {}; // the server decides again
+    // Touch all fields so errors become visible; the server decides again, so
+    // its errors go. Written as the store's own write, no command, as these
+    // writes always were.
+    write(SUBMIT, { ...store.state.value, touched: allTouched(), outside: {} });
 
     // ONE snapshot, validated and submitted. `values` is live state and this
     // function reads it across an await: validation ran against the values at
@@ -422,7 +434,7 @@ export function createFormBus<T extends Record<string, any>>(
     // when it resolved. A `set()` landing in that window meant validation
     // passed values that were never submitted, and values were submitted that
     // were never validated.
-    const snapshot = { ...values.value } as T;
+    const snapshot = { ...store.state.value.values } as T;
     const generation = resets;
 
     // Run all rules - awaits async validators too
@@ -438,13 +450,12 @@ export function createFormBus<T extends Record<string, any>>(
       // writing their verdict would show errors for values the form no longer
       // holds, and submitting would send them. The reset cancels this submit.
       if (generation !== resets) return false;
-      errors.value = errs;
-      isValid.value = Object.keys(errs).length === 0;
+      write(SUBMIT, { ...store.state.value, errors: errs, isValid: Object.keys(errs).length === 0 });
     } finally {
       isValidating.value = false;
       updateBusy();
     }
-    if (!isValid.value) return false;
+    if (!store.state.value.isValid) return false;
 
     try {
       isSubmitting.value = true;
@@ -472,13 +483,16 @@ export function createFormBus<T extends Record<string, any>>(
     return `${domPrefix}-${String(field).replace(/[^\w-]/g, '-')}-error`;
   }
 
+  // The field cells, not the plain store state: a render that calls aria() or
+  // firstInvalid() then follows the error (B4 i2).
   function shownError<K extends keyof T>(field: K): string | undefined {
     return touched.value[field] ? errors.value[field] : undefined;
   }
 
-  function aria<K extends keyof T>(field: K): FieldAria {
+  function aria<K extends keyof T>(field: K, describedBy?: string): FieldAria {
     const shown = shownError(field) !== undefined;
-    return { 'aria-invalid': shown ? 'true' : undefined, 'aria-describedby': shown ? errorId(field) : undefined };
+    const ids = shown ? (describedBy ? `${describedBy} ${errorId(field)}` : errorId(field)) : describedBy;
+    return { 'aria-invalid': shown ? 'true' : undefined, 'aria-describedby': ids || undefined };
   }
 
   function firstInvalid(): keyof T | undefined {
@@ -486,14 +500,14 @@ export function createFormBus<T extends Record<string, any>>(
     return undefined;
   }
 
-  function use(plugin: Plugin, pluginOptions?: PluginOptions): void {
-    bus.use(plugin, pluginOptions);
+  function use(plugin: PluginParts): void {
+    bus.use(plugin);
   }
 
   function dispose(): void {
     for (const off of offs) off();
     offs.length = 0;
-    claimed?.delete(id);
+    store.$dispose();
   }
 
   return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, setErrors, aria, errorId, firstInvalid, use, bus, dispose };

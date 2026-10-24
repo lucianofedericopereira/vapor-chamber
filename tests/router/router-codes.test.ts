@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { BusError, conditionOf, ownerOf } from '../../src/command-bus';
 import { HARD_NAV_CODES, isRouterError } from '@router/errors';
-import { ERROR_CODE_REGISTRY } from '../../src/schema';
+import { ERROR_CODE_REGISTRY } from '../../src/error-registry';
 import { ROWS, makeRouter } from './fixture';
 
 const withLoad = (load: string) => [...ROWS, { name: 'data', path: '/data', parent: 'shell', component: 'Home', load }];
@@ -89,8 +89,9 @@ describe('the catalogue', () => {
 
   it('every router code has a registry row', () => {
     expect(routerRows.map((e) => e.code).sort()).toEqual([
-      'router:aborted:navigation', 'router:already:route', 'router:exceeded:redirects',
-      'router:failed:blade', 'router:failed:component', 'router:failed:guard', 'router:failed:history', 'router:failed:loader', 'router:failed:routes',
+      'router:aborted:navigation', 'router:already:route', 'router:conflict:base', 'router:exceeded:redirects',
+      'router:failed:blade', 'router:failed:commit', 'router:failed:component', 'router:failed:guard', 'router:failed:history', 'router:failed:hook', 'router:failed:loader',
+      'router:failed:navigation', 'router:failed:revalidate', 'router:failed:routes',
       'router:invalid:component', 'router:invalid:menu', 'router:invalid:parent', 'router:invalid:path',
       'router:missing:component', 'router:missing:fetchBlade', 'router:missing:http', 'router:missing:inline',
       'router:missing:loader', 'router:missing:param', 'router:missing:parent', 'router:missing:record',

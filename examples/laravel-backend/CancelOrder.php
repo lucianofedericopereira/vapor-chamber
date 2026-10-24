@@ -13,6 +13,7 @@ namespace App\Actions\Order;
 
 use App\Models\Order;
 use App\Models\User;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Gate;
 
 class CancelOrder
@@ -22,6 +23,13 @@ class CancelOrder
         // The target is identity: findOrFail throws ModelNotFoundException,
         // which the controller answers 404 not_found.
         $order = Order::findOrFail((int) ($target['id'] ?? 0));
+
+        // A guest signs in first: 401 unauthenticated, which the client's
+        // outbox keeps for after sign-in. Asked for a guest, the ability
+        // below throws AuthorizationException -> 403, a verdict it drops.
+        if ($user === null) {
+            throw new AuthenticationException();
+        }
 
         // Policy-based authorization. The 'cancel' ability lives in
         // App\Policies\OrderPolicy. Throws AuthorizationException -> 403.

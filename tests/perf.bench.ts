@@ -5,37 +5,47 @@
  * Or:       npm run test -- --bench tests/perf.bench.ts
  *
  * These are not CI tests - they measure throughput on the developer's machine.
+ *
+ * Every row times the work its id names and nothing else. Buses, stores,
+ * composables and peers are built in the group's setup, outside the timed
+ * function, and a row that changes state resets it in its own beforeEach,
+ * which tinybench runs outside the timing. Building is timed only in the
+ * `create.*` rows. Each row's name is a stable id that never changes between
+ * releases (tests/bench-harness.test.ts pins the list), with the old label as
+ * the comment above it.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { effectScope, version as VUE_VERSION } from 'vue';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { BenchFnOptions } from 'vitest';
+import { effectScope, onScopeDispose, ref, watchEffect } from 'vue';
 import { createCommandBus, createAsyncCommandBus, configureUid, _resetUid, _withOrigin } from '../src/command-bus';
-import { rehydrate, type DehydratedCommand } from '../src/ssr';
-import { persist } from '../src/plugins-io';
+import { defineChamberStore as defineCoreStore } from '../src/store/core';
 import { createFastLane } from '../src/fast-lane';
-import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
+import { useCommand, useCommandHistory } from '../src/chamber';
 import { createTransitionBridge } from '../src/transitions';
 import { createDirectivePlugin } from '../src/directives';
 import { stampActiveLinks } from '@router/dom';
-import { useCommandState, signal, waitForVueDetection } from '../src/chamber';
+import { signal, waitForVueDetection } from '../src/chamber';
+import { defineChamberStore } from '../src/store';
 import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
+import { saveTo } from '../src/store-persist';
 
 const _alienFactory = alienSignalAdapter(_alienSignal as any);
 
 // Vitest 5 made `bench` a test-context fixture: benches register inside a test
-// and run through `bench.compare()`. Each describe below keeps its 4.x shape by
-// shadowing `bench` with a collector whose registrations run as ONE compare, so
-// a group's rows still come from the same run - which is what
-// scripts/bench-ratios-reporter.mjs relies on when it divides two of them.
-// Bench names are unchanged; the reporter matches them exactly.
-function benchGroup(): (name: string, fn: () => unknown) => void {
-  const defs: Array<{ name: string; fn: () => unknown }> = [];
+// and run through `bench.compare()`. Each describe below shadows `bench` with a
+// collector whose registrations run as ONE compare, so a group's rows come from
+// the same run - which is what scripts/bench-ratios-reporter.mjs relies on when
+// it divides two of them. The reporter matches the ids exactly.
+type Fn = () => unknown;
+function benchGroup(): (id: string, a: Fn | BenchFnOptions, b?: Fn) => void {
+  const defs: Array<{ id: string; opts: BenchFnOptions; fn: Fn }> = [];
   it('compare', async ({ bench }) => {
-    await bench.compare(...defs.map((d) => bench(d.name, d.fn)));
+    await bench.compare(...defs.map((d) => bench(d.id, d.opts, d.fn)));
   });
-  return (name, fn) => {
-    defs.push({ name, fn });
+  return (id, a, b) => {
+    defs.push(typeof a === 'function' ? { id, opts: {}, fn: a } : { id, opts: a, fn: b as Fn });
   };
 }
 
@@ -50,169 +60,213 @@ function benchGroup(): (name: string, fn: () => unknown) => void {
 //     marked dispatch (every cross-tab receive, MCP call, and redo).
 // ---------------------------------------------------------------------------
 
-// These two benches install their bus as the shared one, which
-// `useCommandHistory` observes when given no `bus` option. A bus passed as a
-// second argument is dropped: the history then watches the shared bus while
-// the loop dispatches on another, and the bench measures an empty history.
-// Kept as the shared bus so the workload matches the stamped ratios. Pinned by
-// `tests/bench-harness.test.ts`.
+// The histories take their bus as `{ bus }`: without it `useCommandHistory`
+// observes the shared bus (tests/bench-harness.test.ts). Each iteration starts
+// from an empty history, as one built per iteration did.
 describe('origin-marker paths', () => {
   const bench = benchGroup();
-  bench('dispatch with useCommandHistory installed - 10k (onAfter hook cost)', () => {
-    const bus = createCommandBus();
-    setCommandBus(bus);
-    bus.register('act', (cmd) => cmd.target);
-    const history = useCommandHistory({});
-    for (let i = 0; i < 10_000; i++) bus.dispatch('act', i, { qty: i });
-    history.clear();
+  const histBus = createCommandBus();
+  histBus.register('act', (cmd) => cmd.target);
+  const undoBus = createCommandBus();
+  undoBus.register('act', (cmd) => cmd.target);
+  const originBus = createCommandBus();
+  originBus.register('act', (cmd) => cmd.target);
+  let history!: ReturnType<typeof useCommandHistory>;
+  let undoHistory!: ReturnType<typeof useCommandHistory>;
+  beforeAll(async () => {
+    await waitForVueDetection();
+    history = useCommandHistory({ bus: histBus });
+    undoHistory = useCommandHistory({ bus: undoBus });
+  });
+  afterAll(() => {
     history.dispose();
-    resetCommandBus();
+    undoHistory.dispose();
   });
 
-  bench('undo+redo cycle x 2k (marked-dispatch path)', () => {
-    const bus = createCommandBus();
-    setCommandBus(bus);
-    bus.register('act', (cmd) => cmd.target);
-    const history = useCommandHistory({});
+  // dispatch with useCommandHistory installed - 10k (onAfter hook cost)
+  bench('history.dispatch', { beforeEach: () => history.clear() }, () => {
+    for (let i = 0; i < 10_000; i++) histBus.dispatch('act', i, { qty: i });
+  });
+
+  // undo+redo cycle x 2k (marked-dispatch path)
+  bench('history.undoredo', { beforeEach: () => undoHistory.clear() }, () => {
     for (let i = 0; i < 2_000; i++) {
-      bus.dispatch('act', i, { qty: i });
-      history.undo();
-      history.redo();
+      undoBus.dispatch('act', i, { qty: i });
+      undoHistory.undo();
+      undoHistory.redo();
     }
-    history.dispose();
-    resetCommandBus();
   });
 
-  bench('_withOrigin-wrapped dispatch - 10k', () => {
-    const bus = createCommandBus();
-    bus.register('act', (cmd) => cmd.target);
+  // _withOrigin-wrapped dispatch - 10k
+  bench('origin.wrapped', () => {
     for (let i = 0; i < 10_000; i++) {
-      _withOrigin('sync', () => bus.dispatch('act', i, { qty: i }));
+      _withOrigin('sync', () => originBus.dispatch('act', i, { qty: i }));
     }
   });
 });
 
 describe('core dispatch throughput', () => {
   const bench = benchGroup();
-  bench('syncDispatch - bare handler, no plugins', () => {
-    const bus = createCommandBus();
-    bus.register('test', (cmd) => cmd.target);
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('test', i);
-    }
+  const bare = createCommandBus();
+  bare.register('test', (cmd) => cmd.target);
+  const parts = createCommandBus();
+  // Three plugins, each a part the bus places: an observer, a recorder, a work step.
+  parts.use({ started: () => {} });
+  parts.use({ settled: () => {} });
+  parts.use({ begin: () => undefined });
+  parts.on('*', () => {});
+  parts.register('test', (cmd) => cmd.target);
+  const queries = createCommandBus();
+  queries.register('getUser', (cmd) => ({ id: cmd.target }));
+  const stepped = createCommandBus();
+  stepped.register('getUser', (cmd) => ({ id: cmd.target }));
+  stepped.use({ begin: () => undefined }); // a step: the stepped path
+  stepped.onAfter(() => {});
+  const emits = createCommandBus();
+  emits.on('test', () => {});
+  emits.on('test', () => {});
+  emits.on('test', () => {});
+  const wildcard = createCommandBus();
+  wildcard.on('cart*', () => {});
+  wildcard.register('cartAdd', () => {});
+  const batch = createCommandBus();
+  batch.register('test', () => 'ok');
+  const cmds = Array.from({ length: 100 }, (_, i) => ({ action: 'test', target: i }));
+
+  // syncDispatch - bare handler, no plugins
+  bench('dispatch.sync.bare', () => {
+    for (let i = 0; i < 10_000; i++) bare.dispatch('test', i);
   });
 
-  bench('syncDispatch - 3 plugins + 1 listener', () => {
-    const bus = createCommandBus();
-    bus.use((_cmd, next) => next());
-    bus.use((_cmd, next) => next());
-    bus.use((_cmd, next) => next());
-    bus.on('*', () => {});
-    bus.register('test', (cmd) => cmd.target);
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('test', i);
-    }
+  // syncDispatch - 3 plugins + 1 listener
+  bench('dispatch.sync.parts3', () => {
+    for (let i = 0; i < 10_000; i++) parts.dispatch('test', i);
   });
 
-  bench('syncQuery - bare handler, no plugins', () => {
-    const bus = createCommandBus();
-    bus.register('getUser', (cmd) => ({ id: cmd.target }));
-    for (let i = 0; i < 10_000; i++) {
-      bus.query('getUser', i);
-    }
+  // syncQuery - bare handler, no plugins
+  bench('query.sync.bare', () => {
+    for (let i = 0; i < 10_000; i++) queries.query('getUser', i);
   });
 
-  bench('syncQuery - 1 plugin + 1 after-hook (full runner path)', () => {
-    const bus = createCommandBus();
-    bus.register('getUser', (cmd) => ({ id: cmd.target }));
-    bus.use((_cmd, next) => next());
-    bus.onAfter(() => {});
-    for (let i = 0; i < 10_000; i++) {
-      bus.query('getUser', i);
-    }
+  // syncQuery - 1 plugin + 1 after-hook (full runner path)
+  bench('query.sync.stepped', () => {
+    for (let i = 0; i < 10_000; i++) stepped.query('getUser', i);
   });
 
-  bench('emit - 3 listeners, no handler', () => {
-    const bus = createCommandBus();
-    bus.on('test', () => {});
-    bus.on('test', () => {});
-    bus.on('test', () => {});
-    for (let i = 0; i < 10_000; i++) {
-      bus.emit('test', i);
-    }
+  // emit - 3 listeners, no handler
+  bench('emit.listeners3', () => {
+    for (let i = 0; i < 10_000; i++) emits.emit('test', i);
   });
 
-  bench('matchesPattern - wildcard prefix*', () => {
-    const bus = createCommandBus();
-    bus.on('cart*', () => {});
-    bus.register('cartAdd', () => {});
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('cartAdd', i);
-    }
+  // matchesPattern - wildcard prefix*
+  bench('dispatch.sync.wildcard', () => {
+    for (let i = 0; i < 10_000; i++) wildcard.dispatch('cartAdd', i);
   });
 
-  bench('dispatchBatch - 100 commands', () => {
-    const bus = createCommandBus();
-    bus.register('test', () => 'ok');
-    const cmds = Array.from({ length: 100 }, (_, i) => ({ action: 'test', target: i }));
-    for (let i = 0; i < 100; i++) {
-      bus.dispatchBatch(cmds);
-    }
+  // dispatchBatch - 100 commands
+  bench('dispatch.batch100', () => {
+    for (let i = 0; i < 100; i++) batch.dispatchBatch(cmds);
   });
 });
 
 describe('meta overhead - uid generator comparison', () => {
   const bench = benchGroup();
-  // Default: counter + per-process random prefix. ~12ns per call vs ~104ns for
-  // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21x200k reps -
-  // quote the runtime with the number). What this bench measures is the
-  // DISPATCH-level ratio (~2.5x), not the per-call one (~8x): the rest of the
-  // dispatch dilutes it.
-  bench('dispatch - default counter-based uid', () => {
-    const bus = createCommandBus();
-    bus.register('test', () => {});
-    // The library's own default, in case a prior bench swapped it.
-    _resetUid();
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('test', i);
-    }
+  const counter = createCommandBus();
+  counter.register('test', () => {});
+  const uuid = createCommandBus();
+  uuid.register('test', () => {});
+  // Default: counter + per-process random prefix. About 12 ns per call against
+  // about 104 ns for crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over
+  // 21x200k reps - quote the runtime with the number). What this bench measures
+  // is the DISPATCH-level ratio (about 2.5x), not the per-call one (about 8x):
+  // the rest of the dispatch dilutes it.
+  // dispatch - default counter-based uid
+  bench('uid.counter', { beforeEach: () => _resetUid() }, () => {
+    for (let i = 0; i < 10_000; i++) counter.dispatch('test', i);
   });
 
   // Opt-in via configureUid - for distributed tracing / cross-process IDs.
-  bench('dispatch - crypto.randomUUID via configureUid', () => {
-    const bus = createCommandBus();
-    bus.register('test', () => {});
-    configureUid(() => crypto.randomUUID());
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('test', i);
-    }
-    // Restore the library's default so later groups time it, not a copy.
-    _resetUid();
+  // dispatch - crypto.randomUUID via configureUid
+  bench('uid.uuid', { beforeEach: () => configureUid(() => crypto.randomUUID()), afterEach: () => _resetUid() }, () => {
+    for (let i = 0; i < 10_000; i++) uuid.dispatch('test', i);
   });
 });
 
 describe('async dispatch throughput', () => {
   const bench = benchGroup();
-  bench('asyncDispatch - bare handler', async () => {
-    const bus = createAsyncCommandBus();
-    bus.register('test', async (cmd) => cmd.target);
+  const bare = createAsyncCommandBus();
+  bare.register('test', async (cmd) => cmd.target);
+  const parts = createAsyncCommandBus();
+  // Three plugins, each a part the bus places: an observer, a recorder, a work step.
+  parts.use({ started: () => {} });
+  parts.use({ settled: () => {} });
+  parts.use({ begin: () => undefined });
+  parts.on('*', () => {});
+  parts.register('test', async (cmd) => cmd.target);
+  const hooked = createAsyncCommandBus();
+  hooked.onAfter(() => {});
+  hooked.register('test', async (cmd) => cmd.target);
+
+  // asyncDispatch - bare handler
+  bench('dispatch.async.bare', async () => {
+    for (let i = 0; i < 1_000; i++) await bare.dispatch('test', i);
+  });
+
+  // The async counterpart of dispatch.sync.parts3: the parts' boundaries
+  // (plugin:failed:plugin) sit on this path, and the work they add is paid
+  // here, not on the bare row above.
+  // asyncDispatch - 3 plugins + 1 listener
+  bench('dispatch.async.parts3', async () => {
+    for (let i = 0; i < 1_000; i++) await parts.dispatch('test', i);
+  });
+
+  // An async dispatch with one onAfter hook, as history(), useCommandHistory,
+  // useCommandError and the devtools install.
+  bench('dispatch.async.hook', async () => {
+    for (let i = 0; i < 1_000; i++) await hooked.dispatch('test', i);
+  });
+});
+
+// Creation, timed on its own: each row builds and disposes 1k of one thing,
+// with nothing dispatched. The rows above build theirs outside the timing.
+describe('creation (1k each, created and disposed)', () => {
+  const bench = benchGroup();
+  const undoStore = defineCoreStore('benchUndo', {
+    state: () => ({ n: 0 }),
+    reducers: { inc: (s: { n: number }) => ({ n: s.n + 1 }) },
+    undo: true,
+  });
+  const storeBus = createCommandBus();
+  const composableBus = createCommandBus();
+  beforeAll(async () => {
+    await waitForVueDetection();
+  });
+
+  bench('create.bus.sync', () => {
+    for (let i = 0; i < 1_000; i++) createCommandBus().dispose();
+  });
+
+  bench('create.bus.async', () => {
+    for (let i = 0; i < 1_000; i++) createAsyncCommandBus().dispose();
+  });
+
+  bench('create.store.undo', () => {
+    for (let i = 0; i < 1_000; i++) undoStore(storeBus).$dispose();
+  });
+
+  bench('create.usecommand', () => {
     for (let i = 0; i < 1_000; i++) {
-      await bus.dispatch('test', i);
+      const scope = effectScope();
+      scope.run(() => useCommand({ bus: composableBus }));
+      scope.stop();
     }
   });
 
-  // The async counterpart of "syncDispatch - 3 plugins + 1 listener": the
-  // plugin boundary (plugin:failed:plugin) sits on this path, and the per-level
-  // work it adds is paid here, not on the bare row above.
-  bench('asyncDispatch - 3 plugins + 1 listener', async () => {
-    const bus = createAsyncCommandBus();
-    bus.use((_cmd, next) => next());
-    bus.use((_cmd, next) => next());
-    bus.use((_cmd, next) => next());
-    bus.on('*', () => {});
-    bus.register('test', async (cmd) => cmd.target);
+  bench('create.usecommandhistory', () => {
     for (let i = 0; i < 1_000; i++) {
-      await bus.dispatch('test', i);
+      const scope = effectScope();
+      scope.run(() => useCommandHistory({ bus: composableBus }));
+      scope.stop();
     }
   });
 });
@@ -281,73 +335,83 @@ import { Subject } from 'rxjs';
 
 describe('emit fast path - no listeners', () => {
   const bench = benchGroup();
-  bench('vapor-chamber bus.emit with NO listeners (10k)', () => {
-    const bus = createCommandBus();
+  const bus = createCommandBus();
+  const m = mitt<{ x: number }>();
+
+  // vapor-chamber bus.emit with NO listeners (10k)
+  bench('emit.none', () => {
     for (let i = 0; i < 10_000; i++) bus.emit('nobody-listening', i);
   });
 
-  bench('mitt with NO listeners (10k)', () => {
-    const m = mitt<{ x: number }>();
+  // mitt with NO listeners (10k)
+  bench('emit.none.peer.mitt', () => {
     for (let i = 0; i < 10_000; i++) m.emit('x', i);
   });
 });
 
 describe('comparative emit fan-out (10k events x 3 listeners)', () => {
   const bench = benchGroup();
-  bench('vapor-chamber bus.emit - 3 listeners', () => {
-    const bus = createCommandBus();
-    bus.on('evt', () => {});
-    bus.on('evt', () => {});
-    bus.on('evt', () => {});
+  const bus = createCommandBus();
+  bus.on('evt', () => {});
+  bus.on('evt', () => {});
+  bus.on('evt', () => {});
+  const m = mitt<{ evt: number }>();
+  m.on('evt', () => {});
+  m.on('evt', () => {});
+  m.on('evt', () => {});
+  const e = new EventEmitter3();
+  e.on('evt', () => {});
+  e.on('evt', () => {});
+  e.on('evt', () => {});
+  const t = new (TinyEmitter as any)();
+  t.on('evt', () => {});
+  t.on('evt', () => {});
+  t.on('evt', () => {});
+  const s = new Subject<number>();
+  s.subscribe(() => {});
+  s.subscribe(() => {});
+  s.subscribe(() => {});
+  const handlers = new Map<string, Set<(i: number) => void>>();
+  function on(evt: string, fn: (i: number) => void): void {
+    let set = handlers.get(evt);
+    if (!set) { set = new Set(); handlers.set(evt, set); }
+    set.add(fn);
+  }
+  function emit(evt: string, i: number): void {
+    const set = handlers.get(evt);
+    if (set) for (const fn of set) fn(i);
+  }
+  on('evt', () => {});
+  on('evt', () => {});
+  on('evt', () => {});
+
+  // vapor-chamber bus.emit - 3 listeners
+  bench('fanout.emit', () => {
     for (let i = 0; i < 10_000; i++) bus.emit('evt', i);
   });
 
-  bench('mitt - 3 listeners', () => {
-    const m = mitt<{ evt: number }>();
-    m.on('evt', () => {});
-    m.on('evt', () => {});
-    m.on('evt', () => {});
+  // mitt - 3 listeners
+  bench('fanout.peer.mitt', () => {
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
   });
 
-  bench('eventemitter3 - 3 listeners', () => {
-    const e = new EventEmitter3();
-    e.on('evt', () => {});
-    e.on('evt', () => {});
-    e.on('evt', () => {});
+  // eventemitter3 - 3 listeners
+  bench('fanout.peer.eventemitter3', () => {
     for (let i = 0; i < 10_000; i++) e.emit('evt', i);
   });
 
-  bench('tiny-emitter - 3 listeners', () => {
-    const t = new (TinyEmitter as any)();
-    t.on('evt', () => {});
-    t.on('evt', () => {});
-    t.on('evt', () => {});
+  // tiny-emitter - 3 listeners
+  bench('fanout.peer.tiny-emitter', () => {
     for (let i = 0; i < 10_000; i++) t.emit('evt', i);
   });
 
-  bench('rxjs Subject - 3 subscribers', () => {
-    const s = new Subject<number>();
-    s.subscribe(() => {});
-    s.subscribe(() => {});
-    s.subscribe(() => {});
+  // rxjs Subject - 3 subscribers
+  bench('fanout.peer.rxjs', () => {
     for (let i = 0; i < 10_000; i++) s.next(i);
   });
 
-  bench('raw Map<string, Set<fn>> - 3 listeners (hand-rolled baseline)', () => {
-    const handlers = new Map<string, Set<(i: number) => void>>();
-    function on(evt: string, fn: (i: number) => void): void {
-      let s = handlers.get(evt);
-      if (!s) { s = new Set(); handlers.set(evt, s); }
-      s.add(fn);
-    }
-    function emit(evt: string, i: number): void {
-      const s = handlers.get(evt);
-      if (s) for (const fn of s) fn(i);
-    }
-    on('evt', () => {});
-    on('evt', () => {});
-    on('evt', () => {});
+  // raw Map<string, Set<fn>> - 3 listeners (hand-rolled baseline)
+  bench('fanout.map', () => {
     for (let i = 0; i < 10_000; i++) emit('evt', i);
   });
 });
@@ -363,75 +427,86 @@ describe('comparative emit fan-out (10k events x 3 listeners)', () => {
 
 describe('fast lane - single-handler hot dispatch (10k)', () => {
   const bench = benchGroup();
-  bench('vapor-chamber fast-lane compile + dispatch', () => {
-    const lane = createFastLane();
-    const onTick = lane.compile<number, number>('tick', (n) => n * 2);
+  const lane = createFastLane();
+  const onTick = lane.compile<number, number>('tick', (n) => n * 2);
+  const fn = (n: number) => n * 2;
+  const m = mitt<{ tick: number }>();
+  m.on('tick', () => {});
+  const bus = createCommandBus();
+  bus.register('tick', (cmd) => cmd.target * 2);
+
+  // vapor-chamber fast-lane compile + dispatch (compiled once, in setup)
+  bench('hot.fastlane.compiled', () => {
     let acc = 0;
     for (let i = 0; i < 10_000; i++) acc = onTick(i);
     if (acc < 0) console.log(acc);
   });
 
-  bench('direct function call (theoretical floor)', () => {
-    const fn = (n: number) => n * 2;
+  // direct function call (theoretical floor)
+  bench('hot.floor', () => {
     let acc = 0;
     for (let i = 0; i < 10_000; i++) acc = fn(i);
     if (acc < 0) console.log(acc);
   });
 
-  bench('mitt (closest peer - emit fires listeners, no return)', () => {
-    const m = mitt<{ tick: number }>();
-    m.on('tick', () => {});
+  // mitt (closest peer - emit fires listeners, no return)
+  bench('hot.peer.mitt', () => {
     for (let i = 0; i < 10_000; i++) m.emit('tick', i);
   });
 
-  bench('vapor-chamber bus.dispatch (general-purpose, for comparison)', () => {
-    const bus = createCommandBus();
-    bus.register('tick', (cmd) => cmd.target * 2);
+  // vapor-chamber bus.dispatch (general-purpose, for comparison)
+  bench('hot.dispatch', () => {
     for (let i = 0; i < 10_000; i++) bus.dispatch('tick', i);
   });
 });
 
 describe('fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)', () => {
   const bench = benchGroup();
-  bench('vapor-chamber fast-lane emit (live, default)', () => {
-    const lane = createFastLane();
-    lane.on('evt', () => {});
-    lane.on('evt', () => {});
-    lane.on('evt', () => {});
-    for (let i = 0; i < 10_000; i++) lane.emit('evt', i);
+  const live = createFastLane();
+  live.on('evt', () => {});
+  live.on('evt', () => {});
+  live.on('evt', () => {});
+  const snapshot = createFastLane({ removal: 'snapshot' });
+  snapshot.on('evt', () => {});
+  snapshot.on('evt', () => {});
+  snapshot.on('evt', () => {});
+  const bus = createCommandBus();
+  bus.on('evt', () => {});
+  bus.on('evt', () => {});
+  bus.on('evt', () => {});
+  const m = mitt<{ evt: number }>();
+  m.on('evt', () => {});
+  m.on('evt', () => {});
+  m.on('evt', () => {});
+  const e = new EventEmitter3();
+  e.on('evt', () => {});
+  e.on('evt', () => {});
+  e.on('evt', () => {});
+
+  // vapor-chamber fast-lane emit (live, default)
+  bench('lanefanout.live', () => {
+    for (let i = 0; i < 10_000; i++) live.emit('evt', i);
   });
 
-  bench("vapor-chamber fast-lane emit (removal: 'snapshot')", () => {
-    const lane = createFastLane({ removal: 'snapshot' });
-    lane.on('evt', () => {});
-    lane.on('evt', () => {});
-    lane.on('evt', () => {});
-    for (let i = 0; i < 10_000; i++) lane.emit('evt', i);
+  // vapor-chamber fast-lane emit (removal: 'snapshot')
+  bench('lanefanout.snapshot', () => {
+    for (let i = 0; i < 10_000; i++) snapshot.emit('evt', i);
   });
 
-  bench('vapor-chamber bus.emit (general-purpose, for comparison)', () => {
-    const bus = createCommandBus();
-    bus.on('evt', () => {});
-    bus.on('evt', () => {});
-    bus.on('evt', () => {});
+  // vapor-chamber bus.emit (general-purpose, for comparison)
+  bench('lanefanout.emit', () => {
     for (let i = 0; i < 10_000; i++) bus.emit('evt', i);
   });
 
-  bench('mitt - 3 listeners (peer)', () => {
-    const m = mitt<{ evt: number }>();
-    m.on('evt', () => {});
-    m.on('evt', () => {});
-    m.on('evt', () => {});
+  // mitt - 3 listeners (peer)
+  bench('lanefanout.peer.mitt', () => {
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
   });
 
   // The EventEmitter migration guide's peer: the fast lane is what it
   // recommends for EventEmitter's pub/sub, so it is compared here, same run.
-  bench('eventemitter3 - 3 listeners (peer)', () => {
-    const e = new EventEmitter3();
-    e.on('evt', () => {});
-    e.on('evt', () => {});
-    e.on('evt', () => {});
+  // eventemitter3 - 3 listeners (peer)
+  bench('lanefanout.peer.eventemitter3', () => {
     for (let i = 0; i < 10_000; i++) e.emit('evt', i);
   });
 });
@@ -442,29 +517,21 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
   // stamping, plugin chain, hooks, result allocation. The benches below
   // measure the full path for a fair "is the lib competitive?" comparison
   // against minimal-feature peers.
+  const bus = createCommandBus();
+  bus.register('act', (cmd) => cmd.target);
+  const m = mitt<{ act: number }>();
+  m.on('act', () => {}); // can't capture a return - emit is fire-only
 
-  bench('vapor-chamber bus.dispatch - bare handler, no plugins', () => {
-    const bus = createCommandBus();
-    bus.register('act', (cmd) => cmd.target);
+  // vapor-chamber bus.dispatch - bare handler, no plugins
+  bench('compare.dispatch', () => {
     for (let i = 0; i < 10_000; i++) bus.dispatch('act', i);
   });
 
-  bench('mitt - emit (bus.emit equivalent, no result)', () => {
-    const m = mitt<{ act: number }>();
-    m.on('act', () => {});  // can't capture a return - emit is fire-only
+  // mitt - emit (bus.emit equivalent, no result)
+  bench('compare.peer.mitt', () => {
     for (let i = 0; i < 10_000; i++) m.emit('act', i);
   });
 });
-
-// ---------------------------------------------------------------------------
-// SSR rehydration throughput
-//
-// The lib's `rehydrate()` replays serialized commands through the bus. It is
-// orthogonal to Vue's own hydration - Vue 3.6.0-beta.11's static-template
-// hydration fast path speeds up VDOM/Vapor hydration but does NOT speed up
-// command replay. These benches lock the lib's replay cost so any regression
-// is visible regardless of Vue version.
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Listener fan-out - tests the cost of the on() / emit() listener walk.
@@ -474,25 +541,29 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
 
 describe('listener fan-out', () => {
   const bench = benchGroup();
-  bench('dispatch with 50 exact-match listeners + 5 wildcards', () => {
-    const bus = createCommandBus();
-    bus.register('hot', (cmd) => cmd.target);
-    for (let i = 0; i < 50; i++) bus.on('hot', () => {});
-    for (let i = 0; i < 5; i++) bus.on('hot:*', () => {});
-    for (let i = 0; i < 5_000; i++) bus.dispatch('hot', i);
+  const dispatches = createCommandBus();
+  dispatches.register('hot', (cmd) => cmd.target);
+  for (let i = 0; i < 50; i++) dispatches.on('hot', () => {});
+  for (let i = 0; i < 5; i++) dispatches.on('hot:*', () => {});
+  const emits = createCommandBus();
+  for (let i = 0; i < 50; i++) emits.on('evt', () => {});
+  for (let i = 0; i < 5; i++) emits.on('evt:*', () => {});
+
+  // dispatch with 50 exact-match listeners + 5 wildcards
+  bench('fanout50.dispatch', () => {
+    for (let i = 0; i < 5_000; i++) dispatches.dispatch('hot', i);
   });
 
-  bench('emit with 50 exact-match listeners + 5 wildcards', () => {
-    const bus = createCommandBus();
-    for (let i = 0; i < 50; i++) bus.on('evt', () => {});
-    for (let i = 0; i < 5; i++) bus.on('evt:*', () => {});
-    for (let i = 0; i < 5_000; i++) bus.emit('evt', i);
+  // emit with 50 exact-match listeners + 5 wildcards
+  bench('fanout50.emit', () => {
+    for (let i = 0; i < 5_000; i++) emits.emit('evt', i);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Persist plugin - every dispatch triggers getState() + JSON.stringify() +
-// storage.setItem(). Coalescing should batch back-to-back saves into one.
+// A store's persist - every write schedules one save per microtask: a burst of
+// writes stringifies and stores once. The bench awaits that microtask, so the
+// save is inside the timed call.
 // ---------------------------------------------------------------------------
 
 function makeMemoryStorage() {
@@ -500,95 +571,44 @@ function makeMemoryStorage() {
   return {
     getItem: (k: string) => m.get(k) ?? null,
     setItem: (k: string, v: string) => { m.set(k, v); },
-    removeItem: (k: string) => { m.delete(k); },
   };
 }
 
-describe('persist plugin throughput', () => {
+describe('store persist throughput', () => {
   const bench = benchGroup();
-  bench('100 rapid dispatches with persist enabled (small state)', () => {
-    const bus = createCommandBus();
-    let counter = 0;
-    bus.register('inc', () => ++counter);
-    bus.use(persist({
-      key: 'bench:small',
-      getState: () => ({ counter }),
-      storage: makeMemoryStorage(),
-    }));
-    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+  type Small = { counter: number };
+  type Items = { items: { id: number; name: string }[] };
+  const small = defineCoreStore('benchSmall', {
+    state: (): Small => ({ counter: 0 }),
+    reducers: { inc: (s: Small) => ({ counter: s.counter + 1 }) },
+    persist: saveTo({ key: 'bench:small', storage: makeMemoryStorage() }),
+  })(createCommandBus());
+  const items = defineCoreStore('benchItems', {
+    state: (): Items => ({ items: Array.from({ length: 50 }, (_, i) => ({ id: i, name: 'item-' + i })) }),
+    reducers: { touch: (s: Items) => ({ items: [{ ...s.items[0], id: s.items[0].id + 1 }, ...s.items.slice(1)] }) },
+    persist: saveTo({ key: 'bench:medium', storage: makeMemoryStorage() }),
+  })(createCommandBus());
+  afterAll(() => {
+    small.$dispose();
+    items.$dispose();
   });
 
-  bench('100 rapid dispatches with persist enabled (50-item array state)', () => {
-    const bus = createCommandBus();
-    const items: { id: number; name: string }[] = [];
-    for (let i = 0; i < 50; i++) items.push({ id: i, name: 'item-' + i });
-    bus.register('touch', () => { items[0].id++; });
-    bus.use(persist({
-      key: 'bench:medium',
-      getState: () => ({ items }),
-      storage: makeMemoryStorage(),
-    }));
-    for (let i = 0; i < 100; i++) bus.dispatch('touch', null);
+  // 100 rapid writes of a store with persist (small state)
+  bench('persist.small', async () => {
+    for (let i = 0; i < 100; i++) small.inc();
+    await Promise.resolve();
   });
 
-  // Same workload, but with coalesce: true - saves collapse to one per
-  // microtask burst. Measures the win when many rapid dispatches touch the
-  // same state.
-  bench('100 rapid dispatches with persist enabled + coalesce (50-item array state)', () => {
-    const bus = createCommandBus();
-    const items: { id: number; name: string }[] = [];
-    for (let i = 0; i < 50; i++) items.push({ id: i, name: 'item-' + i });
-    bus.register('touch', () => { items[0].id++; });
-    bus.use(persist({
-      key: 'bench:medium-coalesced',
-      getState: () => ({ items }),
-      storage: makeMemoryStorage(),
-      coalesce: true,
-    }));
-    for (let i = 0; i < 100; i++) bus.dispatch('touch', null);
-  });
-});
-
-describe('SSR rehydrate throughput', () => {
-  const bench = benchGroup();
-  function makeCommands(n: number): DehydratedCommand[] {
-    const out: DehydratedCommand[] = new Array(n);
-    for (let i = 0; i < n; i++) {
-      out[i] = { action: 'replay', target: i, payload: { v: i % 7 } };
-    }
-    return out;
-  }
-
-  bench('rehydrate - 10 commands, single handler', () => {
-    const bus = createCommandBus();
-    bus.register('replay', (cmd) => cmd.target);
-    rehydrate(bus, makeCommands(10));
-  });
-
-  bench('rehydrate - 100 commands, single handler', () => {
-    const bus = createCommandBus();
-    bus.register('replay', (cmd) => cmd.target);
-    rehydrate(bus, makeCommands(100));
-  });
-
-  bench('rehydrate - 1000 commands, single handler', () => {
-    const bus = createCommandBus();
-    bus.register('replay', (cmd) => cmd.target);
-    rehydrate(bus, makeCommands(1000));
-  });
-
-  bench('rehydrate - 1000 commands, ignoreUnhandled skip path', () => {
-    const bus = createCommandBus();
-    // No handler registered - every command is skipped via hasHandler check.
-    // Measures the cheap-path cost (relevant when the page replays a mix
-    // of commands and only a subset is bound on the client).
-    rehydrate(bus, makeCommands(1000), { ignoreUnhandled: true });
+  // 100 rapid writes of a store with persist (50-item array state)
+  bench('persist.items50', async () => {
+    for (let i = 0; i < 100; i++) items.touch();
+    await Promise.resolve();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Transition bridge throughput - current-Vue baseline (running version is shown
-// in each bench label via VUE_VERSION; recorded baseline blocks below stay literal)
+// Transition bridge throughput - current-Vue baseline (the running version is in
+// benchProvenance; recorded baseline blocks below stay literal)
 //
 // These benches lock the JS-layer dispatch cost of the transition bridge so
 // any future regression in the hook-dispatch path is visible regardless of Vue
@@ -626,57 +646,49 @@ describe('SSR rehydrate throughput', () => {
 //     beta.13 reference. beta.15 changed no code on these paths (docs + one guard
 //     on the non-hot v-vc-command click handler). Canonical cross-beta deltas
 //     would need beta.14 re-run on THIS host.
+// These baselines were timed with the bus and bridge built inside each call.
 // ---------------------------------------------------------------------------
 
 describe('transition bridge throughput', () => {
   const bench = benchGroup();
-  function mockEl(): Element {
-    return { tagName: 'DIV' } as unknown as Element;
-  }
+  const el = { tagName: 'DIV' } as unknown as Element;
+  const done = () => {};
+  const modal = createTransitionBridge({ bus: createCommandBus({ onMissing: 'ignore' }), namespace: 'modal' });
+  const list = createTransitionBridge({ bus: createCommandBus({ onMissing: 'ignore' }), namespace: 'list' });
+  const drawer = createTransitionBridge({ bus: createCommandBus({ onMissing: 'ignore' }), namespace: 'drawer' });
+  const raw = createCommandBus({ onMissing: 'ignore' });
 
-  bench('createTransitionBridge - all 9 hooks (1k sequences)', () => {
-    const bus = createCommandBus({ onMissing: 'ignore' });
-    const t = createTransitionBridge({ bus, namespace: 'modal' });
-    const el = mockEl();
-    const done = () => {};
+  // createTransitionBridge - all 9 hooks (1k sequences)
+  bench('transition.hooks9', () => {
     for (let i = 0; i < 1_000; i++) {
-      t.onBeforeEnter(el);
-      t.onEnter(el, done);
-      t.onAfterEnter(el);
-      t.onEnterCancelled(el);
-      t.onBeforeLeave(el);
-      t.onLeave(el, done);
-      t.onAfterLeave(el);
-      t.onLeaveCancelled(el);
-      t.onMove(el);
+      modal.onBeforeEnter(el);
+      modal.onEnter(el, done);
+      modal.onAfterEnter(el);
+      modal.onEnterCancelled(el);
+      modal.onBeforeLeave(el);
+      modal.onLeave(el, done);
+      modal.onAfterLeave(el);
+      modal.onLeaveCancelled(el);
+      modal.onMove(el);
     }
   });
 
-  bench(`createTransitionBridge - onMove only x 10k (vue ${VUE_VERSION})`, () => {
-    const bus = createCommandBus({ onMissing: 'ignore' });
-    const t = createTransitionBridge({ bus, namespace: 'list' });
-    const el = mockEl();
-    for (let i = 0; i < 10_000; i++) {
-      t.onMove(el);
-    }
+  // createTransitionBridge - onMove only x 10k
+  bench('transition.move', () => {
+    for (let i = 0; i < 10_000; i++) list.onMove(el);
   });
 
-  bench('createTransitionBridge - onEnter + onLeave x 5k (enter/leave cycle)', () => {
-    const bus = createCommandBus({ onMissing: 'ignore' });
-    const t = createTransitionBridge({ bus, namespace: 'drawer' });
-    const el = mockEl();
-    const done = () => {};
+  // createTransitionBridge - onEnter + onLeave x 5k (enter/leave cycle)
+  bench('transition.enterleave', () => {
     for (let i = 0; i < 5_000; i++) {
-      t.onEnter(el, done);
-      t.onLeave(el, done);
+      drawer.onEnter(el, done);
+      drawer.onLeave(el, done);
     }
   });
 
-  bench('createTransitionBridge - onMove vs raw bus.dispatch (overhead delta)', () => {
-    const bus = createCommandBus({ onMissing: 'ignore' });
-    for (let i = 0; i < 10_000; i++) {
-      bus.dispatch('listMove', { tagName: 'DIV' });
-    }
+  // createTransitionBridge - onMove vs raw bus.dispatch (overhead delta)
+  bench('transition.dispatch', () => {
+    for (let i = 0; i < 10_000; i++) raw.dispatch('listMove', { tagName: 'DIV' });
   });
 });
 
@@ -731,13 +743,15 @@ describe('active-link stamping - N anchors x M commits', () => {
 
   const root = buildRoot(ANCHORS);
 
-  bench(`${COMMITS} PATH commits x ${ANCHORS} anchors (full walk, unavoidable)`, () => {
+  // 50 PATH commits x 500 anchors (full walk, unavoidable)
+  bench('stamp.path', () => {
     for (let i = 0; i < COMMITS; i++) {
       stampActiveLinks('/admin', `/section-${i % 25}/item-${i}`, root);
     }
   });
 
-  bench(`${COMMITS} QUERY-ONLY commits x ${ANCHORS} anchors (what the memo skips)`, () => {
+  // 50 QUERY-ONLY commits x 500 anchors (what the memo skips)
+  bench('stamp.query', () => {
     // Same path every time - this is the per-keystroke case, and every one of
     // these walks produced stamps identical to the ones already there.
     for (let i = 0; i < COMMITS; i++) {
@@ -780,175 +794,89 @@ describe('directive delegation (.delegate) - mount/unmount cost at scale', () =>
     } as unknown as Element;
   }
 
-  function makeApp() {
+  function installed() {
     const directives = new Map<string, any>();
-    return {
-      app: { directive(name: string, def: any) { directives.set(name, def); } },
-      get: (name: string) => directives.get(name),
-    };
+    createDirectivePlugin().install({ directive(name: string, def: any) { directives.set(name, def); } } as any);
+    return directives.get('vc-command');
   }
+  const direct = installed();
+  const delegated = installed();
+  const els = Array.from({ length: N }, mockEl);
+  const plain = { arg: 'command', value: 'a', modifiers: {} };
+  const delegate = { arg: 'command', value: 'a', modifiers: { delegate: true } };
+  const unbind = { arg: 'command' };
 
-  bench(`mount + unmount ${N} direct listeners (default)`, () => {
-    const { app, get } = makeApp();
-    createDirectivePlugin().install(app);
-    const vc = get('vc-command');
-    const els: Element[] = [];
-    for (let i = 0; i < N; i++) {
-      const el = mockEl();
-      els.push(el);
-      vc.mounted(el, { arg: 'command', value: 'a', modifiers: {} });
-    }
-    for (const el of els) {
-      vc.beforeUnmount(el, { arg: 'command' });
-    }
+  // mount + unmount 5000 direct listeners (default)
+  bench('directive.direct', () => {
+    for (const el of els) direct.mounted(el, plain);
+    for (const el of els) direct.beforeUnmount(el, unbind);
   });
 
-  bench(`mount + unmount ${N} delegated listeners (.delegate)`, () => {
-    const { app, get } = makeApp();
-    createDirectivePlugin().install(app);
-    const vc = get('vc-command');
-    const els: Element[] = [];
-    for (let i = 0; i < N; i++) {
-      const el = mockEl();
-      els.push(el);
-      vc.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
-    }
-    for (const el of els) {
-      vc.beforeUnmount(el, { arg: 'command' });
-    }
+  // mount + unmount 5000 delegated listeners (.delegate)
+  bench('directive.delegate', () => {
+    for (const el of els) delegated.mounted(el, delegate);
+    for (const el of els) delegated.beforeUnmount(el, unbind);
   });
 });
 
 // ---------------------------------------------------------------------------
-// useCommandState - immediate vs coalesced (current-Vue v-for/v-if baseline;
-// running version shown in bench labels via VUE_VERSION)
+// A store - immediate vs coalesced (plan 1.32 4e: useCommandState folded into
+// the store)
 //
-// Beta.13 introduces specialized v-for block operations and reduced v-if branch
-// scope overhead in the Vapor runtime. Both optimizations feed into signal writes
-// that come from useCommandState. These benches measure the dispatch+state-write
-// cost in vapor-chamber's layer (below Vue) so we can track our contribution to
-// the overall update cost separately from Vue's runtime improvements.
-//
-// Reading these numbers:
-//   - "immediate" fires a signal write per dispatch - each write would trigger
-//     a Vue re-render if consumed in a template.
-//   - "coalesced" batches all writes via queueMicrotask - one signal write for
-//     the whole burst. The bench measures synchronous cost only; the deferred
-//     write is not awaited.
-//   - "100 dispatches vs 10" shows how coalescing scales with burst size.
-//
-// Baselines (v1.4.0, beta.13, 2026-05-28):
-//   immediate  10 array appends    20,347 hz   runs: 20,188 / 20,507
-//   coalesced  10 array appends    19,741 hz   runs: 19,767 / 19,715  - parity at small bursts
-//   immediate 100 array appends     2,012 hz   runs:  1,934 /  2,090
-//   coalesced 100 array appends     2,052 hz   runs:  2,015 /  2,090  - within noise
-//   immediate 100 counter            2,044 hz  runs:  2,015 /  2,073
-//   coalesced 100 counter            1,986 hz  runs:  1,875 /  2,098  - within noise
-//
-// Baselines (v1.5.0, beta.14, 2026-06-05):
-//   immediate  10 array appends    20,679 hz   (+2% vs beta.13)
-//   coalesced  10 array appends    20,493 hz   (+4% vs beta.13) - parity holds
-//   immediate 100 array appends     2,093 hz   (+4% vs beta.13)
-//   coalesced 100 array appends     2,086 hz   (+2% vs beta.13) - within noise
-//   immediate 100 counter            2,067 hz  (+1% vs beta.13)
-//   coalesced 100 counter            2,105 hz  (+6% vs beta.13) - within noise
-//   -> coalesce is throughput-neutral across both array and scalar types (confirmed beta.14)
-//   -> use coalesce for correctness (≤1 signal write per burst), not for throughput
-//
-// Baselines (v1.6.0, beta.15, 2026-06-11, dev host, median of 3 runs):
-//   immediate  10 array  19,100 hz    coalesced  10 array  19,100 hz
-//   immediate 100 array   1,934 hz    coalesced 100 array   1,942 hz
-//   immediate 100 counter 1,945 hz    coalesced 100 counter 1,937 hz
-//   -> ~3-7% under the beta.14 reference box, uniform across every row -> host
-//     variance, not a beta.15 change. Coalesce stays throughput-neutral.
+// Each row runs a burst of a store's action from its reset state: the
+// dispatch and state-write cost in vapor-chamber's layer, below Vue's runtime.
+//   - "immediate" writes the state per dispatch; each write would re-render a
+//     template that reads it.
+//   - "coalesced" chains the burst and writes once, a microtask later. The bench
+//     measures the synchronous cost; the deferred write lands before the next
+//     iteration's reset.
 // ---------------------------------------------------------------------------
 
-describe('useCommandState - immediate vs coalesced dispatch cost', () => {
+type BenchList = { items: number[] };
+type BenchCount = { n: number };
+const listNow = defineChamberStore('list', { state: (): BenchList => ({ items: [] }), reducers: { append: (s: BenchList, x: number) => ({ items: [...s.items, x] }) } });
+const listLater = defineChamberStore('list', { state: (): BenchList => ({ items: [] }), reducers: { append: (s: BenchList, x: number) => ({ items: [...s.items, x] }) }, coalesce: true });
+const countNow = defineChamberStore('count', { state: (): BenchCount => ({ n: 0 }), reducers: { inc: (s: BenchCount) => ({ n: s.n + 1 }) } });
+const countLater = defineChamberStore('count', { state: (): BenchCount => ({ n: 0 }), reducers: { inc: (s: BenchCount) => ({ n: s.n + 1 }) }, coalesce: true });
+
+describe('a store - immediate vs coalesced dispatch cost', () => {
   const bench = benchGroup();
-  // Each iteration creates a fresh effectScope so tryAutoCleanup finds a live
-  // Vue scope. We call dispose() inside run() and do NOT call scope.stop() -
-  // stopping would fire onScopeDispose and double-call dispose() on
-  // already-cleaned-up state, producing 0ns measurements and NaN hz.
+  const scope = effectScope();
+  const lists = scope.run(() => ({ immediate: listNow(createCommandBus()), coalesced: listLater(createCommandBus()) }))!;
+  const counts = scope.run(() => ({ immediate: countNow(createCommandBus()), coalesced: countLater(createCommandBus()) }))!;
+  afterAll(() => scope.stop());
 
-  bench('immediate - 10 dispatches, array append (simulates v-for source)', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number[]>(
-        [],
-        { append: (s, cmd) => [...s, cmd.target] },
-      );
-      for (let i = 0; i < 10; i++) bus.dispatch('append', i);
-      dispose();
-      void state;
-    });
+  const { immediate: list, coalesced: listCoalesced } = lists;
+  const { immediate: count, coalesced: countCoalesced } = counts;
+
+  // immediate - 10 dispatches, array append (simulates v-for source)
+  bench('store.immediate.append10', { beforeEach: () => { list.$reset(); } }, () => {
+    for (let i = 0; i < 10; i++) list.append(i);
   });
 
-  bench('coalesced - 10 dispatches, array append (simulates v-for source)', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number[]>(
-        [],
-        { append: (s, cmd) => [...s, cmd.target] },
-        { coalesce: true },
-      );
-      for (let i = 0; i < 10; i++) bus.dispatch('append', i);
-      dispose();
-      void state;
-    });
+  // immediate - 100 dispatches, array append (simulates v-for source)
+  bench('store.immediate.append100', { beforeEach: () => { list.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) list.append(i);
   });
 
-  bench('immediate - 100 dispatches, array append', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number[]>(
-        [],
-        { append: (s, cmd) => [...s, cmd.target] },
-      );
-      for (let i = 0; i < 100; i++) bus.dispatch('append', i);
-      dispose();
-      void state;
-    });
+  // coalesced - 10 dispatches, array append (simulates v-for source)
+  bench('store.coalesced.append10', { beforeEach: () => { listCoalesced.$reset(); } }, () => {
+    for (let i = 0; i < 10; i++) listCoalesced.append(i);
   });
 
-  bench('coalesced - 100 dispatches, array append', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number[]>(
-        [],
-        { append: (s, cmd) => [...s, cmd.target] },
-        { coalesce: true },
-      );
-      for (let i = 0; i < 100; i++) bus.dispatch('append', i);
-      dispose();
-      void state;
-    });
+  // coalesced - 100 dispatches, array append (simulates v-for source)
+  bench('store.coalesced.append100', { beforeEach: () => { listCoalesced.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) listCoalesced.append(i);
   });
 
-  bench('immediate - 100 dispatches, counter (simulates v-if condition)', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number>(
-        0,
-        { inc: (s) => s + 1 },
-      );
-      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-      dispose();
-      void state;
-    });
+  // immediate - 100 dispatches, counter (simulates v-if condition)
+  bench('store.immediate.count100', { beforeEach: () => { count.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) count.inc();
   });
 
-  bench('coalesced - 100 dispatches, counter (simulates v-if condition)', () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number>(
-        0,
-        { inc: (s) => s + 1 },
-        { coalesce: true },
-      );
-      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-      dispose();
-      void state;
-    });
+  // coalesced - 100 dispatches, counter (simulates v-if condition)
+  bench('store.coalesced.count100', { beforeEach: () => { countCoalesced.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) countCoalesced.inc();
   });
 });
 
@@ -968,7 +896,7 @@ describe('useCommandState - immediate vs coalesced dispatch cost', () => {
 // to see the auto-detection path vs the explicit fallback.
 //
 // Baselines (v1.4.0, beta.13, 2026-05-28):
-//   plain { value } object 10k writes    ~368,000 hz  <- V8 DCE upper bound; real cost ≈ zero overhead
+//   plain { value } object 10k writes    ~368,000 hz  <- V8 DCE upper bound; real cost about zero overhead
 //   closure getter/setter (OLD, v1.3)      ~2,400 hz  <- real cost; setter is a fn call V8 cannot elide
 //   alien-signals via alienSignalAdapter  ~10,500 hz  <- opt-in reactive; ~4x faster than old closure
 //   Vue ref via signal() auto-detected     ~9,500 hz  <- same algorithm, slight Vue wrapper overhead
@@ -994,7 +922,7 @@ describe('useCommandState - immediate vs coalesced dispatch cost', () => {
 //   alien-signals via alienSignalAdapter  ~8,500-10,700 hz
 //   Vue shallowRef via signal() (v1.5.0)  ~31,000-42,000 hz <- machine-state sensitive
 //        (busy vs idle); the ~4-7x ratio over the old deep ref() is the robust claim
-//   Vue ref + watchEffect subscriber      ~35,000-55,000 hz (±4.5% rme - noisiest row)
+//   Vue ref + watchEffect subscriber      ~35,000-55,000 hz (+/-4.5% rme - noisiest row)
 //   effectScope + onScopeDispose only x1k ~156,000 hz
 //   effectScope + signal + onScopeDispose  ~21,000-25,000 hz
 //   useCommandState 100 dispatches          ~1,650-2,015 hz
@@ -1002,67 +930,82 @@ describe('useCommandState - immediate vs coalesced dispatch cost', () => {
 //     lifecycle rows are stable. signal-shallow-ab (same-process A/B) is the
 //     trustworthy regression guard - it still shows shallowRef faster. No beta.15
 //     reactivity regression; the cross-run spread is host state, not code.
+// These baselines were timed with each signal and store built inside each call.
 // ---------------------------------------------------------------------------
 
 describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref', () => {
   const bench = benchGroup();
+  const plain = { value: 0 };
+  const alien = _alienFactory(0);
+  let vue!: { value: number };
+  const notified = ref(0);
+  const watching = effectScope();
+  const stores = effectScope();
+  let count!: ReturnType<typeof countNow>;
+  let countCoalesced!: ReturnType<typeof countLater>;
   beforeAll(async () => {
     await waitForVueDetection();
+    vue = signal(0);
+    let sink = 0;
+    watching.run(() => {
+      watchEffect(() => { sink = notified.value; });
+    });
+    void sink;
+    stores.run(() => {
+      count = countNow(createCommandBus());
+      countCoalesced = countLater(createCommandBus());
+    });
+  });
+  afterAll(() => {
+    watching.stop();
+    stores.stop();
   });
 
-  // ── without add-on (default fallback) ─────────────────────────────────────
+  // -- without add-on (default fallback) -------------------------------------
 
-  bench('plain { value } object - actual fallback (no Vue, no alien-signals)', () => {
-    // NOTE: V8 may dead-code-eliminate these writes (no subscribers, fresh object
-    // per iteration). The ~370k hz figure is an upper bound; real cost is near
-    // zero overhead. The honest takeaway: plain property access has no function
-    // call overhead, unlike getter/setter or alien-signals.
-    const s = { value: 0 };
+  // plain { value } object - actual fallback (no Vue, no alien-signals)
+  bench('signal.plain', () => {
+    // NOTE: V8 may dead-code-eliminate these writes (no subscribers). The ~370k
+    // hz figure is an upper bound; real cost is near zero overhead. The honest
+    // takeaway: plain property access has no function call overhead, unlike
+    // getter/setter or alien-signals.
     let sink = 0;
-    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    for (let i = 0; i < 10_000; i++) { plain.value = i; sink = plain.value; }
     if (sink < 0) console.log(sink);
   });
 
-  // ── with alien-signals add-on ──────────────────────────────────────────────
+  // -- with alien-signals add-on ----------------------------------------------
 
-  bench('alien-signals via alienSignalAdapter - opt-in reactive path', () => {
+  // alien-signals via alienSignalAdapter - opt-in reactive path
+  bench('signal.alien', () => {
     // What you get after: configureAlienSignals(alienSignal)
     // or: configureSignal(alienSignalAdapter(alienSignal))
-    const s = _alienFactory(0);
     let sink = 0;
-    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    for (let i = 0; i < 10_000; i++) { alien.value = i; sink = alien.value; }
     if (sink < 0) console.log(sink);
   });
 
-  // ── Vue auto-detected (signal() wires shallowRef) ──────────────────────────
+  // -- Vue auto-detected (signal() wires shallowRef) --------------------------
 
-  bench('Vue shallowRef via signal() - auto-detected (default)', () => {
+  // Vue shallowRef via signal() - auto-detected (default)
+  bench('signal.vue', () => {
     // What signal() returns when Vue is present: shallowRef. Goes
     // through the signal() indirection, so V8 can't constant-fold it - this is
-    // a reliable scalar-write measurement (~40-62k hz run-dependent, ~4-7x the old deep-ref ~9k).
-    const s = signal(0);
+    // a reliable scalar-write measurement.
     let sink = 0;
-    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    for (let i = 0; i < 10_000; i++) { vue.value = i; sink = vue.value; }
     if (sink < 0) console.log(sink);
   });
 
-  bench(`Vue ref + watchEffect subscriber - notify path (vue ${VUE_VERSION})`, async () => {
-    const { ref, watchEffect, effectScope } = await import('vue');
-    const scope = effectScope();
-    const r = ref(0);
-    let sink = 0;
-    scope.run(() => {
-      watchEffect(() => { sink = r.value; });
-    });
-    for (let i = 0; i < 1_000; i++) r.value = i;
-    scope.stop();
-    void sink;
+  // Vue ref + watchEffect subscriber - notify path
+  bench('signal.vue.watch', () => {
+    for (let i = 0; i < 1_000; i++) notified.value = i;
   });
 
-  // ── lifecycle overhead (current Vue) ──────────────────────────────────────
+  // -- lifecycle overhead (current Vue) ----------------------------------------
 
-  bench(`effectScope + onScopeDispose only x 1k (vue ${VUE_VERSION} lazy job cost)`, async () => {
-    const { effectScope } = await import('vue');
+  // effectScope + onScopeDispose only x 1k (lazy job cost)
+  bench('scope.empty', () => {
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
       scope.run(() => {
@@ -1073,8 +1016,8 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
     }
   });
 
-  bench(`effectScope + reactive signal + onScopeDispose x 1k (vue ${VUE_VERSION} full path)`, async () => {
-    const { effectScope, onScopeDispose } = await import('vue');
+  // effectScope + reactive signal + onScopeDispose x 1k (full path)
+  bench('scope.signal', () => {
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
       scope.run(() => {
@@ -1086,26 +1029,16 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
     }
   });
 
-  // ── useCommandState with real Vue refs ────────────────────────────────────
+  // -- a store with real Vue refs ------------------------------------------
 
-  bench(`useCommandState 100 dispatches - Vue ref signal writes (vue ${VUE_VERSION})`, () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
-      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-      dispose();
-      void state;
-    });
+  // store 100 dispatches - Vue ref signal writes
+  bench('signal.store.count100', { beforeEach: () => { count.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) count.inc();
   });
 
-  bench(`useCommandState coalesced 100 dispatches - Vue ref, 1 reactive write (vue ${VUE_VERSION})`, () => {
-    effectScope().run(() => {
-      const bus = createCommandBus();
-      const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });
-      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-      dispose();
-      void state;
-    });
+  // store coalesced 100 dispatches - Vue ref, 1 reactive write
+  bench('signal.store.coalesced100', { beforeEach: () => { countCoalesced.$reset(); } }, () => {
+    for (let i = 0; i < 100; i++) countCoalesced.inc();
   });
 });
 
@@ -1113,7 +1046,7 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
 // here. Pure deterministic signal loops are constant-foldable, so V8 dead-code-
 // eliminates the shallowRef path (whose writes have no observable effect) while
 // keeping ref's Proxy-trap side effects - producing inflated, unstable ratios
-// (observed 800x+ with ±100% rme). The honest, DCE-safe measurement lives in
+// (observed 800x+ with +/-100% rme). The honest, DCE-safe measurement lives in
 // tests/signal-shallow-ab.test.ts, which runs the REAL dispatch path (the bus
 // indirection defeats constant-folding) interleaved in-process and prints the
 // ratio on `npm run test:timing`. Use that as the source of truth.

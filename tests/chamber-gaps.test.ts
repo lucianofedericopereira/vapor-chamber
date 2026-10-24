@@ -1,12 +1,11 @@
 /**
  * Supplemental coverage for src/chamber.ts.
  *
- *  - runDispatch: async rejection, async and sync `{ ok:false }` with no
+ *  - runDispatch and runCommand: an async rejection, a `{ ok:false }` with no
  *    error attached.
  *  - untracked: the `__VC_IIFE__` const-fold guard - at runtime in tests
  *    the identifier resolves via globalThis, so both arms are drivable.
- *  - useSharedCommandState: maxSize tightening, ring-buffer trim
- *, rejected dispatch promise recording.
+ *  - useSharedCommandState: maxSize tightening, ring-buffer trim.
  *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction.
  *  - useCommandHistory redo payloads: object payload -> `__origin` spread
  *, array payload -> non-markable identity fallback.
@@ -18,7 +17,7 @@
  *  - readGlobal's catch via a throwing global getter.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
-import { runDispatch } from '../src/chamber';
+import { runCommand, runDispatch } from '../src/chamber';
 import {
   untracked,
   useSharedCommandState,
@@ -28,7 +27,7 @@ import {
   resetCommandBus,
   signal,
 } from '../src/index';
-import { createCommandBus } from '../src/index';
+import { createAsyncCommandBus, createCommandBus } from '../src/index';
 import { it } from '../src/vitest';
 
 afterEach(() => {
@@ -43,34 +42,27 @@ afterEach(() => {
 /** A bus whose dispatch answers `value` (runDispatch calls bus.dispatch directly). */
 const answering = (value: unknown) => ({ dispatch: () => value }) as unknown as Parameters<typeof runDispatch>[0];
 
-describe('runDispatch error arms', () => {
-  it('records a rejected dispatch promise', async () => {
+describe('runDispatch and runCommand error arms', () => {
+  it('runDispatch: a rejected dispatch promise is a failed result, loading back to false', async () => {
     const loading = signal(false);
-    const lastError = signal<Error | null>(null);
     const boom = new Error('rejected');
 
-    const result = await runDispatch(answering(Promise.reject(boom)), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
+    const result = await runDispatch(answering(Promise.reject(boom)), false, 'x', undefined, undefined, loading, { n: 0, seq: 0 });
 
     expect(result).toEqual({ ok: false, error: boom });
     expect(loading.value).toBe(false);
-    expect(lastError.value).toBe(boom);
   });
 
-  it('stores null when an async failure carries no error', async () => {
+  it('runDispatch: a failure with no error hands no data on', () => {
     const loading = signal(false);
-    const lastError = signal<Error | null>(new Error('stale'));
-
-    await runDispatch(answering(Promise.resolve({ ok: false })), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
-    expect(lastError.value).toBeNull();
+    const seen: unknown[] = [];
+    const result = runDispatch(answering({ ok: false }), false, 'x', undefined, undefined, loading, { n: 0, seq: 0 }, (v) => seen.push(v));
+    expect({ ok: (result as { ok: boolean }).ok, seen, loading: loading.value }).toEqual({ ok: false, seen: [], loading: false });
   });
 
-  it('stores null when a sync failure carries no error', () => {
-    const loading = signal(false);
-    const lastError = signal<Error | null>(new Error('stale'));
-
-    const result = runDispatch(answering({ ok: false }), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
-    expect((result as { ok: boolean }).ok).toBe(false);
-    expect(lastError.value).toBeNull();
+  it('runCommand: a rejected dispatch promise is a failed result', async () => {
+    const boom = new Error('rejected');
+    expect(await runCommand(answering(Promise.reject(boom)), true, 'x', undefined, undefined)).toEqual({ ok: false, error: boom, value: undefined });
   });
 });
 
@@ -88,15 +80,15 @@ describe('untracked IIFE guard', () => {
     expect(untracked(() => 11)).toBe(11);
   });
 
-  it('runDispatch calls the bus directly when __VC_IIFE__ is set, dispatch and query', () => {
+  it('runDispatch and runCommand call the bus directly when __VC_IIFE__ is set', () => {
     vi.stubGlobal('__VC_IIFE__', true);
     const bus = { dispatch: () => ({ ok: true, value: 'd' }), query: () => ({ ok: true, value: 'q' }) } as unknown as Parameters<typeof runDispatch>[0];
     const seen: unknown[] = [];
     const loading = signal(false);
-    const lastError = signal<Error | null>(null);
-    runDispatch(bus, false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 }, (v) => seen.push(v));
-    runDispatch(bus, true, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 }, (v) => seen.push(v));
-    expect(seen).toEqual(['d', 'q']);
+    runDispatch(bus, false, 'x', undefined, undefined, loading, { n: 0, seq: 0 }, (v) => seen.push(v));
+    runDispatch(bus, true, 'x', undefined, undefined, loading, { n: 0, seq: 0 }, (v) => seen.push(v));
+    seen.push((runCommand(bus, true, 'x', undefined, undefined) as { value: unknown }).value);
+    expect(seen).toEqual(['d', 'q', 'd']);
   });
 });
 
@@ -106,21 +98,19 @@ describe('untracked IIFE guard', () => {
 
 describe('useSharedCommandState', () => {
   it('tightens maxSize when a later caller asks for a smaller buffer', async () => {
-    const rejecting = {
-      on: () => () => {},
-      dispatch: () => Promise.reject(new Error('r')),
-    } as any;
+    const bus = createAsyncCommandBus();
+    bus.register('a', async () => { throw new Error('r'); });
 
-    const first = useSharedCommandState({ bus: rejecting, maxSize: 10 });
-    const second = useSharedCommandState({ bus: rejecting, maxSize: 2 });
+    const first = useSharedCommandState({ bus, maxSize: 10 });
+    const second = useSharedCommandState({ bus, maxSize: 2 });
 
-    // Three rejections against a cap of 2 -> ring buffer trims to 2.
-    await second.dispatch('a', {});
-    await second.dispatch('b', {});
-    await second.dispatch('c', {});
+    // Three failures against a cap of 2 -> ring buffer trims to 2.
+    await bus.dispatch('a', {});
+    await bus.dispatch('a', {});
+    await bus.dispatch('a', {});
 
     expect(second.errors.value).toHaveLength(2);
-    expect(second.errorCount.value).toBe(2);
+    expect(second.errors.value.length).toBe(2);
     // Same shared entry - the first caller observes the same trimmed buffer.
     expect(first.errors.value).toHaveLength(2);
 
@@ -128,22 +118,6 @@ describe('useSharedCommandState', () => {
     second.dispose();
   });
 
-  it('records a rejected dispatch promise that bypassed the bus fan-out', async () => {
-    const boom = new Error('reject');
-    const rejecting = {
-      on: () => () => {},
-      dispatch: () => Promise.reject(boom),
-    } as any;
-
-    const shared = useSharedCommandState({ bus: rejecting, maxSize: 5 });
-    const result = await shared.dispatch('pay', {});
-
-    expect(result).toEqual({ ok: false, error: boom, value: undefined });
-    expect(shared.lastError.value).toBe(boom);
-    expect(shared.inFlight.value).toBe(0);
-    expect(shared.isAnyLoading.value).toBe(false);
-    shared.dispose();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -155,7 +129,7 @@ describe('useCommandGroup name cache', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     setCommandBus(bus);
     const seen: string[] = [];
-    bus.onBefore((cmd) => { seen.push(cmd.action); });
+    bus.use({ started: (cmd) => { seen.push(cmd.action); } });
 
     const group = useCommandGroup('shop');
     for (let i = 0; i < 260; i++) group.dispatch(`act${i}`, {});

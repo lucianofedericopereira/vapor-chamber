@@ -87,6 +87,21 @@ describe('POST /api/vc', () => {
   });
 });
 
+describe('GET / (the Blade half: the cart rendered into the page)', () => {
+  it('renders the cart as the count span\'s text and as JSON in data-cart, the same as an answer', async () => {
+    const cleared = await dispatch(JSON.stringify({ command: 'cartClear' }));
+    const empty = await fetch(`${server.origin}/`).then((r) => r.text());
+    expect(empty).toContain(`data-cart='${JSON.stringify(cleared.json.state)}'>0 items (total: $0.00)</span>`);
+    // The sentence holds a `$`: a string replacement would read `$1` in it.
+    const added = await dispatch(JSON.stringify({ command: 'cartAdd', target: { id: 1 }, payload: { qty: 2 } }));
+    expect(added.json.state).toEqual({ count: 2, total: 39.98, summary: '2 items (total: $39.98)' });
+    const page = await fetch(`${server.origin}/`).then((r) => r.text());
+    expect(page).toContain(`data-cart='${JSON.stringify(added.json.state)}'>2 items (total: $39.98)</span>`);
+    // Positive control: the page still loads the bundle the cart script needs.
+    expect(page).toContain('vapor-chamber-core.iife.min.js');
+  });
+});
+
 /*
  * Why these tests start the real script: the bugs live in the order of
  * Node's `res.writeHead` calls and in how a raw request line reaches the

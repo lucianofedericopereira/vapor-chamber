@@ -160,6 +160,36 @@ describe('check-ascii: the ROOT is covered by the tree, not by a list', () => {
   });
 });
 
+/** Top-level directories holding tracked files, or null when `root` is not a git checkout. */
+function gitTopDirs(): string[] | null {
+  let out: string;
+  try {
+    out = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return null;
+  }
+  return [...new Set(out.split('\n').filter((p) => p.includes('/')).map((p) => p.slice(0, p.indexOf('/'))))];
+}
+
+describe('check-ascii: ROOTS is checked against the tree', () => {
+  // Outside a git checkout, every directory in the root that is not skipped:
+  // a superset of what git tracks, as for the root files above.
+  const dirs = gitTopDirs() ?? readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !SKIP_DIRS.has(d.name))
+    .map((d) => d.name);
+
+  it('finds tracked top-level directories to classify', () => {
+    expect(dirs.length).toBeGreaterThan(5);
+  });
+
+  it('every tracked top-level directory is a scanned root', () => {
+    expect(
+      dirs.filter((d) => !ROOTS.includes(d)),
+      'a tracked top-level directory that check-ascii never opens - add it to ROOTS',
+    ).toEqual([]);
+  });
+});
+
 describe('check-ascii: the CHARACTER alphabet actually fires', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'vc-ascii-'));
 

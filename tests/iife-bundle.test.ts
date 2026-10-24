@@ -74,21 +74,22 @@ describe('IIFE variants - audience-based contracts', () => {
   // CORE - sprinkled JS (Blade / Rails / Django). Bus + HTTP + light plugins.
   // -------------------------------------------------------------------------
   describe('core: dispatch over HTTP for sprinkled-JS sites', () => {
-    it('exposes bus, createApp, connect, http transport, light plugins', () => {
+    it('exposes bus, createApp, connect, httpTransport, light plugins', () => {
       const ns = loadNamespace(variants.core);
       assertPresent(ns, [
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect',
-        'http',
-        'logger', 'validator', 'debounce', 'throttle', 'authGuard',
+        'httpTransport',
+        'logger', 'validator', 'authGuard', 'pace', 'bindCommands', 'bindDisplay',
+        'defineChamberStore', 'commandState', 'Accepted',
       ]);
     });
 
     it('does NOT expose realtime transports, heavy plugins, mount, Vapor APIs', () => {
       const ns = loadNamespace(variants.core);
       assertAbsent(ns, [
-        'ws', 'sse',
-        'persist', 'createChannel', 'history', 'optimistic',
+        'wsTransport', 'sse',
+        'saveTo', 'createChannel', 'history',
         'mount',
         'defineVaporCustomElement', 'defineWidget',
         'defineVaporComponent', 'defineVaporAsyncComponent',
@@ -106,8 +107,9 @@ describe('IIFE variants - audience-based contracts', () => {
       assertPresent(ns, [
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect',
-        'http',
-        'logger', 'validator', 'debounce', 'throttle', 'authGuard',
+        'httpTransport',
+        'logger', 'validator', 'authGuard', 'pace', 'bindCommands', 'bindDisplay',
+        'defineChamberStore', 'commandState', 'Accepted',
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
       ]);
     });
@@ -115,8 +117,8 @@ describe('IIFE variants - audience-based contracts', () => {
     it('does NOT expose realtime transports, heavy plugins, full Vapor surface', () => {
       const ns = loadNamespace(variants.elements);
       assertAbsent(ns, [
-        'ws', 'sse',
-        'persist', 'createChannel', 'history', 'optimistic',
+        'wsTransport', 'sse',
+        'saveTo', 'createChannel', 'history',
         'mount',
         'defineVaporComponent', 'defineVaporAsyncComponent',
         'useCommand', 'useVaporAsyncCommand',
@@ -135,10 +137,12 @@ describe('IIFE variants - audience-based contracts', () => {
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect', 'mount',
         // transports
-        'http', 'ws', 'sse',
+        'httpTransport', 'wsTransport', 'sse',
         // all plugins
-        'logger', 'validator', 'history', 'debounce', 'throttle',
-        'authGuard', 'optimistic', 'persist', 'createChannel',
+        'logger', 'validator', 'history',
+        'authGuard', 'createChannel', 'pace', 'bindCommands', 'bindDisplay',
+        // the store, with its persist
+        'defineChamberStore', 'saveTo', 'Accepted',
         // widget surface
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
         // full Vapor surface

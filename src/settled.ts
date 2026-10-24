@@ -1,22 +1,17 @@
 /**
  * vapor-chamber - act on a command result that may not have arrived yet.
  *
- * A plugin is `(cmd, next) => result`, and on the ASYNC bus `next()` returns a
- * PROMISE of the result, whose `.ok` is `undefined`. A plugin that reads it as
- * the result fails silently: a logger logs every command as an error, a
- * history records nothing, a circuit breaker opens after five SUCCESSES, an
- * SSR plugin dehydrates nothing. `onSettled` settles it, and stays synchronous
- * on the sync bus.
- *
- * Two guards, because a rule applied by hand at each call site is missing
- * wherever nobody remembered it: the `Plugin` type (reading `.ok` straight off
- * `next()` does not compile), and `tests/settled-sweep.test.ts`, which checks
- * every module that returns a plugin - the IIFE/CDN build has no types.
+ * On the ASYNC bus a dispatch, a step's answer or an undo returns a PROMISE of
+ * the result, whose `.ok` is `undefined`. Code that reads it as the result
+ * fails silently. `onSettled` settles it, and stays synchronous on the sync
+ * bus, so one function serves both (the register undo path, the ledger, the
+ * store, an app reading `bus.dispatch` on either bus).
  */
 
 import type { CommandResult } from './command-bus';
+import { _report } from './report';
 
-/** A result, or the promise of one - what `next()` actually returns. */
+/** A result, or the promise of one - what a dispatch on either bus returns. */
 export type MaybeAsyncResult = CommandResult | Promise<CommandResult>;
 
 /**
@@ -49,14 +44,14 @@ export function isThenable(value: unknown): value is PromiseLike<unknown> {
 }
 
 /**
- * Run `fn` once the result is real, and PRESERVE SYNC-NESS: a sync `next()`
- * stays sync, so a plugin on the sync bus is byte-for-byte the same behaviour
- * it had before. Only the async arm is new.
+ * Run `fn` once the result is real, and PRESERVE SYNC-NESS: a sync result
+ * stays sync, so the sync bus never waits a microtask for it. Only a promise
+ * takes the async arm.
  *
- * THERE IS NO REJECTION ARM. Two call sites in `chamber.ts` (runDispatch and
- * useSharedCommandState) hand-roll the check instead: a dispatch promise that
- * REJECTS never reaches `fn`, and both have cleanup that must run anyway
- * (clearing a loading flag, recording the error), so each spells out
+ * THERE IS NO REJECTION ARM. One call site in `chamber.ts` (runDispatch)
+ * hand-rolls the check instead: a dispatch promise that REJECTS never reaches
+ * `fn`, and it has cleanup that must run anyway (clearing a loading flag,
+ * recording the error), so it spells out
  * `.then(onOk, onErr)` plus the success body again for the sync path. Through
  * `onSettled` with a rejection arm, the sync path would build its two
  * callbacks on every dispatch, since they capture that dispatch's state: a
@@ -91,10 +86,11 @@ export function onSettled<R extends MaybeAsyncResult>(
  * (WCAG 3.3.4).
  *
  * Not landing is a throw, a rejection, or a failed CommandResult, returned or
- * resolved; a throw or rejection is logged here, once for every caller, as
- * `<label> error for "<action>"`. Returns a promise when it had to wait, so
- * the caller can refuse a second press meanwhile. Shared by useCommandHistory
- * and the history() plugin, which had the defect twice.
+ * resolved; a throw or rejection is reported here (`history:failed:move`),
+ * once for every caller. Answers whether it landed, as a promise when
+ * it had to wait, so the caller can refuse a second press meanwhile and take
+ * the next step of a press only after this one landed. The ledger's undo and
+ * redo share it; useCommandHistory and history() each had the defect.
  * tests/history-undo-lands.test.ts.
  */
 export function moveUnlessRefused(
@@ -103,10 +99,13 @@ export function moveUnlessRefused(
   call: () => unknown,
   label: string,
   action: string,
-): Promise<void> | undefined {
-  const onError = (e: unknown): void => console.error(`[vapor-chamber] ${label} error for "${action}":`, e);
-  const refused = (v: unknown): boolean =>
-    v != null && typeof v === 'object' && (v as { ok?: unknown }).ok === false;
+): boolean | Promise<boolean> {
+  const onError = (e: unknown): void => _report('error', 'history:failed:move', `${label} threw for "${action}"`, e, { action });
+  const landed = (v: unknown): boolean => {
+    const refused = v != null && typeof v === 'object' && (v as { ok?: unknown }).ok === false;
+    if (refused) revert();
+    return !refused;
+  };
   let outcome: unknown;
   try {
     // The move is inside the try: an observer of the move that throws (a sync
@@ -117,14 +116,8 @@ export function moveUnlessRefused(
   } catch (e) {
     revert();
     onError(e);
-    return undefined;
+    return false;
   }
-  if (!isThenable(outcome)) {
-    if (refused(outcome)) revert();
-    return undefined;
-  }
-  return Promise.resolve(outcome).then(
-    (v) => { if (refused(v)) revert(); },
-    (e) => { revert(); onError(e); },
-  );
+  if (!isThenable(outcome)) return landed(outcome);
+  return Promise.resolve(outcome).then(landed, (e) => { revert(); onError(e); return false; });
 }

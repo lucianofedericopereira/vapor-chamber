@@ -152,6 +152,18 @@ describe('ab tool: smoke', () => {
     }
     expect(lines.join('\n')).toMatch(/pinned: --n=sum:\d+ \(and 4x\)/);
   });
+
+  it('awaits a row\'s SETTLE after each of its calls, outside the timed window', async () => {
+    const w = resolve(__dirname, '../scripts/ab/workloads/smoke-settle.mjs');
+    const log = console.log;
+    console.log = () => {};
+    try {
+      const summary = await main([__dirname, __dirname, w, '--k=2', '--rounds=4', '--ms=1', '--lengths=1']);
+      expect(Object.keys(summary)).toEqual(['pending']);
+    } finally {
+      console.log = log;
+    }
+  });
 });
 
 // Why synthetic replicates: the verdict logic is what decides whether a speed

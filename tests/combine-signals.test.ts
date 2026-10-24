@@ -1,7 +1,8 @@
 /** Two abort signals combine as `AbortSignal.any` does, with or without it, at every site (log 36.13, F1). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Accepted } from '../src/accepted';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { supersede } from '../src/plugins-extra';
 import { _combineSignals } from '../src/http';
 import type { Command } from '../src/command-bus';
@@ -75,13 +76,12 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
     });
   });
 
-  describe('createHttpBridge', () => {
+  describe('httpTransport', () => {
     it('disposing the scope cancels a request when the bridge has its own signal too', async () => {
       mode();
       const sent = backend();
       const scope = new AbortController();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal, scopeController: scope }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: new AbortController().signal, scopeController: scope }) });
       later(() => scope.abort());
       expect(code(await bus.dispatch('save', {}))).toBe('core:aborted:dispatch');
       expect(sent[0].aborted).toBe(true);
@@ -91,8 +91,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       mode();
       const sent = backend();
       const bridgeCtrl = new AbortController();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createHttpBridge({ endpoint: '/api', signal: bridgeCtrl.signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: bridgeCtrl.signal }) });
       later(() => bridgeCtrl.abort());
       expect(code(await bus.dispatch('save', {}, undefined, { signal: new AbortController().signal }))).toBe('core:aborted:dispatch');
       expect(sent[0].aborted).toBe(true);
@@ -102,21 +101,19 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       mode();
       backend();
       const own = new AbortController();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createHttpBridge({ endpoint: '/api', signal: own.signal, scopeController: new AbortController() }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: own.signal, scopeController: new AbortController() }) });
       const reason = new Error('left the page');
       later(() => own.abort(reason));
       expect((await bus.dispatch('save', {})).error).toBe(reason);
     });
   });
 
-  describe('createBatchingHttpBridge', () => {
+  describe('httpTransport with batch', () => {
     it('disposing the scope cancels a batch when the bridge has its own signal too', async () => {
       mode();
       const sent = backend(300, true);
       const scope = new AbortController();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: new AbortController().signal, scopeController: scope }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: new AbortController().signal, scopeController: scope, batch: {} }) });
       later(() => scope.abort());
       expect(code(await bus.dispatch('save', {}))).toBe('core:aborted:dispatch');
       expect(sent[0].aborted).toBe(true);
@@ -126,8 +123,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       mode();
       const sent = backend(300, true);
       const bridgeCtrl = new AbortController();
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: bridgeCtrl.signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: bridgeCtrl.signal, batch: {} }) });
       later(() => bridgeCtrl.abort());
       expect(code(await bus.dispatch('save', {}, undefined, { signal: new AbortController().signal }))).toBe('core:aborted:dispatch');
       expect(sent[0].aborted).toBe(true);
@@ -136,8 +132,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
     it('on a bridge with its own signal, a batch whose every command aborted is cancelled', async () => {
       mode();
       const sent = backend(300, true);
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: new AbortController().signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: new AbortController().signal, batch: {} }) });
       const a = new AbortController();
       const b = new AbortController();
       const done = Promise.all([
@@ -196,8 +191,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       backend(1);
       const bridgeCtrl = new AbortController();
       const count = live(bridgeCtrl.signal);
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createHttpBridge({ endpoint: '/api', signal: bridgeCtrl.signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: bridgeCtrl.signal }) });
       for (let i = 0; i < 3; i++) expect(code(await bus.dispatch('save', {}, undefined, { signal: new AbortController().signal }))).toBe('saved');
       expect(count()).toBe(0);
     });
@@ -207,10 +201,25 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       backend(1, true);
       const bridgeCtrl = new AbortController();
       const count = live(bridgeCtrl.signal);
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: bridgeCtrl.signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: bridgeCtrl.signal, batch: {} }) });
       for (let i = 0; i < 3; i++) expect(code(await bus.dispatch('save', {}, undefined, { signal: new AbortController().signal }))).toBe('saved');
       expect(count()).toBe(0);
+    });
+
+    it("on the bridge signal and the dispatch's, after a 202's polls end", async () => {
+      mode();
+      let n = 0;
+      vi.stubGlobal('fetch', async () => (n++ === 0
+        ? new Response('{}', { status: 202, headers: { 'content-type': 'application/json', location: 'http://x/jobs/1', 'retry-after': '0' } })
+        : new Response('{"state":2}', { status: 200, headers: { 'content-type': 'application/json' } })));
+      const bridgeCtrl = new AbortController();
+      const user = new AbortController();
+      const count = live(bridgeCtrl.signal);
+      const own = live(user.signal);
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api', signal: bridgeCtrl.signal, poll: { interval: 1 } }) });
+      const r = await bus.dispatch('report', {}, undefined, { signal: user.signal });
+      expect(code(await (r.value as Accepted).done)).toBe(2);
+      expect([count(), own()]).toEqual([0, 0]);
     });
 
     it("on the caller's signal, after superseded dispatches settle", async () => {

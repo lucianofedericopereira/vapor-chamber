@@ -2,10 +2,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 type Cart = { rev: number; items: string[] };
-const reducers = { add: (s: Cart, item: string) => ({ ...s, items: [...s.items, item] }) };
+// Sent: no local change, the answer is the state.
+const reducers = { add: null };
 
 /**
  * A client whose replies the test releases by hand, in any order. Each reply
@@ -27,8 +28,7 @@ describe('version orders the answers, as the server applied the writes', () => {
   it('an older answer that arrives last never replaces a newer one', async () => {
     // The server applied milk first (rev 1), then eggs (rev 2); milk's reply arrives last.
     const { client, release } = heldClient({ milk: { rev: 1, items: ['milk'] }, eggs: { rev: 2, items: ['milk', 'eggs'] } });
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: client }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: client }) });
     const cart = make(bus, (s) => s.rev);
     const a = cart.add('milk');
     const b = cart.add('eggs');
@@ -44,8 +44,7 @@ describe('version orders the answers, as the server applied the writes', () => {
 
   it('control: without version the last reply to arrive wins', async () => {
     const { client, release } = heldClient({ milk: { rev: 1, items: ['milk'] }, eggs: { rev: 2, items: ['milk', 'eggs'] } });
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: client }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: client }) });
     const cart = make(bus);
     const a = cart.add('milk');
     const b = cart.add('eggs');
@@ -61,8 +60,7 @@ describe('version orders the answers, as the server applied the writes', () => {
   it('control: a newer answer that arrives last is applied', async () => {
     // The server applied eggs first (rev 1), then milk (rev 2); milk's reply arrives last.
     const { client, release } = heldClient({ eggs: { rev: 1, items: ['eggs'] }, milk: { rev: 2, items: ['eggs', 'milk'] } });
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: client }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: client }) });
     const cart = make(bus, (s) => s.rev);
     const a = cart.add('milk');
     const b = cart.add('eggs');
@@ -77,8 +75,7 @@ describe('version orders the answers, as the server applied the writes', () => {
 
   it('an equal version is not newer; a version that is not a number falls back to arrival order', async () => {
     const { client, release } = heldClient({ a: { rev: 0, items: ['a'] }, b: { rev: Number.NaN, items: ['b'] }, c: { rev: Number.NaN, items: ['b', 'c'] } });
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: client }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: client }) });
     const cart = make(bus, (s) => s.rev);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = cart.add('a');
@@ -105,8 +102,7 @@ describe('version orders the answers, as the server applied the writes', () => {
 describe('an answer with no state writes nothing', () => {
   it('the store keeps its state and `answer` is not called', async () => {
     const { client, release } = heldClient({ milk: undefined });
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: client }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: client }) });
     const answer = vi.fn((_s: Cart, v: unknown) => v as Cart);
     const cart = defineChamberStore('cart', { state: (): Cart => ({ rev: 0, items: [] }), reducers, answer })(bus);
     const p = cart.add('milk');

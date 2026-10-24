@@ -3,8 +3,8 @@
  *
  * This file renders nothing: it forwards Vue's own define* functions, so
  * rendering-side work (attrs fallthrough, interop, hydration) lands below it.
- * The wrappers and createVaporChamberApp take an opt-in return generic
- * (`<T = any>`) and `object`-typed options: importing Vue's Vapor types here
+ * The wrappers take an opt-in return generic (`<T = any>`) and `object`-typed
+ * options, and createVaporChamberApp answers `unknown`: importing Vue's Vapor types here
  * would put a hard `vue` type dependency on the main barrel and break Vue-less
  * command-bus consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
  *
@@ -12,8 +12,8 @@
  */
 
 import {
-  signal,
   tryAutoCleanup,
+  tryKeepAliveHooks,
   untracked,
   getVaporAppFn,
   getVaporInteropRef,
@@ -22,10 +22,14 @@ import {
   getDefineVaporAsyncComponentFn,
   vueDetectionHint,
 } from './chamber';
+import { _report } from './report';
 import type { BaseBus, CommandBus, Handler, RegisterOptions, CommandResult } from './command-bus';
 import { _errResult } from './command-bus';
+import { commandState, type CommandState } from './command-state';
+import type { Signal } from './signal';
 import { DEV } from './dev';
-import { resolveBus, type BusOption, type ResultOn } from './shared-bus';
+import { resolveBus, type BusOption, } from './shared-bus';
+import { _paceOf, pace, type Paced, type PaceOption, type PacedOn } from './pace';
 
 /**
  * Why the `defineVapor*` wrappers warn instead of just returning null.
@@ -43,8 +47,8 @@ import { resolveBus, type BusOption, type ResultOn } from './shared-bus';
  * production IIFE builds; this helper is then unreferenced and tree-shaken.
  */
 function devWarnNoVapor(api: string): void {
-  console.warn(
-    `[vapor-chamber] ${api}() returned null - Vue 3.6+ with Vapor mode was not detected, ` +
+  _report('warn', 'vue:missing:vapor',
+    `${api}() returned null: Vue 3.6+ with Vapor mode was not detected, ` +
       `so the component was NOT created. ${vueDetectionHint()} ` +
       'For VDOM mode use the matching define* helper from vue instead.',
   );
@@ -65,18 +69,21 @@ function devWarnNoVapor(api: string): void {
  * `defineWidget` element property is the opposite: it arrives as itself.)
  * Pinned by tests/vapor/vapor-subpath-wiring.test.ts.
  *
+ * Typed in src/vapor.ts as a `VaporChamberApp`, where Vue's types may be
+ * named: here it answers `unknown`, and the root does not export it.
+ *
  * @example
- * import { createVaporChamberApp } from 'vapor-chamber';
+ * import { createVaporChamberApp } from 'vapor-chamber/vapor';
  * import App from './App.vue';
  * createVaporChamberApp(App).mount('#app');
  *
  * @example Root props
  * createVaporChamberApp(App, { title: 'Cart', onSave: () => onSave }).mount('#app');
  */
-export function createVaporChamberApp<TApp = any>(
+export function createVaporChamberApp(
   rootComponent: object,
   rootProps?: Record<string, unknown>,
-): TApp {
+): unknown {
   const fn = getVaporAppFn();
   if (!fn) {
     // The bare "Vapor required" message was the same whether Vue was absent,
@@ -88,7 +95,7 @@ export function createVaporChamberApp<TApp = any>(
       (DEV ? ' For VDOM mode, use createApp() from vue instead.' : '')
     );
   }
-  return fn(rootComponent, rootProps) as TApp;
+  return fn(rootComponent, rootProps);
 }
 
 /**
@@ -211,17 +218,22 @@ export function defineVaporAsyncComponent<T = any>(
 // ---------------------------------------------------------------------------
 
 /** `defineVaporCommand`'s options: how the handler registers, and on which bus. */
-export type VaporCommandOptions<B extends BaseBus = BaseBus> = RegisterOptions & BusOption<B>;
+export type VaporCommandOptions<B extends BaseBus = BaseBus, D extends number | undefined = undefined, T extends number | undefined = undefined> = RegisterOptions & BusOption<B> & PaceOption<D, T>;
 
 /**
- * defineVaporCommand - a command for hot paths in Vapor mode, with no
- * loading or error state.
+ * defineVaporCommand - a command for hot paths in Vapor mode: one action, its
+ * handler registered with the composable, and a dispatch that writes no state.
  *
- * Unlike useCommand(), this creates no loading/error signals, so a dispatch
- * writes no loading or error state.
- * Ideal for high-frequency, fire-and-forget patterns where reactive
- * loading/error state isn't needed: scroll-position tracking, mousemove
+ * Ideal for high-frequency, fire-and-forget patterns where no busy or error
+ * state is shown: scroll-position tracking, mousemove
  * sampling, telemetry / metrics events, debounced search, autosave.
+ * `{ debounce: ms }` or `{ throttle: ms }` paces the dispatch at the sender
+ * (`pace`): a paced dispatch returns a promise.
+ *
+ * One handler per action, the newest registration still live: two pages
+ * that define one action each answer while on screen, the older one again
+ * once the newer unmounts, and a page cached by KeepAlive releases its
+ * handler until it returns. tests/register-live-owner-fixture.test.ts.
  *
  * @example
  * const { dispatch } = defineVaporCommand('telemetryEvent', (cmd) => {
@@ -230,15 +242,15 @@ export type VaporCommandOptions<B extends BaseBus = BaseBus> = RegisterOptions &
  * });
  * dispatch({ name: 'page_view', params: { page: '/landing' } });
  */
-export function defineVaporCommand<B extends BaseBus = CommandBus>(
+export function defineVaporCommand<B extends BaseBus = CommandBus, D extends number | undefined = undefined, T extends number | undefined = undefined>(
   action: string,
   handler: Handler,
-  options?: VaporCommandOptions<B>
+  options?: VaporCommandOptions<B, D, T>
 ) {
   const bus = resolveBus(options?.bus);
   // The options go to register() as they are: it reads the register fields,
-  // and an undo's stored copy keeps `bus`, which nothing reads.
-  const unregister = bus.register(action, handler, options);
+  // and an undo's stored copy keeps `bus` and the pace, which nothing reads.
+  let unregister: (() => void) | null = bus.register(action, handler, options);
 
   // `untracked`, like every other composable's dispatch. This one was the gap,
   // and the worst place for it: a dispatch is an ACTION, not a read, and this
@@ -247,11 +259,28 @@ export function defineVaporCommand<B extends BaseBus = CommandBus>(
   // become that effect's dependencies and the component re-renders on state it
   // never mentions. Pass-through when Vue is absent, so the "zero reactive
   // overhead" claim above is unaffected for non-Vue consumers.
-  function dispatch(target: any, payload?: any): ResultOn<B> {
-    return untracked(() => bus.dispatch(action, target, payload)) as ResultOn<B>;
+  function direct(target: any, payload?: any): PacedOn<B, CommandResult, D, T> {
+    return untracked(() => bus.dispatch(action, target, payload)) as PacedOn<B, CommandResult, D, T>;
   }
 
-  function dispose() { unregister(); }
+  // Paced at the sender when an option says so, decided here (as useCommand).
+  let dispatch = direct;
+  let paced: Paced | undefined;
+  const pacing = _paceOf(options);
+  if (pacing !== undefined) {
+    const p = (paced = pace((_action, target, payload, o) => untracked(() => bus.dispatch(action, target, payload, o)), pacing));
+    dispatch = ((target: any, payload?: any) => p(action, target, payload)) as typeof direct;
+  }
+
+  function dispose() { paced?.dispose(); unregister?.(); unregister = null; }
+
+  // A page cached by KeepAlive releases its handler and takes it back when it
+  // returns, so the page on screen answers, as useCommand().register does.
+  // tests/register-live-owner-fixture.test.ts.
+  tryKeepAliveHooks(
+    () => { unregister?.(); unregister = null; },
+    () => { unregister ??= bus.register(action, handler, options); },
+  );
 
   tryAutoCleanup(dispose);
 
@@ -267,15 +296,17 @@ export function defineVaporCommand<B extends BaseBus = CommandBus>(
  * used inside Suspense boundaries.
  *
  * Vue 3.6.0-beta.10 introduced proper async component hydration under VDOM
- * Suspense. This composable wraps an AsyncCommandBus dispatch with reactive
- * loading/error state, making it safe for `<script setup vapor>` components
- * that await async operations. Error-boundary rendering and scheduler-flush
+ * Suspense. This composable wraps an AsyncCommandBus dispatch, untracked, and
+ * gives `pending(action, target?)` (the bus's command state for that key,
+ * `commandState`), making it safe for `<script setup vapor>` components that
+ * await async operations. Error-boundary rendering and scheduler-flush
  * behavior around async components are Vue runtime concerns (per-beta detail:
  * CHANGELOG / whitepaper alignment log).
  *
  * The dispatch function returns a Promise<CommandResult>, matching the
  * AsyncCommandBus interface. Use this when your commands hit async transports
- * (HTTP bridge, WS bridge) and you need awaitable results.
+ * (httpTransport, wsTransport) and you need awaitable results. A dispatch's
+ * own failure is its result.
  *
  * Vue 3.6.0-rc.8: an awaiting `<script setup vapor>` compiles to an
  * `async setup()` that uses runtime-core's `withAsyncContext` and returns its
@@ -287,52 +318,43 @@ export function defineVaporCommand<B extends BaseBus = CommandBus>(
  * @example
  * // In a <script setup vapor> component under <Suspense>:
  * import { useVaporAsyncCommand } from 'vapor-chamber';
- * const { dispatch, loading, lastError } = useVaporAsyncCommand(asyncBus);
+ * const { dispatch, pending } = useVaporAsyncCommand(asyncBus);
+ * const creating = pending('orderCreate');
  * const result = await dispatch('orderCreate', { items: cart });
  */
 export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult> }) {
   const bus: any = resolveBus(asyncBus as BaseBus | undefined);
-  const loading = signal(false);
-  const lastError = signal<Error | null>(null);
-  // In flight: `loading` is true while any dispatch is, as runDispatch's
-  // (tests/composable-overlap.test.ts).
-  let n = 0;
+  // Held from the first pending() call, released with the composable.
+  var state: CommandState | undefined;
 
-  // Intentionally hand-rolled, NOT routed through the shared runDispatch() that
-  // useCommand / useCommandQuery use. A single async/await is
-  // ~1.2x leaner on the dispatch wrapper than runDispatch's .then-chain (measured, v1.18.0);
-  // this is the awaited HTTP/WS path, so keep it lean. Do not "consolidate" into
-  // runDispatch - the consistency isn't worth the wrapper overhead here.
+  // Intentionally hand-rolled, NOT routed through chamber.ts's runCommand. A
+  // single async/await is ~1.2x leaner on the dispatch wrapper than a
+  // .then-chain (measured, v1.18.0); this is the awaited HTTP/WS path, so keep
+  // it lean. Do not "consolidate" - the consistency isn't worth the wrapper
+  // overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
     try {
-      // Both opening writes are inside the try: a sync subscriber that throws
-      // on either becomes a failed result and `loading` ends false (pinned by
-      // tests/vapor-async-throwing-subscriber.test.ts).
-      if (n++ === 0) loading.value = true;
-      lastError.value = null;
       // Untracked around the SYNCHRONOUS entry only - once the dispatch
       // suspends, the caller's effect has finished and there is no subscriber
       // left to leak into (pinned by the "synchronous entry is the whole
-      // exposure" test). Same scope as runDispatch's, one call, so the leaner
-      // hand-rolled wrapper above stays leaner.
-      const result = await untracked(() => bus.dispatch(action, target, payload));
-      if (!result.ok) lastError.value = result.error ?? null;
-      return result;
+      // exposure" test).
+      return await untracked(() => bus.dispatch(action, target, payload));
     } catch (e) {
-      const error = e as Error;
-      lastError.value = error;
-      return _errResult(error);
-    } finally {
-      if (--n === 0) loading.value = false;
+      return _errResult(e as Error);
     }
   }
 
-  // Dispatch-only composable (no register/on, unlike useCommand) - there are no
-  // subscriptions to tear down. Kept as a no-op for return-shape symmetry with the
-  // other composables (callers may destructure `dispose`).
-  function dispose() {}
+  /** In flight for this key, bus-wide (`commandState`'s `pending`). */
+  function pending(action: string, target?: unknown): Readonly<Signal<boolean>> {
+    return (state ??= commandState(bus)).pending(action, target);
+  }
+
+  function dispose() {
+    state?.dispose();
+    state = undefined;
+  }
 
   tryAutoCleanup(dispose);
 
-  return { dispatch, loading, lastError, dispose };
+  return { dispatch, pending, dispose };
 }

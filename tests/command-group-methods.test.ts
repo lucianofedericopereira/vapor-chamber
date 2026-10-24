@@ -39,7 +39,7 @@ describe('useCommandGroup - query / emit / use / on / dispose', () => {
   it('use(plugin) installs a plugin scoped to the shared bus', () => {
     const cart = useCommandGroup('cart');
     const calls: string[] = [];
-    cart.use((cmd, next) => { calls.push(cmd.action); return next(); });
+    cart.use({ started: (cmd) => { calls.push(cmd.action); } });
     cart.register('add', () => 1);
     cart.dispatch('add', {});
     expect(calls).toEqual(['cartAdd']);
@@ -48,7 +48,7 @@ describe('useCommandGroup - query / emit / use / on / dispose', () => {
   it('dispose() unhooks registrations, listeners, and plugins', () => {
     const cart = useCommandGroup('cart');
     const calls: string[] = [];
-    cart.use((_cmd, next) => { calls.push('plugin'); return next(); });
+    cart.use({ started: (_cmd) => { calls.push('plugin'); } });
     cart.on('*', () => calls.push('listener'));
     cart.register('add', () => { calls.push('handler'); });
 

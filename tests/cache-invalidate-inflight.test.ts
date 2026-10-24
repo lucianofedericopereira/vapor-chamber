@@ -28,16 +28,12 @@ function setup() {
   return { bus, c, db, runs: () => runs, release: () => release() };
 }
 
-describe('cache() - invalidation during a read in flight', () => {
-  it.each([
-    ['a targeted invalidate', (c: ReturnType<typeof cache>) => c.invalidate('getUser', { id: 1 })],
-    ['an action-wide invalidate', (c: ReturnType<typeof cache>) => c.invalidate('getUser')],
-    ['clear()', (c: ReturnType<typeof cache>) => c.clear()],
-  ])('does not store the overtaken answer after %s', async (_label, invalidate) => {
+describe('cache() - clear() during a read in flight', () => {
+  it('does not store the overtaken answer after clear()', async () => {
     const { bus, c, db, runs, release } = setup();
     const inflight = bus.dispatch('getUser', { id: 1 });
     db.name = 'new';
-    invalidate(c);
+    c.clear();
     release();
     expect((await inflight).value).toEqual({ name: 'old' }); // its own caller still gets its answer
 
@@ -47,14 +43,4 @@ describe('cache() - invalidation during a read in flight', () => {
     expect(runs()).toBe(2);
   });
 
-  it('still stores a read no invalidation touched', async () => {
-    const { bus, c, runs, release } = setup();
-    const first = bus.dispatch('getUser', { id: 1 });
-    c.invalidate('getUser', { id: 2 }); // another key
-    release();
-    await first;
-    await bus.dispatch('getUser', { id: 1 });
-    expect(runs()).toBe(1);
-    expect(c.size()).toBe(1);
-  });
 });

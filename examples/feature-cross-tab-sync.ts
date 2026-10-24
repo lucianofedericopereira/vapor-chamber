@@ -1,128 +1,93 @@
 /**
- * Feature example: createChannel - cross-tab coordination via BroadcastChannel
- * ===========================================================================
- * A handler computes a FACT and emits it on an event channel; the bridge puts
- * that fact on a BroadcastChannel, and every other open tab applies it.
+ * Feature example: the same cart, prefs and logout in every open tab
+ * =================================================================
+ * Two kinds of thing cross between tabs, and each has its own piece.
  *
- * WHAT CROSSES IS A FACT, NOT A COMMAND, and that is the point. If the command
- * crossed, each tab would re-run the handler and derive its own outcome - so a
- * handler that mints an id, reads a clock or starts from different state would
- * leave the tabs permanently different, and a handler that dispatches a nested
- * command would apply that derivation twice per tab. Sending what was computed
- * removes all of it: the receiving tab applies values rather than recomputing
- * them, and a derivation never crosses unless you emit it.
+ * A STORE crosses by itself. A store with `share: shareTabs()` sends each
+ * write's command. The tab holding the store's Web Lock runs every tab's
+ * command and posts it on, and every tab applies it with the store's reducer,
+ * with no dispatch, so every tab ends on one state. Mint ids and times in the
+ * call, never in the reducer. An undo in
+ * any tab undoes the command in every tab. A tab opened later asks for the
+ * state when it opens.
  *
- * The bridge is not a bus plugin, so it costs the dispatch path nothing.
+ * A FACT that is no store's state crosses on a lane, through `createChannel`.
+ * "The user logged out" is computed once, where it happened, and every other
+ * tab applies it. The bridge is not a bus plugin, so it costs the dispatch
+ * path nothing.
+ *
+ * Open this page in two tabs and dispatch in one: the other logs what arrived.
  */
 
-// One entry for a Vue app: `vapor-chamber/vue` carries the bus and its
-// plugins too, and wires Vue (the root would not).
-import { createCommandBus, setCommandBus, createChannel, persist, useCommandState } from 'vapor-chamber/vue'
+import { createChannel, createCommandBus, saveTo, shareTabs } from 'vapor-chamber'
 import { createFastLane } from 'vapor-chamber/fast-lane'
+import { defineChamberStore } from 'vapor-chamber/store'
 
 const bus = createCommandBus()
-setCommandBus(bus)
 
-// The shared event channel. One lane can carry every synced fact in the app;
-// the bridge decides which of them cross.
-const lane = createFastLane()
-
-// ─── Basic: mirror the cart across all open tabs ──────────────────────────────
+// ─── State: the cart and the prefs ───────────────────────────────────────────
 
 type CartState = { items: Array<{ id: number; qty: number }>; count: number }
 
-// The single writer. A local emit and a fact from another tab both land here,
-// so there is exactly one code path that changes cart state.
-// Outside a component, for brevity: in an app this runs in setup(). Here nothing
-// disposes it automatically (the DEV heads-up says so); call dispose() when done.
-const cartState = useCommandState<CartState>(
-  { items: [], count: 0 },
-  {
-    // Facts are absolute ("the cart is this"), not relative ("add one"), so a
-    // tab that was opened later converges instead of drifting.
-    'cartChanged': (_state, cmd) => cmd.target as CartState,
-  }
-)
-lane.on<CartState>('cartChanged', (next) => { bus.dispatch('cartChanged', next) })
+// Outside a component, for brevity: in an app this runs in setup(). Created
+// here, the store lives until `cart.$dispose()`.
+const cart = defineChamberStore('cart', {
+  state: (): CartState => ({ items: [], count: 0 }),
+  reducers: {
+    add: (state, item: { id: number; qty: number }) => ({ items: [...state.items, item], count: state.count + 1 }),
+  },
+  share: shareTabs(),
+})(bus)
+cart.$onField('count', (n) => console.log('[cart] count is now', n))
 
-// The handler COMPUTES; it does not write.
-bus.register('cartAdd', (cmd) => {
-  const s = cartState.state.value
-  lane.emit('cartChanged', {
-    items: [...s.items, cmd.target as { id: number; qty: number }],
-    count: s.count + 1,
-  })
-})
+type Prefs = { theme: 'light' | 'dark'; lang: string }
 
-const tabSync = createChannel({
-  channel: 'vapor-chamber:app',   // all tabs sharing this channel stay in step
-  lane,
-  events: ['cartChanged'],        // the wire contract, declared, not guessed at
-})
+// Shared across the open tabs, and saved: it survives the last tab closing.
+const prefs = defineChamberStore('prefs', {
+  state: (): Prefs => ({ theme: 'light', lang: 'en' }),
+  reducers: { setTheme: (state, theme: Prefs['theme']) => ({ ...state, theme }) },
+  share: shareTabs(),
+  persist: saveTo({ key: 'vc:prefs' }),
+})(bus)
+prefs.$onField('theme', (theme) => console.log('[prefs] theme is now', theme))
 
-// Tab A dispatches -> Tab A computes and emits -> Tab B and Tab C apply:
-bus.dispatch('cartAdd', { id: 1, qty: 1 })
-// cartState.state.value holds the same value in every tab.
+// ─── Facts: logout everywhere, a cleared notification ────────────────────────
 
-// ─── Auth sync: logout everywhere ────────────────────────────────────────────
+// One lane carries the app's facts. The channel decides which of them cross.
+const lane = createFastLane()
 
 bus.register('authLogout', () => {
   lane.emit('loggedOut', { at: Date.now() })   // the clock is read ONCE, here
 })
+bus.register('notificationsClear', (cmd) => {
+  lane.emit('notificationCleared', cmd.target)
+})
 
+// Every tab runs these, the one that logged out included.
 lane.on('loggedOut', () => {
+  console.log('[auth] logged out, going to /login')
   localStorage.removeItem('token')
   window.location.href = '/login'
 })
+lane.on<{ id: number }>('notificationCleared', (n) => console.log('[notifications] cleared', n.id))
 
-const authSync = createChannel({ channel: 'vapor-chamber:auth', lane, events: ['loggedOut'] })
-
-// ─── Dropping a fact on arrival ───────────────────────────────────────────────
-
-const notificationSync = createChannel({
-  channel: 'vapor-chamber:notifications',
+const facts = createChannel({
+  channel: 'vapor-chamber:facts',      // all tabs sharing this channel stay in step
   lane,
-  events: ['notificationCleared'],
-  onReceive: (event, _data) => {
+  events: ['loggedOut', 'notificationCleared'],   // the wire contract, declared, not guessed at
+  onReceive: (event) => {
     // Return false to drop a fact from another tab without applying it.
     if (event === 'notificationCleared' && document.hidden) return false
   },
 })
 
-// ─── Combined with persist: survive both tab close AND page reload ─────────────
+// On unmount: facts.dispose()
 
-type UserPrefs = { theme: 'light' | 'dark'; lang: string }
+// ─── This tab's first changes: the others log them as they arrive ────────────
 
-const prefsState = useCommandState<UserPrefs>(
-  { theme: 'light', lang: 'en' },
-  { 'prefsChanged': (_state, cmd) => cmd.target as UserPrefs }
-)
-lane.on<UserPrefs>('prefsChanged', (next) => { bus.dispatch('prefsChanged', next) })
+cart.add({ id: 1, qty: 1 })
+prefs.setTheme('dark')
 
-const prefsPersist = persist<UserPrefs>({
-  key: 'vc:prefs',
-  getState: () => prefsState.state.value,
-  filter: (cmd) => cmd.action === 'prefsChanged',
-})
-bus.use(prefsPersist)
+console.log('BroadcastChannel open?', facts.isOpen())
 
-bus.register('prefsSetTheme', (cmd) => {
-  lane.emit('prefsChanged', { ...prefsState.state.value, theme: (cmd.target as UserPrefs).theme })
-})
-
-const prefsSync = createChannel({ channel: 'vapor-chamber:prefs', lane, events: ['prefsChanged'] })
-
-// User changes theme in Tab A -> persisted to localStorage AND mirrored to all tabs
-bus.dispatch('prefsSetTheme', { theme: 'dark', lang: 'en' })
-
-// ─── Cleanup ──────────────────────────────────────────────────────────────────
-
-window.addEventListener('beforeunload', () => {
-  tabSync.dispose()
-  authSync.dispose()
-  notificationSync.dispose()
-  prefsSync.dispose()
-})
-
-console.log('BroadcastChannel open?', tabSync.isOpen())
-export {}
+export { bus, cart, prefs }

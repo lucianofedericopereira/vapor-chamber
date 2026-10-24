@@ -24,15 +24,17 @@ cd demo-app && php artisan serve
 
 `setup.sh` is idempotent and **updates** an existing `demo-app`: it replaces its
 own route block rather than skipping when one is already present, so a scaffold
-made before a page was added still picks it up. It also writes, the same way,
-the lines in `bootstrap/app.php` that leave the command routes' input as the
-client sent it (docs/integrations/laravel.md, "Input as the client sent it").
+made before a page was added still picks it up. It also requires this repo's
+Composer package from the checkout. Its provider leaves the command routes'
+input as the client sent it (docs/integrations/laravel.md, "Input as the
+client sent it"). An older scaffold's `bootstrap/app.php` lines for the same
+are removed.
 
 Needs PHP ≥ 8.3 (Laravel 13) and Composer. `setup.sh` also builds the vapor-chamber `dist/`
 on demand for the IIFE copy.
 
 `composer create-project` always pulls the **current** Laravel skeleton - last
-verified end-to-end on **Laravel 13.35** with PHP 8.5 (2026-10-13). Nothing here pins a
+verified end-to-end on **Laravel 13.38** with PHP 8.5 (2026-10-23). Nothing here pins a
 major: the wiring is one route, one controller and two action classes, which
 has not changed shape since Laravel 11.
 
@@ -40,7 +42,7 @@ has not changed shape since Laravel 11.
 
 | page | bundle | Vue? | what it shows |
 | --- | --- | --- | --- |
-| `/cart` | `core` | no | sprinkled JS: `connect()` + plain DOM, one `<script src>` |
+| `/cart` | `core` | no | sprinkled JS: `connect()`, a store seeded from the session cart, `bindCommands` and `bindDisplay` over markup, one `<script src>` |
 | `/widget` | `elements` | yes, as a module | a Vapor custom element whose events cross the shadow boundary into Alpine and plain-DOM listeners |
 
 They are separate on purpose. `/cart`'s whole point is that nothing but the
@@ -75,6 +77,12 @@ from the version the library is tested against.
 - **Server-truth state** - the cart lives in the session; reload the page and
   Blade renders the same numbers the bus returned.
 - **Wire observability** - `bus.on('*', ...)` logs every dispatch on the page.
+- **An old page** - each page sends the build it was served from as `X-App-Version`. The
+  controller compares it with `config('vapor-chamber.app_version')` (`APP_VERSION` in `.env`,
+  `1` here) and answers a page that differs `{ redirect }` to the page itself, which
+  `onRedirect` loads. Open `/cart`, set `APP_VERSION=2` in the demo's `.env` (a deploy), press
+  Add in the open tab: it reloads onto the new build, the cart intact, and the old tab's
+  command ran no action.
 
 ## Smoke test (no browser)
 
@@ -83,7 +91,7 @@ from the version the library is tested against.
 curl -s -X POST http://127.0.0.1:8000/api/vc \
   -H 'Content-Type: application/json' -H "X-CSRF-TOKEN: $TOKEN" -b cookies.txt \
   -d '{"command":"cartAdd","target":{"id":1},"payload":{"qty":2}}'
-# -> {"state":{"count":2,"total":8,"lastAdded":"Coffee"}}
+# -> {"state":{"count":2,"total":8,"totalText":"8.00","lastAdded":"Coffee"}}
 
 # validation failure - an RFC 9457 problem, the field as a JSON pointer
 ... -d '{"command":"cartAdd","target":{"id":1},"payload":{"qty":0}}'
@@ -94,9 +102,25 @@ curl -s -X POST http://127.0.0.1:8000/api/vc \
 
 # unknown command
 ... -d '{"command":"nope","target":{}}'             # -> 404 {"status":404,"code":"unknown_command","detail":"..."}
+
+# an old page (the header is the page's build, the config says 2)
+... -H 'X-App-Version: 1' -d '{"command":"cartAdd","target":{"id":1}}'   # -> 200 {"redirect":"/cart"}, no action ran
 ```
 
 (Get `$TOKEN` + session cookie from `GET /cart` first - or just use the page.)
+
+## Check your backend
+
+The wire contract's cases ship as Pact files in `contract/`. With the demo
+served and [`pact-verifier`](https://github.com/pact-foundation/pact-reference/releases)
+on the `PATH`, run from the repo root:
+
+```bash
+node scripts/verify-contract.mjs --base http://127.0.0.1:8000
+```
+
+It checks every case on the demo's own `web` routes and exits non-zero on a
+failure. An app checks itself the same way (docs/contract.md 4).
 
 **Read next:** [`docs/integrations/laravel.md`](../../docs/integrations/laravel.md)
 for the full picture - Sanctum SPA flow, Inertia coexistence, Filament panels,

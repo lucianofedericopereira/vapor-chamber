@@ -7,13 +7,15 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { describe, expect, vi } from 'vitest';
+import { describe, expect } from 'vitest';
 import { conditionOf, createAsyncCommandBus, createCommandBus, ownerOf } from '../src/command-bus';
 import { _timedOut } from '../src/directives';
 import { createOutbox } from '../src/outbox';
-import { throttle, validator } from '../src/plugins-core';
-import { ERROR_CODE_REGISTRY, schemaValidator, synthesize, type BusSchema } from '../src/schema';
-import { rehydrate } from '../src/ssr';
+import { defineTransport } from '../src/transports';
+import { validator } from '../src/plugins-core';
+import { pace } from '../src/pace';
+import { schemaValidator, synthesize, type BusSchema } from '../src/schema';
+import { ERROR_CODE_REGISTRY } from '../src/error-registry';
 import type { BusError } from '../src/command-bus';
 import { it } from '../src/vitest';
 
@@ -38,21 +40,19 @@ describe('errors match the catalogue', () => {
     matchesCatalogue(result.error);
   });
 
-  it('throttle() refuses as its own limited:handler', ({ bus }) => {
-    bus.use(throttle(['save'], 10_000));
+  it('pace() refuses a throttled call and supersedes a debounced one as the catalogue says', async ({ bus }) => {
     bus.register('save', () => 'saved');
-    bus.dispatch('save', {});
-    const second = bus.dispatch('save', {});
-    expect(second).toFailWith('throttle:limited:handler');
+    const throttled = pace(bus.dispatch, { throttle: 10_000 });
+    await throttled('save', {});
+    const second = await throttled('save', {});
+    expect(second).toFailWith('pace:limited:dispatch');
     matchesCatalogue(second.error);
-  });
-
-  it('a throttled handler refuses as the catalogue says', ({ bus }) => {
-    bus.register('save', () => 'saved', { throttle: 10_000 });
-    bus.dispatch('save', {});
-    const second = bus.dispatch('save', {});
-    expect(second).toFailWith('core:limited:handler');
-    matchesCatalogue(second.error);
+    const debounced = pace(bus.dispatch, { debounce: 10_000 });
+    const first = debounced('save', {});
+    debounced.dispose();
+    const superseded = await first;
+    expect(superseded).toFailWith('pace:aborted:dispatch');
+    matchesCatalogue(superseded.error);
   });
 
   it('an aborted dispatch refuses as the catalogue says', async () => {
@@ -79,37 +79,21 @@ describe('every library failure is coded (shape rule 2)', () => {
     matchesCatalogue(r.error);
   });
 
-  it('a schema rejection reads invalid, so the outbox drops it instead of blocking', async () => {
-    // As a plain Error the rejection read `failed`, a bug, which the outbox
-    // keeps. Coded, it reads `invalid`, the one library condition the outbox's
-    // default rule treats as final (outbox.ts, isRetryable).
-    const bus = createAsyncCommandBus();
-    bus.register('cartAdd', async () => 1);
-    bus.use(schemaValidator(cartSchema));
-    let online = false;
+  it('a schema rejection is refused before the outbox holds anything', async () => {
+    // The outbox holds at the work step, below every plugin, so the validator
+    // refuses an invalid command at once, offline too, with its own code.
     const outbox = createOutbox({
-      storage: { load: () => null, save: () => {}, clear: () => {} },
-      isOnline: () => online,
+      storage: null,
+      isOnline: () => false,
       autoFlush: false,
     });
-    outbox.install(bus);
-    await bus.dispatch('cartAdd', { id: 'x' });
-    expect(outbox.pending.value).toBe(1);
-    online = true;
-    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 0, rejected: 1 });
+    const bus = createAsyncCommandBus({ transport: defineTransport(async () => ({ ok: true, value: 1, error: undefined })), outbox });
+    bus.use(schemaValidator(cartSchema));
+    const r = await bus.dispatch('cartAdd', { id: 'x' });
+    expect(r).toFailWith('schemaValidator:invalid:payload');
+    matchesCatalogue(r.error);
     expect(outbox.pending.value).toBe(0);
     outbox.dispose();
-  });
-
-  it('rehydrate() on an async bus refuses as ssr:invalid:bus', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createAsyncCommandBus();
-    bus.register('cartAdd', async () => 1);
-    const [r] = rehydrate(bus, [{ action: 'cartAdd', target: {} }]);
-    warn.mockRestore();
-    expect(r).toFailWith('ssr:invalid:bus');
-    expect(r.error?.message).toContain('rehydrateAsync');
-    matchesCatalogue(r.error);
   });
 
   it('synthesize() without an adapter refuses as schema:missing:adapter', async () => {

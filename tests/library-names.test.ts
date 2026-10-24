@@ -1,10 +1,10 @@
 /** A name with `$` is the library's: an app's is refused, coded (log s35.117). */
 import { describe, expect, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { defineChamberStore } from '../src/store';
 import { createTestBus } from '../src/testing';
 import { it } from '../src/vitest';
+import { history } from '../src/plugins-core';
 
 const thrown = (fn: () => unknown): unknown => { try { fn(); } catch (e) { return e; } return undefined; };
 
@@ -54,7 +54,6 @@ describe("an app's $ name is refused", () => {
   it('the test bus registers <action>$undo as the real bus does, so history undoes there too', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     const h = history({ bus: bus as never });
-    bus.use(h as never);
     let undone = 0;
     bus.register('add', () => 1, { undo: () => { undone++; } });
     bus.dispatch('add', 1);

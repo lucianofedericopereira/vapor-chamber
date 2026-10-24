@@ -22,14 +22,14 @@ const failure = (p: Promise<unknown>) => p.then(() => null, (e: { code: string; 
 describe('two reads of one URL at once', () => {
   it('a silent one first: the loud one is not marked silent', async () => {
     const calls = backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const [quiet, loud] = await Promise.all([failure(http.get('/api/x', { silent: true })), failure(http.get('/api/x'))]);
     expect([quiet, loud, calls.length]).toEqual([['remote:failed:http', true], ['remote:failed:http', undefined], 2]);
   });
 
   it('a loud one first: the silent one is marked silent', async () => {
     const calls = backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const [loud, quiet] = await Promise.all([failure(http.get('/api/x')), failure(http.get('/api/x', { silent: true }))]);
     expect([loud, quiet, calls.length]).toEqual([['remote:failed:http', undefined], ['remote:failed:http', true], 2]);
   });
@@ -38,7 +38,7 @@ describe('two reads of one URL at once', () => {
 describe('a silent read that its own signal aborts', () => {
   it('joining a read in flight: marked silent', async () => {
     backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const leader = failure(http.get('/api/x', { silent: true }));
     const ac = new AbortController();
     const joiner = failure(http.get('/api/x', { silent: true, signal: ac.signal }));
@@ -48,7 +48,7 @@ describe('a silent read that its own signal aborts', () => {
 
   it('already aborted when it would join: marked silent', async () => {
     backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const leader = failure(http.get('/api/x', { silent: true }));
     const ac = new AbortController();
     ac.abort();
@@ -58,7 +58,7 @@ describe('a silent read that its own signal aborts', () => {
 
   it('leading a read others may join: marked silent', async () => {
     backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const ac = new AbortController();
     const leader = failure(http.get('/api/x', { silent: true, signal: ac.signal }));
     ac.abort();
@@ -70,21 +70,21 @@ describe('control', () => {
   it('a silent read, alone, that its signal aborts: marked silent', async () => {
     backend(500);
     const ac = new AbortController();
-    const p = failure(createHttpClient({ retry: 0 }).get('/api/x', { silent: true, signal: ac.signal, dedupe: false }));
+    const p = failure(createHttpClient({ retry: false }).get('/api/x', { silent: true, signal: ac.signal, dedupe: false }));
     ac.abort();
     expect(await p).toEqual(['transport:aborted:request', true]);
   });
 
   it('two silent reads: both marked, one request', async () => {
     const calls = backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const both = await Promise.all([failure(http.get('/api/x', { silent: true })), failure(http.get('/api/x', { silent: true }))]);
     expect([both, calls.length]).toEqual([[['remote:failed:http', true], ['remote:failed:http', true]], 1]);
   });
 
   it('two loud reads: neither marked, one request', async () => {
     const calls = backend(500);
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const both = await Promise.all([failure(http.get('/api/x')), failure(http.get('/api/x'))]);
     expect([both, calls.length]).toEqual([[['remote:failed:http', undefined], ['remote:failed:http', undefined]], 1]);
   });

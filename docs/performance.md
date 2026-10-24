@@ -5,7 +5,8 @@ describes is **already done by default**. The "Tuning knobs" section below
 trades defaults for higher throughput on specific hot paths.
 
 The rules below, condensed to one line each with where their evidence is, are
-in [V8-RULES.md](./V8-RULES.md).
+in [V8-RULES.md](./V8-RULES.md). The steps of a measurement are in
+[TESTING_PROCEDURE.md](./TESTING_PROCEDURE.md).
 
 ---
 
@@ -20,7 +21,7 @@ The lib targets two different optimization regimes:
    on `Command`, `CommandResult`, `CommandMeta` and the internal bus state.
 2. **Algorithmic complexity**: places where the cost scales with the usage
    pattern. Examples: listener fan-out (O(n) walk -> O(1) hash + O(w) wildcard
-   walk), persist plugin saves (one per dispatch -> one per microtask).
+   walk), a store's saves (one per write -> one per microtask).
 
 What the lib does **not** chase:
 - Loop-syntax micro-opts (cached `length`, index-vs-`for...of`). V8's TurboFan
@@ -46,8 +47,8 @@ only.
   monomorphic property access at every consumer site.
   Until the perf audit (s27) this held only for results the bus built itself.
   About 30 sites outside it wrote their own `{ ok, error }` or `{ ok, value }`
-  literal, a different map. They were `validator`, `authGuard`, `debounce`,
-  async `optimisticUndo`, every HTTP and WebSocket bridge result, and the
+  literal, a different map. They were `validator`, `authGuard`, the debounce plugin,
+  async `optimisticUndo`, every HTTP and WebSocket transport result, and the
   `runDispatch` and `useSharedCommandState` error paths. They now call the same two
   factories, which also shrank every IIFE (the full IIFE by 32 B brotli).
   `tests/v8-shapes.test.ts` checks the map with V8's own `%HaveSameMap`, and
@@ -56,41 +57,43 @@ only.
   idempotencyKey, response, request }` with stable field order. The last three
   are `undefined` until stamped (log s35.81, s35.136, s35.139). No late
   property additions, no shape transitions.
-- The `Command` literal is always `{ action, target, payload, meta }`, in the
-  same order across the `dispatch` / `query` / `emit` / `request` paths.
-  Corrected by the perf audit (s27), measured with `%HaveSameMap`: that holds
-  for `dispatch`, `query` and `request` on one bus type. It is pinned in
-  `tests/v8-shapes.test.ts`, where the sync `request`'s `signal` option must
-  not reach the command. `emit` builds `{ action, target }`, deliberately (see
-  its fast-path note below). The async bus adds `signal`, so an async command
-  is its own map. Padding emit to four fields was measured through the real bus
-  and declined. A `'*'` listener reading both kinds gained nothing outside the
+- The `Command` literal is always `{ action, target, payload, meta, signal }`,
+  in the same order, on both buses: dispatch, query, batch, request, a
+  replay, a command another tab sent and the test bus. `signal` is `undefined`
+  where nothing sets it, so a step's ticket fills a slot instead of adding a
+  field, and a site that reads commands from both buses sees one map
+  (`tests/v8-shapes.test.ts`, with `%HaveSameMap`). The sync `request`'s own
+  `signal` option still never reaches the command. The slot was measured
+  2026-10-24 on an Intel i7-8650U: a bare sync dispatch 0.999x (0.1 ns, MDE
+  0.1%), nothing counted on the step, batch, query and app rows (log 36.F56).
+  `emit` builds `{ action, target }`, deliberately (see its fast-path note
+  below). Padding emit to four fields was measured through the real bus and
+  declined: a `'*'` listener reading both kinds gained nothing outside the
   harness's self-A/B band (0.967-1.012x), while the padded emit itself ran
-  about 3% slower. Unifying sync and async would put a `signal` store on the
-  sync hot path, the class of change `_syncDispatchInner` records as 25% worse.
+  about 3% slower.
 - `AsyncState` and `SyncState` are initialized through single object literals
   at bus construction: no incremental field writes that would create shape
   branches.
 
-### Pre-composed plugin chain
+### Parts placed once
 
-`bus.use(plugin)` rebuilds a single composed `runner` function once per plugin
-add or remove. Dispatch calls `runner(cmd, execute)` directly, with no
-per-dispatch chain walk. Each plugin level does allocate one `next` closure per
-dispatch. The runners are re-entrant, so re-entries land at the right level. The bus's
-retry calls a transport level once per attempt. Deferred continuations
-(`debounce` calling it from a timer) re-enter the chain.
-`buildRunner`'s PERF NOTE in `src/command-bus.ts` records what that costs on
-"3 plugins + 1 listener", and why correctness took it.
+`bus.use(plugin)` places each part of a plugin once: its `started` and
+`settled` parts in the facts slot, its rules and its work steps in maps
+resolved once per action. A dispatch reads them; it walks no chain and builds
+no closure per plugin, since no part holds `next`. An action no rule or step
+covers pays one null read for each. A part's throw becomes its plugin's
+`plugin:failed:plugin` at the part's own boundary, an inline try in the bus.
 
-Each plugin call is also the boundary that turns a plugin's throw or rejected
-promise into a `plugin:failed:plugin` result. It is an inline try in each
-runner. On the async runner it is a `.then`, only when a plugin did not simply
-return its `next()` value. On "3 plugins + 1 listener" that boundary sits
-inside the self-control band (within noise) on both buses. It is measured by
-`tests/plugin-throw-ab.test.ts` with three DISTINCT plugin functions per level
-and per bus type: a real chain's shape. One function at every level keeps the
-call site near-monomorphic and understates the cost.
+### The async path awaits only what is async
+
+An async dispatch builds a promise or awaits a step only where something can
+be pending. After-hooks run in a plain loop, and only a hook that returns a
+promise is awaited. A handler that returns a value, such as a store's
+reducer, answers with no async function around it. The retry reads a
+success directly and builds its re-send only on a failure. A sent command's
+POST returns its request's own promise. `useCommand` adds no promise on a
+bus that cannot reject. Each is pinned by a count of microtask turns, and the
+rule and its measurements are V8-RULES rule 20 (log 36.F45 to 36.F49).
 
 ### Listener bucketing
 
@@ -101,8 +104,8 @@ dispatch tests it with one `startsWith`, with no `matchesPattern` call on the
 dispatch path.
 
 With 50 exact and 5 wildcard listeners, emit runs
-<!-- vc:benchEmitVsDispatchFanout -->1.44<!-- /vc:benchEmitVsDispatchFanout -->x
-the dispatch rate (no plugin chain, `meta` stamp or depth tracking), the median
+<!-- vc:benchEmitVsDispatchFanout -->1.50<!-- /vc:benchEmitVsDispatchFanout -->x
+the dispatch rate (no per-action record, `meta` stamp or depth tracking), the median
 of the latest `npm run bench:bands`.
 
 ### Counter-based `meta.id`
@@ -115,9 +118,9 @@ reps): ~12 ns per call vs ~104 ns for `crypto.randomUUID()`, about 8x.**
 entropy, so `randomUUID`'s cost moves between runtimes while the counter's
 does not.
 
-The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->2.90<!-- /vc:benchUidCounterVsUuid -->x on the
+The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->2.89<!-- /vc:benchUidCounterVsUuid -->x on the
 10k-dispatch hot path. That is the median of the latest `npm run bench:bands`, from the
-`meta overhead - uid generator comparison` bench in `tests/perf.bench.ts`. Note the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->2.90<!-- /vc:benchUidCounterVsUuid -->x per dispatch.
+`meta overhead - uid generator comparison` bench in `tests/perf.bench.ts`. Note the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->2.89<!-- /vc:benchUidCounterVsUuid -->x per dispatch.
 The rest of the dispatch dilutes it, which is why per-call absolutes should
 never be quoted as if they were end-to-end wins.
 
@@ -134,13 +137,13 @@ refresh it.
 ### Tree-shake-friendly imports
 
 The signal API lives in a side-effect-free `src/signal.ts` module. Importing
-`createHttpBridge` or `createFormBus` does not pull in the Vue
+`httpTransport` or `createFormBus` does not pull in the Vue
 feature-detection registry from `chamber.ts`. A typical Blade-style consumer
-bundle (`createCommandBus` + `createHttpBridge` + `logger`):
+bundle (`createAsyncCommandBus` + `httpTransport` + `logger`):
 
 | | Bundle |
 |--|--|
-| Brotli | **<!-- vc:sizeConsumer -->8.4<!-- /vc:sizeConsumer --> KB** |
+| Brotli | **<!-- vc:sizeConsumer -->13.3<!-- /vc:sizeConsumer --> KB** |
 | Vapor probing references | 0 |
 
 That number is measured, not retyped. `scripts/measure-size.mjs` builds this
@@ -159,32 +162,26 @@ Composables (`useCommand`, etc.) land in your bundle only if you import them.
 
 ## Tuning knobs (consumer-facing)
 
-### `persist({ ..., coalesce: true })`: collapse rapid saves
+### A store's `persist`: one save per microtask
 
-By default, every successful dispatch with the persist plugin does one
-`getState()` + `JSON.stringify()` + `setItem()` cycle. For workloads where many
-rapid commands touch the same state (form input, scroll tracking, batched cart
-updates), enable coalescing:
+A store with `persist` saves after its writes, once per microtask: a burst of
+writes in one task does one `JSON.stringify()` and one `setItem()`, with the
+last state.
 
 ```ts
-import { persist } from 'vapor-chamber';
-
-bus.use(persist({
-  key: 'vc:cart',
-  getState: () => cart.value,
-  coalesce: true,   // <- save once per microtask burst, not per dispatch
-}));
+const useCart = defineChamberStore('cart', {
+  state, reducers,
+  persist: saveTo({ key: 'vc:cart' }),
+});
 ```
 
-Trade-off: 1 microtask of latency before the save lands. Storage reads right
-after a burst of dispatches see the pre-burst state until the next tick.
-
-On 100 rapid dispatches over a 50-item array state, `coalesce: true` runs
-**<!-- vc:benchPersistCoalesce -->18.27<!-- /vc:benchPersistCoalesce -->x** the default, the median of the latest
-`npm run bench:bands`.
-
-Use it when you're measurably bottlenecked on persist. Leave the default
-otherwise, to keep storage in lockstep with bus state.
+Storage holds a write one microtask after it. A microtask runs before the next
+task, so a page unload cannot fall between a write and its save (HTML Standard,
+perform a microtask checkpoint:
+https://html.spec.whatwg.org/multipage/webappapis.html#perform-a-microtask-checkpoint). A storage read inside the same task sees the state before the
+burst. The `persist()` plugin saved on every dispatch by default and coalesced
+only when asked (in v1.31, `coalesce: true` measured 18.27x the default on
+100 dispatches over a 50-item state). The store has no per-write mode.
 
 ### `configureUid(fn)`: swap the unique-ID generator
 
@@ -215,9 +212,8 @@ right for essentially everyone. The rare consumer who needs an exact
 per-command wall clock has an escape that costs nobody else a byte:
 
 ```ts
-// 1. stamp your own, in a plugin - works with the published package
-bus.use((cmd, next) => { if (cmd.meta) cmd.meta.exactTs = Date.now(); return next(); },
-        { priority: 100 });
+// 1. stamp your own, in a plugin's started part - works with the published package
+bus.use({ started: (cmd) => { if (cmd.meta) cmd.meta.exactTs = Date.now(); } });
 ```
 
 Note what an exact clock would *not* buy. Two commands dispatched in the same
@@ -234,7 +230,7 @@ more, and it vanishes once listener fan-out dominates.
 **The trade.** Every command in one synchronous burst shares a
 `ts`. Ordering is unaffected: `meta.id` is monotonic and unique, and it is what
 you should sequence by. But the wall-clock field goes coarse by up to the
-burst's duration, so a thousand-command `rehydrate` reads as instantaneous.
+burst's duration, so a thousand-command burst reads as instantaneous.
 Commands after the first in a turn also stop tracking `vi.setSystemTime`.
 
 `meta.ts` was never a duration instrument. `Date.now()` is
@@ -244,7 +240,7 @@ plugin. On a hot loop use `createFastLane()`, which stamps no meta at all.
 
 **Nothing internal is affected.** No code in this library reads `meta.ts`.
 Every TTL or expiry decision calls `Date.now()` directly: `cache`,
-`idempotent`, `circuitBreaker`, `rateLimit`, `throttle`, transport queues, the
+`idempotent`, `circuitBreaker`, `rateLimit`, `pace`, transport queues, the
 CSRF cache. `tests/clock-source-contained.test.ts` pins it for `cache` and
 `idempotent`: it drives a deliberately frozen clock and asserts both still
 expire on real time.
@@ -252,71 +248,72 @@ expire on real time.
 Numbers are host-specific: the gain *is* the price of `Date.now()` on your
 platform. The test is self-contained and prints its table, so re-run it there.
 
-### `useSharedCommandState()`: one set of signals shared across many components
+### `commandState(bus)`: one set of signals shared across many components
 
-The default `useCommand()` composable allocates two reactive signals
-(`loading`, `lastError`) **per call**. On a page with 50 components each calling
-it, that's 100 signal nodes in the reactivity graph. Most of those components
-only need to know "is *anything* in flight?". They don't need their own private
-loading state.
+A component needs to know "is THIS in flight?" or "is *anything* in flight?".
+Neither is the component's own fact: a command's busy state is the bus's. So
+no composable keeps a count of its own, and 50 components on a page cost one
+state, plus one signal per key a reader asks about.
 
-`useSharedCommandState()` returns the **same** signal instances to every caller
-subscribed to the same bus. State is per-bus (multiple buses -> multiple shared
-states) and ref-counted (auto-dropped when the last subscriber disposes). It
-exposes a ring-buffered errors list capped at `maxSize` (default 10).
+`commandState(bus)` returns the **same** signal instances to every caller on
+the same bus, with or without Vue. `useSharedCommandState()` is the same handle
+released with the component's scope. State is per-bus (multiple buses ->
+multiple shared states) and ref-counted (dropped when the last handle
+disposes). It keeps a ring-buffered errors list capped at `maxSize` (default 10).
 
 ```ts
 import { useSharedCommandState } from 'vapor-chamber/vue';
 
-// In any number of components - all see the same isAnyLoading / errors / lastError.
-const { dispatch, isAnyLoading, lastError, errors, errorCount, clear } = useSharedCommandState();
+// In any number of components - all see the same anyPending / errors / lastError.
+const { pending, anyPending, lastError, errors, clear } = useSharedCommandState();
 
 // Bind to button disabled across the whole UI:
-//   <button :disabled="isAnyLoading">Save</button>
+//   <button :disabled="anyPending">Save</button>
 //
 // Show a top-of-page error toast:
 //   <Toast v-if="lastError">{{ lastError.message }}</Toast>
-
-await dispatch('cartAdd', product);
 ```
 
 Behavior:
-- **`inFlight`** counts concurrent dispatches across all subscribers. It
-  auto-decrements when each completes, on every path: sync throw, async reject,
-  async `ok: false`.
-- **`isAnyLoading`** is `true` when `inFlight > 0`.
+- **It is the bus's internal facts observer**, never one of the app's hooks or
+  listeners: the bus tells it `started` before the rules, and `settled`
+  after its after-hooks and before its listeners. So a listener reads its
+  command as settled, a sealed bus stays sealed, and `inspectBus` counts no
+  hook or listener for it (`tests/command-state-lane.test.ts`). It catches its
+  own writes: a subscriber's throw is logged and the dispatch runs. A fast lane
+  in its place cost a tracked dispatch +16.8 ns (log 36.84).
+- **`anyPending`** is any command in flight on the bus, from any caller.
 - **`errors`** is a ring buffer (newest last). Older entries drop when its
-  length exceeds `maxSize`.
+  length exceeds `maxSize`. A failed query lands here too.
 - **`lastError`** is the most recent error.
-- **`clear()`** wipes errors and lastError. It does not affect `inFlight`.
-- **`isLoading(action, target?)`** is per-key and bus-wide: true while any
+- **`clear()`** wipes errors and lastError. Pending keys are untouched.
+- **`pending(action, target?)`** is per-key and bus-wide: true while any
   dispatch of that `commandKey(action, target)` is in flight, from any caller.
   Each key is its own signal, written only when its count crosses 0 <-> 1. So
-  `isLoading('svcRestart', 'nginx')` does not re-run when `httpd` restarts.
-  `isLoading(action)` is the exact key `(action, undefined)`, not "any target".
-  Tracking starts at the first `isLoading()` call on the bus (a before-hook is
-  installed then), so a bus nobody asks per-key questions of pays nothing. It
-  stops when the last holder leaves with nothing in flight.
+  `pending('svcRestart', 'nginx')` does not re-run when `httpd` restarts.
+  `pending(action)` is the exact key `(action, undefined)`, not "any target".
+  Counting starts at the first `pending()` call or `anyPending` read, so a bus
+  nobody asks per-key questions of pays nothing. It stops when the last handle
+  leaves with nothing in flight, and the bus is bare again.
   Every start settles, pinned by `tests/command-loading-fixture.test.ts`. A
   plugin that throws or rejects becomes a `plugin:failed:plugin` result.
   `onMissing: 'throw'` is settled before it is re-thrown. Those are the two
-  exits that once left a key true. A sealed bus works too: the library installs its own
-  hook past the seal and seals it again. When the last holder leaves while a
+  exits that once left a key true. When the last handle leaves while a
   key is in flight, the state outlives it until that command settles. So the
   next holder (the page a route change mounts) reads the key lit
   (`tests/shared-state-handover.test.ts`).
-- **`{ signal }`** option forwards to the underlying bus dispatch (the v1.2.x
-  AbortController integration), so cancellation works the same as
-  `useCommand`.
-- **Auto-cleanup** through `tryAutoCleanup`: Vue scope or component disposal
-  calls `dispose()` automatically.
+- **`subscribe(fn)`** runs after a fact moved a value the state holds, for a
+  page whose signals are plain values.
+- **Auto-cleanup** (`useSharedCommandState`) through `tryAutoCleanup`: Vue scope
+  or component disposal calls `dispose()` automatically.
 
 When to use:
 - **Use `useSharedCommandState`** when many components only need aggregate
   state ("any loading?", "any errors?"): toolbars, status bars, global
   spinners, error toast lists.
-- **Use `useCommand`** when a component needs its own private loading/error
-  scoped to its own button or form: component-local UI state.
+- **Use `useCommand().pending(action, target)`** for a button's own busy state:
+  the key it dispatches, so two buttons on one composable go busy apart. A
+  dispatch's own failure is its result.
 
 Both can coexist on the same bus.
 
@@ -360,8 +357,8 @@ Behavior:
   `failureCondition(e) === 'aborted'` all read it. The client's
   `transport:aborted:request` and the router's `router:aborted:navigation`
   have the same name.
-- **HTTP bridge** auto-forwards `cmd.signal` to `fetch`. There is no need to
-  thread the signal through `createHttpBridge` options at construction.
+- **HTTP transport** auto-forwards `cmd.signal` to `fetch`. There is no need to
+  thread the signal through `httpTransport` options at construction.
 - **After-hooks fire** for aborted dispatches, so loggers and metrics see the
   cancellation.
 - **Sync bus** accepts `{ signal }` for type uniformity but ignores it at
@@ -373,7 +370,7 @@ Behavior:
   responder is not told.
 - `bus.dispatchBatch()` accepts `{ signal }`. With `transactional: true`, it
   rolls back already-succeeded commands on a mid-batch abort.
-- The **WebSocket bridge** honours `cmd.signal` per dispatch.
+- The **WebSocket transport** honours `cmd.signal` per dispatch.
 - The **SSE bridge** is receive-only by design, so `cmd.signal` does not apply
   at the bridge level. Call `sse.dispose()` to stop a subscription.
 
@@ -426,12 +423,13 @@ peer: it is bundled only if you install and import it yourself (~7.5 KB raw /
 [tests/alien-signals.test.ts](../tests/alien-signals.test.ts) verify the
 adapter against the real published package, not a stub.
 
-### `useCommandState({ coalesce: true })`: correctness, not speed
+### A store's `coalesce: true`: correctness, not speed
 
-`useCommandState` accepts a `{ coalesce: true }` option. It collapses a burst of
-dispatches into a single reactive signal write: at most 1 write per microtask
-burst. Bench result (v1.4.0, beta.13): throughput is **indistinguishable** from
-the default, 1,902 ops/sec vs 1,897 ops/sec across two runs.
+A store with `coalesce: true` collapses a burst of dispatches into a single
+state write: at most 1 write per microtask burst. Bench result (v1.4.0,
+beta.13, on `useCommandState`, the composable the option came from):
+throughput is **indistinguishable** from the default, 1,902 ops/sec vs 1,897
+ops/sec across two runs.
 
 Use `coalesce: true` when correctness matters: for example, a `v-for` that
 should never see a partially-updated list mid-burst. Do not reach for it as a
@@ -465,9 +463,9 @@ audience, not by feature checklist.
 
 | Variant     | Audience                                                      | Brotli |
 |-------------|---------------------------------------------------------------|--------|
-| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB |
-| `elements`  | Embeddable widgets through custom elements                    | <!-- vc:sizeIifeElements -->10.9<!-- /vc:sizeIifeElements --> KB |
-| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->15.0<!-- /vc:sizeIifeFull --> KB |
+| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB |
+| `elements`  | Embeddable widgets through custom elements                    | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB |
+| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->29.7<!-- /vc:sizeIifeFull --> KB |
 
 _(Always-current measured sizes for every export: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md), generated by `npm run size:doc` and CI-verified fresh.)_
 
@@ -497,7 +495,7 @@ audiences. Pick by what your hot path actually is.
 
 | Path                                  | When to use                                                 | Trades                                                                  |
 |---------------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------------|
-| `createCommandBus()` (general)        | App-level commands: cart, form, navigation, analytics       | Pays per call for envelope + result + plugin chain. Gives you results, plugins, hooks, listeners, schema, batch, request/response, AbortController |
+| `createCommandBus()` (general)        | App-level commands: cart, form, navigation, analytics       | Pays per call for envelope + result + the parts placed on the action. Gives you results, plugins, hooks, listeners, schema, batch, request/response, AbortController |
 | `createFastLane()` (the real hot path) | Game tick, trading data, audio buffer, scroll/mousemove, physics step | Strips everything but the function call. No envelope, no result, no plugins, no hooks, no abort. Just `(data) => handler(data)` |
 
 The fast lane lives at `vapor-chamber/fast-lane`:
@@ -514,12 +512,12 @@ onPriceTick(tick);   // pure function call, no allocations on hot path
 
 | Path                                   | Time per call | Calls in one 60 fps frame |
 |----------------------------------------|---------------|---------------------------|
-| **vapor-chamber `fast-lane`**          | <!-- vc:benchCompileNs -->8.7<!-- /vc:benchCompileNs --> ns | about <!-- vc:benchCompilePerFrame -->1,900,000<!-- /vc:benchCompilePerFrame --> |
-| mitt emit                              | <!-- vc:benchMittNs -->44.7<!-- /vc:benchMittNs --> ns | about <!-- vc:benchMittPerFrame -->370,000<!-- /vc:benchMittPerFrame --> |
-| vapor-chamber `bus.dispatch` (general) | <!-- vc:benchDispatchNs -->92.7<!-- /vc:benchDispatchNs --> ns | about <!-- vc:benchDispatchPerFrame -->180,000<!-- /vc:benchDispatchPerFrame --> |
+| **vapor-chamber `fast-lane`**          | <!-- vc:benchCompileNs -->6.2<!-- /vc:benchCompileNs --> ns | about <!-- vc:benchCompilePerFrame -->2,700,000<!-- /vc:benchCompilePerFrame --> |
+| mitt emit                              | <!-- vc:benchMittNs -->46.8<!-- /vc:benchMittNs --> ns | about <!-- vc:benchMittPerFrame -->360,000<!-- /vc:benchMittPerFrame --> |
+| vapor-chamber `bus.dispatch` (general) | <!-- vc:benchDispatchNs -->83.9<!-- /vc:benchDispatchNs --> ns | about <!-- vc:benchDispatchPerFrame -->200,000<!-- /vc:benchDispatchPerFrame --> |
 
 Stamped from the latest `npm run bench:bands` (`scripts/bench-bands.mjs`), the
-median over its runs, on <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
+median over its runs, on <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
 The times belong to that machine, so read them as an order of magnitude. A
 ratio between two of this library's rows moved 2-9% between the two machines
 measured, and one against another library is a band for one host
@@ -530,15 +528,15 @@ multiple doubled between two machines (the fast lane 13.96x on an Apple M3,
 30.63x on an Intel i7-8650U), because V8 reduces the bare call to almost
 nothing, so it was retired (docs/decisions.md, 2026-10-13).
 
-Fast lane runs **<!-- vc:benchCompileVsDispatch -->10.33<!-- /vc:benchCompileVsDispatch -->x the ops/sec of `bus.dispatch`** and
-**<!-- vc:benchCompileVsMitt -->4.83-5.83<!-- /vc:benchCompileVsMitt -->x that of mitt's emit** on single-handler dispatch. What
+Fast lane runs **<!-- vc:benchCompileVsDispatch -->14.44<!-- /vc:benchCompileVsDispatch -->x the ops/sec of `bus.dispatch`** and
+**<!-- vc:benchCompileVsMitt -->7.37-8.24<!-- /vc:benchCompileVsMitt -->x that of mitt's emit** on single-handler dispatch. What
 it costs over a direct function call is one Map lookup + one closure call. The
 closure is what supports `remove()` + `clear()`.
 
 Take multi-listener fan-out (3 listeners). The latest `npm run bench:bands`
 reads the default `'live'` fast lane at
-**<!-- vc:benchFastLaneVsMitt -->1.88-2.32<!-- /vc:benchFastLaneVsMitt -->x mitt** and
-**<!-- vc:benchFastLaneVsEventEmitter3 -->0.91-0.96<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
+**<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x mitt** and
+**<!-- vc:benchFastLaneVsEventEmitter3 -->1.01-1.16<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
 (level with it where the range spans 1). In v1.12.0 the emit loop gained the
 unsub-during-emit identity guard. A listener removed mid-emit, by itself or a
 peer, no longer skips or double-invokes a neighbor. That guard is the default
@@ -560,6 +558,11 @@ the default pays for its correctness (the 10-15% above). Pick `'snapshot'` only
 off a measured fan-out bottleneck. None of this touches single-handler
 `compile()` dispatch, and both modes share a single-listener fast path on
 `emit`.
+
+`createFastLane({ onError })` calls each listener in a `try`: a throw goes to
+`onError(error, action)` and the emit goes on, the rule a bus listener follows.
+The emit is chosen at creation, so a lane without `onError` carries no `try`.
+A store's field events ride such a lane (`tests/store-one-watcher.test.ts`).
 
 ### When to pick which
 
@@ -586,7 +589,7 @@ object reads ahead there and falls behind once the names vary (log s35.57).
 
 The rows below compare against mitt and eventemitter3, the peers with a
 migration guide here. Each ratio against them is the range over the latest
-`npm run bench:bands` (<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->).
+`npm run bench:bands` (<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->).
 That range is a fact about that host (docs/V8-RULES.md rule 15). The numbers
 this library stands on are its own paths, measured against each other.
 
@@ -595,7 +598,7 @@ this library stands on are its own paths, measured against each other.
 This is the most common emit shape in real apps. Many lifecycle, debug and
 conditional events have zero subscribers. It should be effectively free.
 
-vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->1.85-1.88<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt** (the range over the
+vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->2.12-2.24<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt** (the range over the
 latest `npm run bench:bands`). Per emit, with pre-built buses and a sink, it
 costs 3.2 ns for one repeated event name and 3.8 ns over four varying names. It
 was the same in v1.25.0 (log s35.57). The cost is a `Map.has()` and an
@@ -605,8 +608,8 @@ was the same in v1.25.0 (log s35.57). The cost is a `Map.has()` and an
 ### Emit fan-out (3 listeners)
 
 vapor-chamber `emit` runs
-**<!-- vc:benchEmitVsMittFanout -->1.53-1.63<!-- /vc:benchEmitVsMittFanout -->x mitt**
-and **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.76-0.78<!-- /vc:benchEmitVsEventEmitter3Fanout -->x eventemitter3**
+**<!-- vc:benchEmitVsMittFanout -->1.57-1.94<!-- /vc:benchEmitVsMittFanout -->x mitt**
+and **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.62-0.99<!-- /vc:benchEmitVsEventEmitter3Fanout -->x eventemitter3**
 (the range over the latest `npm run bench:bands`): ahead of mitt, behind
 eventemitter3. Where fan-out speed against eventemitter3 matters, the fast lane
 is level with it (above).
@@ -617,23 +620,23 @@ removed a *later* peer. Its cost on this row was within run-to-run variance.
 
 ### Dispatch with single handler (10k)
 
-`dispatch` is a different shape than `emit`. It returns a `CommandResult`, walks
-the plugin chain (even when empty), stamps `Command.meta` for
+`dispatch` is a different shape than `emit`. It returns a `CommandResult`, reads
+the action's record (its handler, rules and steps), stamps `Command.meta` for
 correlation/causation tracing, and tracks dispatch depth. Minimal event emitters
 (`mitt`) don't compute results, so comparing `bus.dispatch` to `m.emit` is
 apples-to-oranges. Real peers are Pinia's action dispatch, Redux's dispatch, or
 any middleware-chained bus.
 
 mitt's `emit` calls the subscribed functions and returns nothing.
-`bus.dispatch` resolves the handler, runs the plugin chain, stamps the meta and
+`bus.dispatch` resolves the handler, runs the action's rules and steps, stamps the meta and
 returns a `CommandResult`. mitt's emit runs
-**<!-- vc:benchMittEmitVsDispatch -->1.89-2.08<!-- /vc:benchMittEmitVsDispatch -->x**
+**<!-- vc:benchMittEmitVsDispatch -->1.81-2.47<!-- /vc:benchMittEmitVsDispatch -->x**
 the ops/sec of `bus.dispatch` (the range over the latest `npm run bench:bands`).
 
 The gap reflects the work `dispatch` does per call. It allocates the meta object
 (`{ ts, id, correlationId, causationId, origin, idempotencyKey, response,
-request }`) and the result object (`{ ok, value, error }`). It invokes the
-plugin runner and tracks dispatch depth. None of those are free, and all are
+request }`) and the result object (`{ ok, value, error }`). It reads the
+action's record and tracks dispatch depth. None of those are free, and all are
 unavoidable for the bus pattern's semantics.
 
 ### What this means
@@ -691,7 +694,7 @@ nested fields. So `shallowRef` is semantically equivalent for every internal
 signal, and it skips that proxy cost.
 
 `tests/signal-shallow-ab.test.ts` measures it as an **interleaved
-same-process A/B** on the real `useCommandState` dispatch path (median of 5
+same-process A/B** on the real dispatch path, a handler writing a `signal()` (median of 5
 interleaved reps, `process.hrtime`). The coarse vitest-bench harness cannot
 resolve this: its per-iteration setup floor compresses array and scalar cases
 to one rate.
@@ -722,8 +725,8 @@ The real dispatch path defeats constant-folding, since the command bus is
 opaque indirection.
 
 If you genuinely need deep reactivity (nested-mutation tracking for a
-`v-model`-bound state object), opt back in per state. Use `useDeepCommandState`
-or `deepSignal` from `vapor-chamber/reactive`. It pays the `ref` cost only where
+`v-model`-bound state object), opt back in per state: a store's `deep: true`, or `deepSignal` from
+`vapor-chamber/reactive`. It pays the `ref` cost only where
 you ask for it, and every other signal stays on the fast shallow path.
 
 ---

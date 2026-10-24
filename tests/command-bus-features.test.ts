@@ -1,6 +1,8 @@
-import { describe, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll, ownerOf } from '../src/command-bus';
-import { optimisticUndo } from '../src/plugins-core';
+import { describe, expect, vi, afterEach } from 'vitest';
+import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, disposeAll, ownerOf } from '../src/command-bus';
+import { matchesPattern } from '../src/pattern';
+import { createBuffer } from '../src/buffer';
+import { Accepted } from '../src/accepted';
 import { createTestBus } from '../src/testing';
 import { getCommandBus, setCommandBus, resetCommandBus } from '../src/chamber';
 import { stubEnv, stubGlobal } from '../src/vitest-pure';
@@ -118,61 +120,6 @@ describe('onMissing option', () => {
     await expect(bus.dispatch('no.handler', {})).rejects.toThrow('No handler');
   });
 });
-
-// ─── Plugin priority ──────────────────────────────────────────────────────────
-
-describe('plugin priority', () => {
-  it('higher priority plugin runs first regardless of registration order', ({ bus }) => {
-    const order: string[] = [];
-
-    bus.use((_cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
-    bus.use((_cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
-
-    bus.register('test', () => null);
-    bus.dispatch('test', {});
-
-    expect(order).toEqual(['high', 'low']);
-  });
-
-  it('equal priority preserves registration order', ({ bus }) => {
-    const order: string[] = [];
-
-    bus.use((_cmd, next) => { order.push('first'); return next(); }, { priority: 5 });
-    bus.use((_cmd, next) => { order.push('second'); return next(); }, { priority: 5 });
-
-    bus.register('test', () => null);
-    bus.dispatch('test', {});
-
-    expect(order).toEqual(['first', 'second']);
-  });
-
-  it('default priority (0) runs after explicitly prioritized plugins', ({ bus }) => {
-    const order: string[] = [];
-
-    bus.use((_cmd, next) => { order.push('default'); return next(); });
-    bus.use((_cmd, next) => { order.push('priority'); return next(); }, { priority: 1 });
-
-    bus.register('test', () => null);
-    bus.dispatch('test', {});
-
-    expect(order).toEqual(['priority', 'default']);
-  });
-
-  it('unsubscribing a prioritized plugin works correctly', ({ bus }) => {
-    const order: string[] = [];
-
-    const unsub = bus.use((_cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
-    bus.use((_cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
-
-    bus.register('test', () => null);
-    unsub();
-    bus.dispatch('test', {});
-
-    expect(order).toEqual(['low']);
-  });
-});
-
-// ─── createTestBus ────────────────────────────────────────────────────────────
 
 describe('createTestBus', () => {
   it('records dispatched commands', () => {
@@ -676,34 +623,6 @@ describe('register with undo handler', () => {
   });
 });
 
-// ─── Per-command throttle ─────────────────────────────────────────────────────
-
-describe('per-command throttle at register time', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('throttles handler execution', ({ bus }) => {
-    const handler = vi.fn(() => 'result');
-
-    bus.register('fastAction', handler, { throttle: 100 });
-
-    const r1 = bus.dispatch('fastAction', { id: 1 });
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(r1.value).toBe('result');
-
-    const r2 = bus.dispatch('fastAction', { id: 1 });
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(r2).toFailWith('core:limited:handler');
-    expect(r2.error?.message).toContain('throttled');
-    expect((r2.error as any)?.context?.retryIn).toBeGreaterThan(0);
-
-    vi.advanceTimersByTime(100);
-
-    const r3 = bus.dispatch('fastAction', { id: 1 });
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-});
-
 // ─── SSR concurrency (independent bus instances, no state bleed) ─────────────
 
 describe('SSR concurrency - createCommandBus isolation', () => {
@@ -726,7 +645,7 @@ describe('SSR concurrency - createCommandBus isolation', () => {
     const busA = createCommandBus();
     const busB = createCommandBus();
 
-    busA.use((cmd, next) => { log.push(`A:${cmd.action}`); return next(); });
+    busA.use({ started: (cmd) => { log.push(`A:${cmd.action}`); } });
     busA.register('ping', () => null);
     busB.register('ping', () => null);
 
@@ -936,7 +855,7 @@ describe('bus.clear() (sync)', () => {
 
   it('removes plugins', ({ bus }) => {
     const seen: string[] = [];
-    bus.use((cmd, next) => { seen.push(cmd.action); return next(); });
+    bus.use({ started: (cmd) => { seen.push(cmd.action); } });
     bus.register('a', () => null);
     bus.clear();
 
@@ -971,7 +890,7 @@ describe('bus.clear() (sync)', () => {
 describe('bus.clear() (async)', () => {
   it('removes all handlers and plugins', async ({ asyncBus: bus }) => {
     const seen: string[] = [];
-    bus.use(async (cmd, next) => { seen.push(cmd.action); return next(); });
+    bus.use({ started: (cmd) => { seen.push(cmd.action); } });
     bus.register('a', async () => 1);
     bus.clear();
 
@@ -1071,7 +990,7 @@ describe('createTestBus - plugin and hook support', () => {
     const bus = createTestBus();
     const seen: string[] = [];
 
-    bus.use((cmd, next) => { seen.push(cmd.action); return next(); });
+    bus.use({ started: (cmd) => { seen.push(cmd.action); } });
     bus.dispatch('hello', {});
 
     expect(seen).toEqual(['hello']);
@@ -1081,7 +1000,7 @@ describe('createTestBus - plugin and hook support', () => {
     const bus = createTestBus();
     const seen: string[] = [];
 
-    const unsub = bus.use((cmd, next) => { seen.push(cmd.action); return next(); });
+    const unsub = bus.use({ started: (cmd) => { seen.push(cmd.action); } });
     unsub();
     bus.dispatch('hello', {});
 
@@ -1210,28 +1129,6 @@ describe("naming convention onViolation: 'ignore'", () => {
   });
 });
 
-// ─── wrapThrottle: circular ref safety ────────────────────────────────────────
-
-describe('wrapThrottle circular-ref target', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('handles circular-reference target without throwing', ({ bus }) => {
-    const handler = vi.fn(() => 'ok');
-    bus.register('circAction', handler, { throttle: 100 });
-
-    const circular: any = { self: null };
-    circular.self = circular;
-
-    const r1 = bus.dispatch('circAction', circular);
-    expect(r1.ok).toBe(true);
-
-    const r2 = bus.dispatch('circAction', circular);
-    expect(r2).toFailWith('core:limited:handler');
-    expect(r2.error?.message).toContain('throttled');
-  });
-});
-
 // ─── async onMissing: 'ignore' and function modes ─────────────────────────────
 
 describe("async bus onMissing extended", () => {
@@ -1266,23 +1163,12 @@ describe('syncRequest with throwing plugin', () => {
     using _errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.respond('qa', () => 'answer');
-    bus.use(() => { throw new Error('plugin-kaboom'); });
+    bus.use({ admit: () => { throw new Error('plugin-kaboom'); } });
 
     const result = await bus.request('qa', {});
-    // Converted at the plugin boundary (tests/plugin-throw-fixture.test.ts).
+    // Converted at the part's boundary (tests/plugin-throw-fixture.test.ts).
     expect(result).toFailWith('plugin:failed:plugin');
     expect(((result.error as Error).cause as Error).message).toBe('plugin-kaboom');
-  });
-});
-
-// ─── syncUse: async plugin warning ───────────────────────────────────────────
-
-describe('syncUse async plugin warning', () => {
-  it('warns when async function installed on sync bus', () => {
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus();
-    bus.use((async (_cmd: unknown, next: () => unknown) => next()) as never); // async plugin on a SYNC bus - the warning under test
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Async plugin'));
   });
 });
 
@@ -1357,7 +1243,7 @@ describe('createTestBus afterHook silent catch', () => {
     const result = bus.dispatch('ping', {});
     expect(result.ok).toBe(true); // dispatch still succeeds
     expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining('[vapor-chamber/test]'),
+      expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] test:failed:hook: /),
       expect.any(Error),
     );
   });
@@ -1368,7 +1254,7 @@ describe('createTestBus afterHook silent catch', () => {
 describe('createTestBus double-unsub is a no-op', () => {
   it('calling use() unsub twice does not throw', () => {
     const bus = createTestBus();
-    const unsub = bus.use((_cmd, next) => next());
+    const unsub = bus.use({ begin: () => undefined });
     unsub();
     expect(() => unsub()).not.toThrow(); // i === -1 on second call
   });
@@ -1429,7 +1315,7 @@ describe('sync dispatchBatch continueOnError multiple failures', () => {
 
 describe('sync bus double-unsub is a no-op', () => {
   it('use() unsub called twice does not throw', ({ bus }) => {
-    const unsub = bus.use((_cmd, next) => next());
+    const unsub = bus.use({ begin: () => undefined });
     unsub();
     expect(() => unsub()).not.toThrow();
   });
@@ -1467,30 +1353,11 @@ describe('async dispatchBatch continueOnError multiple failures', () => {
   });
 });
 
-// ─── async register with throttle (line 463) ─────────────────────────────────
-
-describe('async register with throttle option', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('throttles handler on async bus', async ({ asyncBus: bus }) => {
-    const handler = vi.fn(async () => 'result');
-    bus.register('fastAsync', handler, { throttle: 100 });
-
-    const r1 = await bus.dispatch('fastAsync', { id: 1 });
-    expect(r1.ok).toBe(true);
-
-    const r2 = await bus.dispatch('fastAsync', { id: 1 });
-    expect(r2).toFailWith('core:limited:handler');
-    expect(r2.error?.message).toContain('throttled');
-  });
-});
-
 // ─── async bus double-unsub guard (lines 473-484) ────────────────────────────
 
 describe('async bus double-unsub is a no-op', () => {
   it('use() unsub called twice does not throw', async ({ asyncBus: bus }) => {
-    const unsub = bus.use(async (_cmd, next) => next());
+    const unsub = bus.use({ begin: () => undefined });
     unsub();
     expect(() => unsub()).not.toThrow();
   });
@@ -1573,14 +1440,6 @@ describe('bus.query() - read-only dispatch', () => {
     expect(result).toSucceedWith({ name: 'Dev', id: 42 });
   });
 
-  it('skips beforeHooks (no mutation gating)', ({ bus }) => {
-    const beforeCalls: string[] = [];
-    bus.onBefore((cmd) => { beforeCalls.push(cmd.action); });
-    bus.register('getUser', () => 'data');
-    bus.query('getUser', {});
-    expect(beforeCalls).toEqual([]); // beforeHook NOT called
-  });
-
   it('still fires afterHooks and on() listeners', ({ bus }) => {
     const afterCalls: string[] = [];
     const onCalls: string[] = [];
@@ -1594,7 +1453,7 @@ describe('bus.query() - read-only dispatch', () => {
 
   it('runs through plugin pipeline', ({ bus }) => {
     const pluginCalls: string[] = [];
-    bus.use((cmd, next) => { pluginCalls.push(cmd.action); return next(); });
+    bus.use({ started: (cmd) => { pluginCalls.push(cmd.action); } });
     bus.register('getUser', () => 'data');
     bus.query('getUser', {});
     expect(pluginCalls).toEqual(['getUser']);
@@ -1604,14 +1463,6 @@ describe('bus.query() - read-only dispatch', () => {
     bus.register('getUser', async () => 'async-data');
     const result = await bus.query('getUser', {});
     expect(result).toSucceedWith('async-data');
-  });
-
-  it('async query skips beforeHooks', async ({ asyncBus: bus }) => {
-    const beforeCalls: string[] = [];
-    bus.onBefore(async (cmd) => { beforeCalls.push(cmd.action); });
-    bus.register('getUser', async () => 'data');
-    await bus.query('getUser', {});
-    expect(beforeCalls).toEqual([]);
   });
 
   it('async query still awaits after-hooks (mirrors the sync-bus "still fires" test above)', async ({ asyncBus: bus }) => {
@@ -1698,48 +1549,9 @@ describe('bus.registeredActions() - introspection', () => {
   });
 });
 
-// ─── TestBus.onBefore (now fires for real) ──────────────────────────────────
-
-describe('TestBus.onBefore - real implementation', () => {
-  it('fires onBefore hooks before dispatch', () => {
-    const bus = createTestBus();
-    const calls: string[] = [];
-    bus.onBefore((cmd) => { calls.push(cmd.action); });
-    bus.dispatch('test', {});
-    expect(calls).toEqual(['test']);
-  });
-
-  it('cancels dispatch when onBefore throws', () => {
-    const bus = createTestBus();
-    bus.onBefore(() => { throw new Error('blocked'); });
-    const result = bus.dispatch('test', {});
-    expect(result).toFailWith('core:refused:hook');
-    expect(result.error?.message).toBe('blocked');
-  });
-
-  it('unsub removes the hook', () => {
-    const bus = createTestBus();
-    const calls: string[] = [];
-    const unsub = bus.onBefore((cmd) => { calls.push(cmd.action); });
-    bus.dispatch('a', {});
-    unsub();
-    bus.dispatch('b', {});
-    expect(calls).toEqual(['a']);
-  });
-});
-
 // ─── TestBus.query / emit / registeredActions ───────────────────────────────
 
 describe('TestBus - query, emit, registeredActions', () => {
-  it('query skips beforeHooks on TestBus', () => {
-    const bus = createTestBus();
-    const beforeCalls: string[] = [];
-    bus.onBefore((cmd) => { beforeCalls.push(cmd.action); });
-    bus.query('getUser', { id: 1 });
-    expect(beforeCalls).toEqual([]);
-    expect(bus.wasDispatched('getUser')).toBe(true);
-  });
-
   it('emit notifies listeners without handler', () => {
     const bus = createTestBus();
     const events: string[] = [];
@@ -1769,12 +1581,7 @@ describe('seal() - freeze bus topology', () => {
 
   it('seal() prevents use() after sealing', ({ bus }) => {
     bus.seal();
-    expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
-  });
-
-  it('seal() prevents onBefore() after sealing', ({ bus }) => {
-    bus.seal();
-    expect(() => bus.onBefore(() => {})).toThrow(/sealed/i);
+    expect(() => bus.use({ begin: () => undefined })).toThrow(/sealed/i);
   });
 
   it('seal() prevents onAfter() after sealing', ({ bus }) => {
@@ -1937,10 +1744,9 @@ describe('createCommandPool - zero-GC circular buffer', () => {
 describe('dispose() - full teardown', () => {
   it('clears handlers, hooks, listeners, and plugins', ({ bus }) => {
     bus.register('a', () => 1);
-    bus.onBefore(() => {});
     bus.onAfter(() => {});
     bus.on('a', () => {});
-    bus.use((_cmd, next) => next());
+    bus.use({ begin: () => undefined });
 
     bus.dispose();
 
@@ -2188,34 +1994,6 @@ describe('commandKey - fast path for primitives', () => {
   });
 });
 
-// ─── Per-instance throttle timers ──────────────────────────────────────────
-
-describe('per-instance throttle timers', () => {
-  it('dispose on one bus does not affect another bus', () => {
-    const bus1 = createCommandBus();
-    const bus2 = createCommandBus();
-
-    bus1.register('a', () => 1, { throttle: 10000 });
-    bus2.register('a', () => 2, { throttle: 10000 });
-
-    // First dispatch on each - goes through
-    const r1 = bus1.dispatch('a', {});
-    const r2 = bus2.dispatch('a', {});
-    expect(r1.ok).toBe(true);
-    expect(r2.ok).toBe(true);
-
-    // Dispose bus1 - should only clear bus1's timers
-    bus1.dispose();
-
-    // Bus2 should still have its throttle active
-    const r3 = bus2.dispatch('a', {});
-    expect(r3).toFailWith('core:limited:handler');
-    expect(r3.error?.message).toContain('throttled');
-
-    bus2.dispose();
-  });
-});
-
 // ─── TestBus seal and depth guard ──────────────────────────────────────────
 
 describe('TestBus seal()', () => {
@@ -2229,7 +2007,7 @@ describe('TestBus seal()', () => {
   it('prevents use after sealing', () => {
     const bus = createTestBus();
     bus.seal();
-    expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
+    expect(() => bus.use({ begin: () => undefined })).toThrow(/sealed/i);
   });
 
   // As on the real buses (tests/seal-clear.test.ts): a sealed bus refuses
@@ -2374,67 +2152,36 @@ describe('transactional dispatchBatch (async)', () => {
   });
 });
 
-// ─── optimisticUndo plugin ────────────────────────────────────────────────────
+// ─── register({ optimistic }) (the optimisticUndo plugin's home, log 36.81) ──
 
-describe('optimisticUndo (sync bus)', () => {
-  it('passes through actions without undo handlers', ({ bus }) => {
-    bus.register('plain', () => 'real-result');
-    bus.use(optimisticUndo(bus, ['plain']));
-
-    const result = bus.dispatch('plain', {});
-    expect(result).toSucceedWith('real-result');
-  });
-
-  it('passes through actions not in the action list', ({ bus }) => {
-    bus.register('other', () => 'other-result');
-    bus.use(optimisticUndo(bus, ['cartAdd']));
-
-    const result = bus.dispatch('other', {});
-    expect(result).toSucceedWith('other-result');
-  });
-
-  it('calls undo handler on sync failure and fires onRollback', ({ bus }) => {
+describe('register optimistic', () => {
+  it('sync: a throw runs the undo, and the failure returns', ({ bus }) => {
     const undoCalls: any[] = [];
-    const rollbackCalls: any[] = [];
     bus.register('cartAdd', () => { throw new Error('out-of-stock'); }, {
       undo: (cmd) => { undoCalls.push(cmd.target); },
+      optimistic: true,
     });
-    bus.use(optimisticUndo(bus, ['cartAdd'], {
-      onRollback: (cmd, err) => { rollbackCalls.push({ action: cmd.action, msg: err.message }); },
-    }));
-
     const result = bus.dispatch('cartAdd', { id: 5 }, { qty: 2 });
     expect(result.ok).toBe(false);
     expect(undoCalls).toEqual([{ id: 5 }]);
-    expect(rollbackCalls).toEqual([{ action: 'cartAdd', msg: 'out-of-stock' }]);
   });
 
-  it('returns predicted value on async bus', async ({ asyncBus: bus }) => {
-    bus.register('cartAdd', async () => 'real-value', {
-      undo: () => {},
-    });
-    bus.use(optimisticUndo(bus as any, ['cartAdd'], {
-      predict: (cmd) => ({ predicted: true, id: cmd.target.id }),
-    }) as any);
-
-    const result = await bus.dispatch('cartAdd', { id: 42 }, { qty: 1 });
-    // optimisticUndo intercepts and returns predicted result synchronously
-    expect(result).toSucceedWith({ predicted: true, id: 42 });
-  });
-
-  it('fires onRollbackError when undo handler throws on sync bus', ({ bus }) => {
-    const errors: any[] = [];
+  it('sync: an undo that fails too is reported, and the first failure returns', ({ bus }) => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     bus.register('cartAdd', () => { throw new Error('handler-fail'); }, {
       undo: () => { throw new Error('undo-fail'); },
+      optimistic: true,
     });
-    bus.use(optimisticUndo(bus, ['cartAdd'], {
-      onRollbackError: (_cmd, undoErr, origErr) => {
-        errors.push({ undo: undoErr.message, orig: origErr.message });
-      },
-    }));
+    const result = bus.dispatch('cartAdd', { id: 1 });
+    expect((result.error as Error).message).toBe('handler-fail');
+    expect(errors.mock.calls.some((c) => String(c[0]).startsWith('[vapor-chamber] [ FAIL ] core:failed:undo: the undo of "cartAdd" failed'))).toBe(true);
+  });
 
-    bus.dispatch('cartAdd', { id: 1 });
-    expect(errors).toEqual([{ undo: 'undo-fail', orig: 'handler-fail' }]);
+  it('async: answers an Accepted at once, whose done settles with the value', async ({ asyncBus: bus }) => {
+    bus.register('cartAdd', async () => 'real-value', { undo: () => {}, optimistic: true });
+    const result = await bus.dispatch('cartAdd', { id: 42 }, { qty: 1 });
+    expect(result.value).toBeInstanceOf(Accepted);
+    expect(await (result.value as Accepted).done).toSucceedWith('real-value');
   });
 });
 
@@ -2445,9 +2192,8 @@ describe('inspectBus (sync)', () => {
     const bus = createCommandBus();
     bus.register('cartAdd', () => 'added', { undo: () => {} });
     bus.register('cartRemove', () => 'removed');
-    bus.use((_cmd, next) => next(), { priority: 10 });
-    bus.use((_cmd, next) => next(), { priority: 5 });
-    bus.onBefore(() => {});
+    bus.use({ begin: () => undefined });
+    bus.use({ begin: () => undefined });
     bus.onAfter(() => {});
     bus.on('cart*', () => {});
     bus.on('*', () => {});
@@ -2459,13 +2205,11 @@ describe('inspectBus (sync)', () => {
     expect(info.undoActions).toEqual(['cartAdd']);
     expect(info.responderActions).toEqual(['cartCheck']);
     expect(info.pluginCount).toBe(2);
-    expect(info.pluginPriorities).toEqual([10, 5]); // sorted high-first
-    expect(info.beforeHookCount).toBe(1);
+    expect(info.plugins.map((p) => p.id)).toEqual([undefined, undefined]);
     expect(info.afterHookCount).toBe(1);
     expect(info.listenerPatterns).toEqual(['cart*', '*']);
     expect(info.sealed).toBe(false);
     expect(info.dispatchDepth).toBe(0);
-    expect(info.activeTimers).toBe(0);
   });
 
   it('reflects sealed state', () => {
@@ -2477,14 +2221,14 @@ describe('inspectBus (sync)', () => {
   it('reflects state after clear', () => {
     const bus = createCommandBus();
     bus.register('a', () => 1);
-    bus.use((_, next) => next());
-    bus.onBefore(() => {});
+    bus.use({ begin: () => undefined });
+    bus.onAfter(() => {});
     bus.clear();
 
     const info = inspectBus(bus);
     expect(info.actions).toEqual([]);
     expect(info.pluginCount).toBe(0);
-    expect(info.beforeHookCount).toBe(0);
+    expect(info.afterHookCount).toBe(0);
   });
 });
 
@@ -2508,7 +2252,6 @@ describe('TestBus.inspect()', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     bus.register('a', () => 1, { undo: () => {} });
     bus.register('b', () => 2);
-    bus.onBefore(() => {});
     bus.on('a*', () => {});
 
     const info = (bus as any).inspect();
@@ -2516,7 +2259,6 @@ describe('TestBus.inspect()', () => {
     expect(info.actions).toEqual(['a', 'a$undo', 'b']); // the undo is a command (s35.114)
     expect(info.undoActions).toEqual(['a']);
     expect(info.pluginCount).toBe(0);
-    expect(info.beforeHookCount).toBe(1);
     expect(info.listenerPatterns).toEqual(['a*']);
     expect(info.sealed).toBe(false);
   });
@@ -2530,26 +2272,26 @@ describe('TestBus.inspect()', () => {
 // async transactional abort/rollback paths, and the inspectBus fallback.
 
 describe('core dispatch - error & edge branches', () => {
-  it('real sync bus: a throwing onBefore hook cancels dispatch and returns errResult', ({ bus }) => {
+  it('real sync bus: a refusing rule cancels dispatch and returns its errResult', ({ bus }) => {
     let handlerRan = false;
     bus.register('act', () => { handlerRan = true; return 1; });
-    bus.onBefore(() => { throw new Error('blocked-by-hook'); });
+    bus.use({ id: 'gate', authorize: () => (_cmd, fail) => ({ ok: false, value: undefined, error: fail('refused:action', 'blocked-by-rule') }) });
 
     const result = bus.dispatch('act', {});
 
-    expect(result).toFailWith('core:refused:hook');
-    expect(result.error?.message).toBe('blocked-by-hook');
-    expect(handlerRan).toBe(false); // handler never runs - hook short-circuits
+    expect(result).toFailWith('gate:refused:action');
+    expect(result.error?.message).toBe('blocked-by-rule');
+    expect(handlerRan).toBe(false); // handler never runs - the rule answers first
   });
 
-  it('real async bus: a throwing onBefore hook cancels dispatch and returns errResult', async ({ asyncBus: bus }) => {
+  it('real async bus: an async refusing rule cancels dispatch and returns its errResult', async ({ asyncBus: bus }) => {
     let handlerRan = false;
     bus.register('act', async () => { handlerRan = true; return 1; });
-    bus.onBefore(async () => { throw new Error('async-blocked'); });
+    bus.use({ id: 'gate', authorize: () => async (_cmd, fail) => ({ ok: false, value: undefined, error: fail('refused:action', 'async-blocked') }) });
 
     const result = await bus.dispatch('act', {});
 
-    expect(result).toFailWith('core:refused:hook');
+    expect(result).toFailWith('gate:refused:action');
     expect(result.error?.message).toBe('async-blocked');
     expect(handlerRan).toBe(false);
   });
@@ -2632,20 +2374,20 @@ describe('core dispatch - error & edge branches', () => {
 });
 
 describe('core dispatch - query, rollback, buffer & error defaults', () => {
-  it('sync query() on a missing handler routes through the plugin runner', ({ bus }) => {
-    bus.use((_cmd, next) => next()); // installing a plugin forces the runner path
+  it('sync query() on a missing handler routes through the work steps', ({ bus }) => {
+    bus.use({ begin: () => undefined }); // a step forces the stepped path
     const r = bus.query('nope', {});
     expect(r).toFailWith('core:missing:handler');
     expect(r.error?.message).toContain('No handler');
   });
 
-  it('async query() on a missing handler - bare and plugin-runner paths', async () => {
+  it('async query() on a missing handler - bare and stepped paths', async () => {
     const bare = createAsyncCommandBus();
     const r1 = await bare.query('nope', {});
     expect(r1).toFailWith('core:missing:handler');
 
     const withPlugin = createAsyncCommandBus();
-    withPlugin.use((_cmd, next) => next());
+    withPlugin.use({ begin: () => undefined });
     const r2 = await withPlugin.query('nope', {});
     expect(r2).toFailWith('core:missing:handler');
   });
@@ -2667,8 +2409,8 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(result.rollbacks).toHaveLength(1);
   });
 
-  it("onMissing:'buffer' drops the oldest and warns when maxBufferSize is exceeded", () => {
-    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: 2 });
+  it('a buffer drops the oldest and warns when maxSize is exceeded', () => {
+    const bus = createCommandBus({ buffer: createBuffer({ maxSize: 2 }) });
     {
       using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -2706,12 +2448,12 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(() => un()).not.toThrow(); // bucket now undefined -> early return
   });
 
-  it('flushDeferred is a no-op for an action with nothing queued while others are buffered', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
-    bus.dispatch('queuedAction', { id: 1 }); // buffers A -> deferred.size === 1
+  it('a release is a no-op for an action with nothing queued while others are buffered', () => {
+    const bus = createCommandBus({ buffer: createBuffer() });
+    bus.dispatch('queuedAction', { id: 1 }); // buffers one action
     const seen: unknown[] = [];
-    // size !== 0 so register() DOES call flushDeferred, but the queue for
-    // 'otherAction' is undefined -> early return (nothing replayed)
+    // register() releases 'otherAction', whose queue is undefined -> early
+    // return (nothing replayed)
     bus.register('otherAction', (cmd) => { seen.push(cmd); });
     expect(seen).toEqual([]);
     // the genuinely-queued action still replays when its own handler registers
@@ -2728,7 +2470,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(() => unA()).not.toThrow(); // bucket still exists, 'a' gone -> i === -1, no splice
   });
 
-  it("onMissing:'buffer' overflow skips the dev warning in production", async () => {
+  it('a buffer overflow skips the dev warning in production', async () => {
     // The dev guard is now the module-level `DEV` from src/dev.ts, evaluated
     // ONCE at import (the same shape as Vue's own `__DEV__`) so that
     // `scripts/build.mjs` can const-fold it and drop both the branch and the
@@ -2740,10 +2482,11 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     // production: the value is fixed before any of this code runs.
     using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
+    const { createBuffer: freshBuffer } = await import('../src/buffer');
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = freshBus({ onMissing: 'buffer', maxBufferSize: 1 });
+    const bus = freshBus({ buffer: freshBuffer({ maxSize: 1 }) });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
@@ -2752,17 +2495,18 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     vi.resetModules();
   });
 
-  it("onMissing:'buffer' overflow also skips the warning via __VC_DEV__=false (IIFE build path)", async () => {
+  it('a buffer overflow also skips the warning via __VC_DEV__=false (IIFE build path)', async () => {
     // The test above covers the ESM-consumer NODE_ENV fallback. DEV has a
     // second resolution path - the direct __VC_DEV__ build define used by
     // scripts/build.mjs for the IIFE bundles - and that path was untested
     // for this warning site.
     using _VC_DEV = stubGlobal('__VC_DEV__', false);
     vi.resetModules();
+    const { createBuffer: freshBuffer } = await import('../src/buffer');
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = freshBus({ onMissing: 'buffer', maxBufferSize: 1 });
+    const bus = freshBus({ buffer: freshBuffer({ maxSize: 1 }) });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
@@ -2867,14 +2611,14 @@ describe('request() dedup keys on canonical commandKey', () => {
   });
 });
 
-describe('dev warning - async plugin on a sync bus', () => {
+describe('dev warning - an async step on a sync bus', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('warns once per action when a sync dispatch returns a thenable', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    // async plugin on a sync bus - the classic footgun
-    bus.use(((_cmd: any, next: any) => Promise.resolve(next())) as any);
+    // an async step on a sync bus - the classic footgun
+    bus.use({ reuse: () => Promise.resolve({ ok: true, value: 1, error: undefined }) });
     bus.register('oops', () => 1);
 
     bus.dispatch('oops', {});
@@ -2886,10 +2630,10 @@ describe('dev warning - async plugin on a sync bus', () => {
     expect(String(matching[0][0])).toContain('createAsyncCommandBus');
   });
 
-  it('does not warn for sync plugins returning real results', () => {
+  it('does not warn for sync steps', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    bus.use((_cmd, next) => next());
+    bus.use({ begin: () => undefined });
     bus.register('fine', () => 1);
 
     const r = bus.dispatch('fine', {});

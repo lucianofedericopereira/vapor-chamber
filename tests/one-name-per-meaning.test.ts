@@ -1,12 +1,13 @@
 /** One name for a cap on retained entries, `maxSize`, and one for teardown, `dispose` (log s35.188, s35.189). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError, useSharedCommandState } from '../src/chamber';
+import { createBuffer } from '../src/buffer';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { createOutbox, type OutboxRecord } from '../src/outbox';
+import { createOutbox } from '../src/outbox';
+import { queueStorage } from './outbox-storage';
 import { cache, idempotent, metrics } from '../src/plugins-extra';
 import { createChannel } from '../src/plugins-io';
-import { createSSRPlugin } from '../src/ssr';
-import { createEchoBridge, createSseBridge, createWsBridge } from '../src/transports';
+import { createEchoBridge, createSseBridge, defineTransport, wsTransport } from '../src/transports';
 
 afterEach(() => { resetCommandBus(); vi.restoreAllMocks(); });
 
@@ -23,7 +24,7 @@ async function remembered(opts: { maxSize?: number }) {
 }
 
 /** Errors kept after five failures, by a composable on the shared bus. */
-function errorsKept(make: () => { errors: { value: unknown[] } }) {
+function errorsKept(make: () => { errors: { readonly value: readonly unknown[] } }) {
   const bus = createCommandBus();
   setCommandBus(bus);
   const { errors } = make();
@@ -47,23 +48,12 @@ describe('maxSize caps what each one keeps', () => {
 
   it('the outbox: the records it queues', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    let saved: OutboxRecord[] = [];
-    const storage = { load: () => null, save: (r: OutboxRecord[]) => { saved = r; }, clear: () => {} };
+    const storage = queueStorage();
     const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 1 });
-    const bus = createAsyncCommandBus({ retry: false });
-    outbox.install(bus);
+    const bus = createAsyncCommandBus({ retry: false, transport: defineTransport(async () => ({ ok: true, value: 1, error: undefined })), outbox });
     for (let i = 0; i < 3; i++) await bus.dispatch('cartAdd', { i });
-    expect([outbox.pending.value, saved.length]).toEqual([1, 1]);
-  });
-
-  it('createSSRPlugin: the commands it records', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus();
-    bus.register('cmd', () => 'ok');
-    const ssr = createSSRPlugin({ maxSize: 1 });
-    bus.use(ssr.plugin);
-    for (let i = 0; i < 3; i++) bus.dispatch('cmd', { i });
-    expect([ssr.size(), ssr.dropped()]).toEqual([1, 2]);
+    await Promise.resolve();
+    expect([outbox.pending.value, storage.rows().length]).toEqual([1, 1]);
   });
 
   it('useCommandError and useSharedCommandState: the errors they keep', () => {
@@ -71,10 +61,10 @@ describe('maxSize caps what each one keeps', () => {
     expect(errorsKept(() => useSharedCommandState({ maxSize: 2 }))).toBe(2);
   });
 
-  it("the bus's maxBufferSize: the commands buffered per action", () => {
+  it("the buffer's maxSize: the commands held per action", () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: unknown[] = [];
-    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: 1, onBufferOverflow: (_a, d) => dropped.push(d.target) });
+    const bus = createCommandBus({ buffer: createBuffer({ maxSize: 1, onDrop: (_a, d) => dropped.push(d.target) }) });
     for (let i = 0; i < 3; i++) bus.dispatch('later', i);
     expect(dropped).toEqual([0, 1]);
   });
@@ -85,7 +75,7 @@ describe('controls', () => {
     expect(await remembered({})).toBe(3);
     expect(errorsKept(() => useCommandError())).toBe(5);
     expect(errorsKept(() => useSharedCommandState())).toBe(5);
-    const bus = createCommandBus({ onMissing: 'buffer', onBufferOverflow: () => { throw new Error('dropped'); } });
+    const bus = createCommandBus({ buffer: createBuffer({ onDrop: () => { throw new Error('dropped'); } }) });
     for (let i = 0; i < 3; i++) bus.dispatch('later', i);
   });
 
@@ -129,8 +119,8 @@ describe('dispose releases what each one took', () => {
     expect([subscribed, ch.isOpen()]).toEqual([0, false]);
   });
 
-  it('control: the WebSocket bridge keeps connect() and disconnect(), a pair', () => {
-    const ws = createWsBridge({ url: 'ws://x' });
+  it('control: the WebSocket transport keeps connect() and disconnect(), a pair', () => {
+    const ws = wsTransport({ url: 'ws://x' });
     expect([typeof ws.connect, typeof ws.disconnect]).toEqual(['function', 'function']);
   });
 });
@@ -142,9 +132,11 @@ describe('dispose releases what each one took', () => {
  * W3C Resource Timing sets its buffer's limit through `maxSize`; the library's
  * own `size()` already counted entries and `maxSize` was its most used name.
  * Where the options configure more than the collection, its name sits inside:
- * the bus's `maxBufferSize` beside `bufferTTL`, the WebSocket bridge's
+ * the bus's `maxBufferSize` beside `bufferTTL`, the WebSocket transport's
  * `maxQueueSize` beside its connection. The old names are gone, with no
- * fallback (no deprecations). Log s35.188.
+ * fallback (no deprecations). Log s35.188. Since then, `maxBufferSize` went
+ * to `createBuffer({ maxSize })` (log 36.73) and `maxQueueSize` to the
+ * transport's own outbox (log 36.74).
  *
  * Teardown had five names: `dispose` (the buses, plugins, composables, the
  * outbox), `teardown` (the SSE and Echo bridges), `close` (createChannel,

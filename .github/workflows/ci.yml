@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # Files no CI check reads beyond the ASCII guard (the local gate runs it).
+    paths-ignore:
+      - '.github/FUNDING.yml'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
     branches: [main]
 

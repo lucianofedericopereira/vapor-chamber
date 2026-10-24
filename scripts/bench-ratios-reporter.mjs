@@ -48,7 +48,7 @@ const OUT = 'docs/metrics.json';
  * marker name -> { group, fast, slow, kind }. The value is `fast.hz /
  * slow.hz`, so every number reads as "N times the slow row". `group` is the
  * describe block both rows sit in (exact title), `fast` and `slow` the exact
- * bench titles; `tests/bench-ratios.test.ts` fails when a row or a group here
+ * bench ids; `tests/bench-ratios.test.ts` fails when a row or a group here
  * is missing from `tests/perf.bench.ts`.
  *
  * `kind` decides how `scripts/bench-bands.mjs` publishes the ratio over N runs.
@@ -61,32 +61,32 @@ const OUT = 'docs/metrics.json';
 export const RATIOS = {
   benchFastLaneVsMitt: {
     group: 'fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)',
-    fast: 'vapor-chamber fast-lane emit (live, default)',
-    slow: 'mitt - 3 listeners (peer)',
+    fast: 'lanefanout.live',
+    slow: 'lanefanout.peer.mitt',
     kind: 'peer',
   },
   benchFastLaneVsEventEmitter3: {
     group: 'fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)',
-    fast: 'vapor-chamber fast-lane emit (live, default)',
-    slow: 'eventemitter3 - 3 listeners (peer)',
+    fast: 'lanefanout.live',
+    slow: 'lanefanout.peer.eventemitter3',
     kind: 'peer',
   },
   benchEmitVsMittFanout: {
     group: 'comparative emit fan-out (10k events x 3 listeners)',
-    fast: 'vapor-chamber bus.emit - 3 listeners',
-    slow: 'mitt - 3 listeners',
+    fast: 'fanout.emit',
+    slow: 'fanout.peer.mitt',
     kind: 'peer',
   },
   benchEmitVsEventEmitter3Fanout: {
     group: 'comparative emit fan-out (10k events x 3 listeners)',
-    fast: 'vapor-chamber bus.emit - 3 listeners',
-    slow: 'eventemitter3 - 3 listeners',
+    fast: 'fanout.emit',
+    slow: 'fanout.peer.eventemitter3',
     kind: 'peer',
   },
   benchMittEmitVsDispatch: {
     group: 'comparative dispatch (10k dispatches, single handler)',
-    fast: 'mitt - emit (bus.emit equivalent, no result)',
-    slow: 'vapor-chamber bus.dispatch - bare handler, no plugins',
+    fast: 'compare.peer.mitt',
+    slow: 'compare.dispatch',
     kind: 'peer',
   },
   // The ratios below were hand-typed in docs/performance.md and ROADMAP.md,
@@ -94,38 +94,32 @@ export const RATIOS = {
   // to ~140x). Each is two rows of the same run, so it follows the bench.
   benchCompileVsMitt: {
     group: 'fast lane - single-handler hot dispatch (10k)',
-    fast: 'vapor-chamber fast-lane compile + dispatch',
-    slow: 'mitt (closest peer - emit fires listeners, no return)',
+    fast: 'hot.fastlane.compiled',
+    slow: 'hot.peer.mitt',
     kind: 'peer',
   },
   benchCompileVsDispatch: {
     group: 'fast lane - single-handler hot dispatch (10k)',
-    fast: 'vapor-chamber fast-lane compile + dispatch',
-    slow: 'vapor-chamber bus.dispatch (general-purpose, for comparison)',
+    fast: 'hot.fastlane.compiled',
+    slow: 'hot.dispatch',
     kind: 'own',
   },
   benchEmitNoListenersVsMitt: {
     group: 'emit fast path - no listeners',
-    fast: 'vapor-chamber bus.emit with NO listeners (10k)',
-    slow: 'mitt with NO listeners (10k)',
+    fast: 'emit.none',
+    slow: 'emit.none.peer.mitt',
     kind: 'peer',
   },
   benchEmitVsDispatchFanout: {
     group: 'listener fan-out',
-    fast: 'emit with 50 exact-match listeners + 5 wildcards',
-    slow: 'dispatch with 50 exact-match listeners + 5 wildcards',
+    fast: 'fanout50.emit',
+    slow: 'fanout50.dispatch',
     kind: 'own',
   },
   benchUidCounterVsUuid: {
     group: 'meta overhead - uid generator comparison',
-    fast: 'dispatch - default counter-based uid',
-    slow: 'dispatch - crypto.randomUUID via configureUid',
-    kind: 'own',
-  },
-  benchPersistCoalesce: {
-    group: 'persist plugin throughput',
-    fast: '100 rapid dispatches with persist enabled + coalesce (50-item array state)',
-    slow: '100 rapid dispatches with persist enabled (50-item array state)',
+    fast: 'uid.counter',
+    slow: 'uid.uuid',
     kind: 'own',
   },
 };
@@ -138,12 +132,12 @@ export const RATIOS = {
  */
 const HOT = 'fast lane - single-handler hot dispatch (10k)';
 export const COSTS = {
-  benchCompileNs: { group: HOT, row: 'vapor-chamber fast-lane compile + dispatch', ops: 10_000, kind: 'cost' },
-  benchMittNs: { group: HOT, row: 'mitt (closest peer - emit fires listeners, no return)', ops: 10_000, kind: 'cost' },
-  benchDispatchNs: { group: HOT, row: 'vapor-chamber bus.dispatch (general-purpose, for comparison)', ops: 10_000, kind: 'cost' },
+  benchCompileNs: { group: HOT, row: 'hot.fastlane.compiled', ops: 10_000, kind: 'cost' },
+  benchMittNs: { group: HOT, row: 'hot.peer.mitt', ops: 10_000, kind: 'cost' },
+  benchDispatchNs: { group: HOT, row: 'hot.dispatch', ops: 10_000, kind: 'cost' },
 };
 
-/** This run's ratios from a bench title -> hz map; a ratio with a row missing is left out. */
+/** This run's ratios from a bench id -> hz map; a ratio with a row missing is left out. */
 export function ratiosOf(hz) {
   const out = {};
   for (const [name, { fast, slow }] of Object.entries(RATIOS)) {

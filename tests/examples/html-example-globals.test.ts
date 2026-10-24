@@ -7,13 +7,13 @@
  * html-example-imports.test.ts). Those fail loudly: a missing named import is a
  * module-resolution error the moment the page loads. A missing GLOBAL is just
  * `undefined`, so the page loads fine and dies later at
- * `VaporChamber.persist is not a function` - only on the code path that touches
+ * `VaporChamber.defineChamberStore is not a function` - only on the code path that touches
  * it, only at runtime, in a browser nobody runs during CI.
  *
  * And the failure is live, not theoretical: the three IIFE variants do NOT have
- * the same surface. `persist` ships in `full` but is absent from `core` and
- * `elements` (measured). `examples/sprinkled-blade` loads `core` today and only
- * calls `connect`, which core has - but an example gaining one `persist` call,
+ * the same surface. The store (`defineChamberStore`) ships in `full` but is
+ * absent from `core` and `elements`. `examples/sprinkled-blade` loads `core` today and only
+ * calls `connect`, which core has - but an example gaining one store call,
  * or switching to the smaller bundle to save bytes, breaks with nothing to
  * catch it. That is exactly the kind of silent-negative this cycle spent its
  * time removing.

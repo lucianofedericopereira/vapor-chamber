@@ -5,53 +5,79 @@
  * Vapor Chamber coexists as reactive islands inside a Filament panel.
  *
  * Useful for: complex visualizations, real-time widgets, multi-step wizards,
- * or any section that benefits from Vue Vapor's signal-based reactivity
- * without needing a full Livewire component.
+ * or any section that benefits from reactivity without needing a full
+ * Livewire component.
+ *
+ * The island: a period picker whose choice is saved across page loads, and the
+ * metrics of that period, read from the server whenever it changes.
  *
  * resources/js/islands/analytics.ts
  */
 
-import { createAsyncCommandBus, persist } from 'vapor-chamber'
-import { createHttpBridge } from 'vapor-chamber/transports'
-import { ref } from 'vue'
+import { bindCommands, bindDisplay, createAsyncCommandBus, createHttpClient, saveTo } from 'vapor-chamber'
+import { defineChamberStore } from 'vapor-chamber/store'
+
+type Period = 'day' | 'week' | 'month'
+type Row = { label: string; value: number }
 
 // Each island creates its own isolated bus.
 // Livewire and Vapor Chamber manage separate DOM scopes - no conflict.
 //
-// NOTE: register and dispatch directly on the LOCAL bus. useCommandGroup()
-// attaches to the shared getCommandBus() unless it is given `{ bus }`, which
-// would defeat the per-island isolation this pattern is about - so either pass
-// the island's bus, or namespace by naming the actions ('analytics*').
-function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
+// NOTE: dispatch on the island's own bus. useCommandGroup() attaches to the
+// shared getCommandBus() unless it is given `{ bus }`, which would defeat the
+// per-island isolation this pattern is about.
+function mountAnalyticsIsland(el: HTMLElement, metricsUrl: string) {
   const bus = createAsyncCommandBus()
-  // `csrf: true` sends Laravel's token: the raw bridge leaves it off, where
-  // the IIFE's connect() turns it on.
-  bus.use(createHttpBridge({ endpoint, actions: ['analyticsLoad*'], csrf: true }))
 
-  // Persist the selected period across page navigations: persist() saves
-  // after each successful `analyticsSetPeriod`, on either bus.
-  const period = ref<'day' | 'week' | 'month'>('week')
-  const periodPersist = persist({
-    key: 'vc:analytics:period',
-    getState: () => period.value,
-    filter: (cmd) => cmd.action === 'analyticsSetPeriod',
-  })
-  period.value = periodPersist.load() ?? 'week'
-  bus.use(periodPersist)
+  // The selected period is a store, saved across page loads: `persist` saves it
+  // after each `analyticsSetPeriod` and reads it back on the next load.
+  const analytics = defineChamberStore('analytics', {
+    state: () => ({ period: 'week' as Period }),
+    reducers: { setPeriod: (_s, target: { period: Period }) => ({ period: target.period }) },
+    persist: saveTo({ key: 'vc:analytics:period' }),
+  })(bus)
 
-  // Register local command handlers
-  bus.register('analyticsSetPeriod', async (cmd) => {
-    period.value = cmd.target.period
-    // Trigger data reload - forwarded to the backend by the HTTP bridge
-    return bus.dispatch('analyticsLoadMetrics', { period: period.value })
-  })
+  // The metrics are the server's data, not a command, so they are a read.
+  // Nothing of them is saved: a new page load reads them again.
+  const metrics = defineChamberStore('metrics', {
+    state: () => ({ rows: [] as Row[], loading: false, error: '' }),
+    reducers: {
+      start: (s) => ({ ...s, loading: true, error: '' }),
+      done: (_s, rows: Row[]) => ({ rows, loading: false, error: '' }),
+      fail: (s, message: string) => ({ ...s, loading: false, error: message }),
+    },
+  })(bus)
 
-  return { bus, period }
+  // A client reads with a cache: a period read before is answered without a
+  // request until its ttl ends, then revalidated with the server's ETag.
+  const http = createHttpClient({ cache: { ttl: 30_000 } })
+  let inFlight: AbortController | undefined
+
+  async function load(period: Period) {
+    inFlight?.abort() // a slow read of an earlier period must not land after this one
+    const read = (inFlight = new AbortController())
+    metrics.start()
+    const res = await http.safe.get<Row[]>(metricsUrl, { params: { period }, signal: read.signal })
+    if (read.signal.aborted) return
+    if (res.error) metrics.fail(res.error.message)
+    else metrics.done(res.data ?? [])
+  }
+
+  // `$onField` fires when the period changes, never for the state a load starts
+  // with, so the first read is asked for.
+  analytics.$onField('period', load)
+  void load(analytics.state.value.period)
+
+  // The island's markup (Blade below) names its commands and the fields it shows.
+  bindCommands(el, { bus })
+  bindDisplay(el, { bus })
+
+  return { bus, analytics, metrics }
 }
 
 // Mount once the widget's element is on the page.
 const el = document.getElementById('analytics-island')
-if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
+if (el?.dataset.metrics) mountAnalyticsIsland(el, el.dataset.metrics)
 
 /*
  * PHP: app/Filament/Widgets/AnalyticsWidget.php
@@ -63,7 +89,7 @@ if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
  *
  *     public function getViewData(): array
  *     {
- *         return ['endpoint' => route('api.vc')];
+ *         return ['metrics' => route('api.analytics.metrics')];
  *     }
  * }
  */
@@ -73,24 +99,19 @@ if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
  * ------------------------------------------------------------------
  * <x-filament-widgets::widget>
  *   <x-filament::section>
- *     <div id="analytics-island" data-endpoint="{{ $endpoint }}">
- *       {{-- Vue Vapor mounts here; Livewire runs the rest of the panel --}}
+ *     <div id="analytics-island" data-metrics="{{ $metrics }}">
+ *       <p>Period: <strong data-vc-text="analytics.period"></strong></p>
+ *       <button data-vc-command="analyticsSetPeriod" data-vc-target='{"period":"day"}'>Day</button>
+ *       <button data-vc-command="analyticsSetPeriod" data-vc-target='{"period":"week"}'>Week</button>
+ *       <button data-vc-command="analyticsSetPeriod" data-vc-target='{"period":"month"}'>Month</button>
+ *       <p data-vc-show="metrics.loading">Loading...</p>
+ *       <p data-vc-show="metrics.error" role="alert" data-vc-text="metrics.error"></p>
+ *       <ul data-vc-each="metrics.rows">
+ *         <template><li><span data-vc-text="label"></span>: <span data-vc-text="value"></span></li></template>
+ *       </ul>
  *     </div>
  *   </x-filament::section>
  * </x-filament-widgets::widget>
- *
- * <script>
- * document.addEventListener('DOMContentLoaded', () => {
- *   const el = document.getElementById('analytics-island')
- *   if (el) {
- *     // If using IIFE/CDN approach inside Filament
- *     const { bus, dispatch } = VaporChamber.mount('#analytics-island', {
- *       transport: VaporChamber.http({ endpoint: el.dataset.endpoint, csrf: true }),
- *       state: { period: 'week', metrics: [] }
- *     })
- *   }
- * })
- * </script>
  */
 
 /*

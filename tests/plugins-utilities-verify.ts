@@ -9,13 +9,13 @@ import {
   createCommandBus,
   BusError,
   ownerOf,
-  matchesPattern,
   commandKey,
   type Command,
   type CommandResult,
   type Plugin,
   type BaseBus,
 } from '../src/command-bus.ts';
+import { matchesPattern } from '../src/pattern.ts';
 
 let pass = 0, fail = 0;
 function assert(cond: boolean, msg: string) {
@@ -333,13 +333,6 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
   assert(be.code === 'core:missing:handler', 'error code');
   assert(ownerOf(be) === 'core', 'owner');
   assert(be.action === 'nope', 'action in error');
-
-  // Throttle -> BusError
-  bus.register('throttled', () => 'ok', { throttle: 5000 });
-  bus.dispatch('throttled', 1);
-  const r2 = bus.dispatch('throttled', 1);
-  assert(r2.error instanceof BusError, 'throttle -> BusError');
-  assert((r2.error as BusError).code === 'core:limited:handler', 'throttle code');
 
   // instanceof Error
   assert(be instanceof Error, 'BusError extends Error');

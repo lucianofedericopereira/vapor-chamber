@@ -1,0 +1,137 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "mw-1",
+      "providerStates": [
+        {
+          "name": "limit spent",
+          "params": {}
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractThrottled",
+            "target": {}
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "content": {
+            "status": 429,
+            "code": "too_many_requests",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "mw-2",
+      "providerStates": [
+        {
+          "name": "limit spent",
+          "params": {}
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc/batch",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "commands": [
+              {
+                "id": "1",
+                "command": "vcContractThrottled",
+                "target": {}
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "results": [
+              {
+                "id": "1",
+                "status": 429,
+                "headers": {},
+                "problem": {
+                  "status": 429,
+                  "code": "too_many_requests",
+                  "detail": "Any text."
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.results[0].problem.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

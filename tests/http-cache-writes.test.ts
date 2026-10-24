@@ -29,13 +29,13 @@ function server() {
 }
 const v = (r: { data: unknown }) => (r.data as { v: string }).v;
 
-describe('invalidateCache against a read in flight', () => {
+describe('an invalidation (a write) against a read in flight', () => {
   it('control: with nothing in flight, the next read fetches', async () => {
     const s = server();
     const http = createHttpClient();
     await http.get('/a', { cache: true });
     s.values.set('/a', 'new');
-    http.invalidateCache('/a');
+    await http.post('/a', {});
     expect(v(await http.get('/a', { cache: true }))).toBe('new');
     expect(s.gets).toBe(2);
   });
@@ -47,7 +47,7 @@ describe('invalidateCache against a read in flight', () => {
     const first = http.get('/a', { cache: true });
     await new Promise((r) => setTimeout(r, 0));
     s.values.set('/a', 'new');
-    http.invalidateCache('/a');
+    await http.post('/a', {});
     const second = http.get('/a', { cache: true });
     s.release();
     const [a, b] = await Promise.all([first, second]);
@@ -73,13 +73,13 @@ describe('invalidateCache against a read in flight', () => {
     expect(s.gets).toBe(2);
   });
 
-  it('a read out before an invalidation of another URL is returned and stored', async () => {
+  it('a read out before a write to another URL is returned and stored', async () => {
     const s = server();
     const http = createHttpClient();
     s.hold = true;
     const first = http.get('/a', { cache: true });
     await new Promise((r) => setTimeout(r, 0));
-    http.invalidateCache('/b');
+    await http.post('/b', {});
     s.release();
     expect(v(await first)).toBe('old');
     await http.get('/a', { cache: true });
@@ -126,9 +126,9 @@ describe('a successful unsafe request invalidates exactly its URL', () => {
  *
  * Item 10. The client stored a response when it landed, whatever happened
  * while it was on the wire, and `invalidateCache` did not touch the dedupe
- * map. A read in flight across an invalidation therefore undid it twice: a
+ * map (the write that invalidates a URL takes the same path). A read in flight across an invalidation therefore undid it twice: a
  * read made after the invalidation joined the old request, and the old
- * answer was stored when it landed. `invalidateCache` now drops the matching
+ * answer was stored when it landed. An invalidation now drops the matching
  * in-flight keys, and a response is stored only if no invalidation of ITS
  * URL happened while it was on the wire; it is still returned to its callers
  * either way. `clearCache()` had the same bug (found fixing this one: it kept
@@ -147,5 +147,5 @@ describe('a successful unsafe request invalidates exactly its URL', () => {
  * Only a 2xx reaches the point where the client stores responses (a non-ok
  * response is thrown by the retry loop, and fetch follows a 3xx), so the
  * rule is "a write that resolved". The match is the exact URL, not the
- * substring `invalidateCache('/cart/1')` would take, so `/cart/12` stays.
+ * substring a pattern '/cart/1' would take, so `/cart/12` stays.
  */

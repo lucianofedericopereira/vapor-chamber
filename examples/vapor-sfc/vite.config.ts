@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { createExampleConfig } from '../vite.base';
+import { createExampleConfig } from '../vite.base.ts';
 
 // No `vue` alias: `vue.runtime.esm-bundler.js` re-exports both
 // `@vue/runtime-dom` and `@vue/runtime-vapor`, so the default entry carries

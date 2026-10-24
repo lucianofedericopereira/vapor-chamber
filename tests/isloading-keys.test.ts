@@ -7,7 +7,7 @@ import { createCommandBus } from '../src/command-bus';
 function litDuring(action: string, target: unknown, reads: Array<[string, unknown]>): boolean[] {
   const bus = createCommandBus();
   const s = useSharedCommandState({ bus });
-  const flags = reads.map(([a, t]) => s.isLoading(a, t));
+  const flags = reads.map(([a, t]) => s.pending(a, t));
   let seen: boolean[] = [];
   bus.register(action, () => { seen = flags.map((f) => f.value); });
   bus.dispatch(action, target);

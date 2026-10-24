@@ -36,7 +36,7 @@ export type ProblemDetails = {
  * The backend's RFC 9457 problem behind a failure, or `undefined` when no
  * backend answered. Walks the `cause` chain (a router failure's cause, a
  * plugin's wrap), so a consumer reads it once instead of digging (docs/contract.md 6):
- * a `remote:` failure (from the http client or a bridge, the same failure
+ * a `remote:` failure (from the http client or a transport, the same failure
  * since log s35.131) gives its problem members. Log s35.121.
  *
  * @example

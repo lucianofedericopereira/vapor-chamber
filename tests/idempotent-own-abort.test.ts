@@ -15,7 +15,7 @@ import type { CommandResult } from '../src/command-bus';
 
 function setup() {
   const bus = createAsyncCommandBus({ retry: false });
-  bus.use(idempotent({ actions: ['*'] }), { priority: 100 });
+  bus.use(idempotent({ actions: ['*'] }));
   let runs = 0;
   let cancelled = 0;
   bus.register('save', (cmd) => new Promise((resolve, reject) => {
@@ -79,10 +79,10 @@ describe('idempotent() - abort per caller', () => {
 describe('idempotent() - a duplicate whose signal aborted on the way in', () => {
   it('settles that caller aborted at once, and the first run lands', async () => {
     const bus = createAsyncCommandBus({ retry: false });
-    // An outer plugin that awaits: the dispatch's pre-flight abort check has
-    // already passed when the signal aborts, so idempotent sees it aborted.
-    bus.use(async (_cmd, next) => { await Promise.resolve(); return next(); }, { priority: 200 });
-    bus.use(idempotent({ actions: ['*'] }), { priority: 100 });
+    // A rule that awaits: the dispatch's pre-flight abort check has already
+    // passed when the signal aborts, so idempotent sees it aborted.
+    bus.use({ validate: () => async () => { await Promise.resolve(); return undefined; } });
+    bus.use(idempotent({ actions: ['*'] }));
     let runs = 0;
     bus.register('save', () => new Promise((r) => { runs++; setTimeout(() => r({ saved: true }), 20); }));
     const p1 = bus.dispatch('save', { id: 1 });

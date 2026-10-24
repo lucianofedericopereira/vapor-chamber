@@ -7,13 +7,16 @@
  * `context.retryIn` test `typeof === 'number'`, so the outbox read it as a
  * declared wait, kept the record, and slept NaN ms - no wait - before flushing
  * again, forever, re-saving the queue each time. With no slot that frees up,
- * the refusal declares no `retryIn`.
+ * the refusal declares no `retryIn`. Since 1.32 step 4i the outbox holds at the
+ * work step, below every plugin, so the refusal never reaches it at all.
  */
 import { describe, expect, it } from 'vitest';
 import type { BusError } from '../src/command-bus';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createOutbox, type OutboxRecord } from '../src/outbox';
+import { createOutbox } from '../src/outbox';
 import { rateLimit } from '../src/plugins-extra';
+import { defineTransport } from '../src/transports';
+import { queueStorage } from './outbox-storage';
 
 describe('rateLimit({ max: 0 })', () => {
   it('refuses with no retryIn', async () => {
@@ -26,22 +29,13 @@ describe('rateLimit({ max: 0 })', () => {
     expect((r.error as BusError).message).not.toContain('NaN');
   });
 
-  it('does not make the outbox flush in a loop', async () => {
-    let saves = 0;
-    let stored: OutboxRecord[] = [];
-    const storage = { load: async () => stored, save: async (q: OutboxRecord[]) => { saves++; stored = q; }, clear: async () => { stored = []; } };
-    let online = false;
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.register('save', async () => 1);
-    const ob = createOutbox({ storage, isOnline: () => online, actions: ['save'] });
-    ob.install(bus);
+  it('refuses before the outbox holds anything, so nothing can flush in a loop', async () => {
+    const storage = queueStorage();
+    const ob = createOutbox({ storage, isOnline: () => false, actions: ['save'] });
+    const bus = createAsyncCommandBus({ retry: false, transport: defineTransport(async () => ({ ok: true, value: 1, error: undefined })), outbox: ob });
     bus.use(rateLimit({ max: 0, actions: ['save'] }));
-    await bus.dispatch('save', { id: 1 });
-    online = true;
-    await ob.flush();
-    const after = saves;
-    await new Promise((r) => setTimeout(r, 50));
-    expect(saves - after).toBe(0);
+    expect((await bus.dispatch('save', { id: 1 })).ok).toBe(false);
+    expect([ob.pending.value, storage.saves]).toEqual([0, 0]);
     ob.dispose();
   });
 });

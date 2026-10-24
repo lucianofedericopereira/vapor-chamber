@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { BusError, conditionOf, createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, postCommand } from '../src/http';
 import { problemOf } from '../src/http-errors';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 import { it } from '../src/vitest';
 
 function mockResponse(status: number, body: unknown = null, headers: Record<string, string> = {}) {
@@ -32,8 +32,7 @@ describe('one failure, whichever path', () => {
     const problem = { status: 409, code: 'stale', detail: 'Changed meanwhile', version: 3 };
     fetchMock().mockResolvedValue(mockResponse(409, problem, { 'retry-after': '2' }));
     const direct = await caught(postCommand('/api/vc', {}));
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     const viaBridge = (await bus.dispatch('orderSave', {})).error as BusError;
     expect(direct).toBeInstanceOf(BusError);
     expect(direct.code).toBe('remote:conflict:stale');
@@ -57,8 +56,7 @@ describe('one failure, whichever path', () => {
     }));
     const direct = await caught(postCommand('/api/vc', {}, { timeout: 5 }));
     expect(direct.code).toBe('transport:timeout:reply');
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', timeout: 5 }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', timeout: 5 }) });
     expect(((await bus.dispatch('x', {})).error as BusError).code).toBe('transport:timeout:reply');
   });
 
@@ -67,8 +65,7 @@ describe('one failure, whichever path', () => {
     const direct = await caught(postCommand('/api/vc', {}));
     expect(direct.code).toBe('transport:lost:reply');
     expect((direct as Error).cause).toBeInstanceOf(TypeError);
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     expect(((await bus.dispatch('x', {})).error as BusError).code).toBe('transport:lost:reply');
   });
 
@@ -84,22 +81,21 @@ describe('one failure, whichever path', () => {
 
   it('a body that is not the JSON it declared is remote:unexpected:json, the parse error as cause', async () => {
     fetchMock().mockResolvedValue(mockResponse(200, '{oops'));
-    const e = await caught(createHttpClient({ retry: 0 }).get('/x'));
+    const e = await caught(createHttpClient({ retry: false }).get('/x'));
     expect(e.code).toBe('remote:unexpected:json');
     expect((e as Error).cause).toBeInstanceOf(SyntaxError);
   });
 
   it('status first: a 503 whose body is not its declared JSON stays remote:limited, on every path', async () => {
     fetchMock().mockResolvedValue(mockResponse(503, '<html>busy</html>'));
-    expect((await caught(createHttpClient({ retry: 0 }).get('/x'))).code).toBe('remote:limited:http');
+    expect((await caught(createHttpClient({ retry: false }).get('/x'))).code).toBe('remote:limited:http');
     expect((await caught(postCommand('/api/vc', {}))).code).toBe('remote:limited:http');
   });
 
   it('a 2xx reply that is not the JSON envelope fails the command: remote:unexpected:json', async () => {
     fetchMock().mockResolvedValue(mockResponse(200, '<html>login</html>', { 'content-type': 'text/html' }));
     expect((await caught(postCommand('/api/vc', {}))).code).toBe('remote:unexpected:json');
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     const r = await bus.dispatch('orderSave', {});
     expect(r.ok).toBe(false);
     expect((r.error as BusError).code).toBe('remote:unexpected:json');
@@ -111,15 +107,13 @@ describe('one failure, whichever path', () => {
     fetchMock().mockResolvedValue(mockResponse(200, ''));
     expect((await createHttpClient().get('/x')).data).toBeNull();
     expect((await postCommand('/api/vc', {})).data).toBeNull();
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     expect((await bus.dispatch('orderSave', {})).ok).toBe(true);
   });
 
   it("a custom client's rejection carrying a response is read as that answer", async () => {
     const problem = { status: 409, code: 'stale', detail: 'Changed meanwhile' };
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient: { post: () => Promise.reject({ response: { status: 409, data: problem } }) } as never }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc', httpClient: { post: () => Promise.reject({ response: { status: 409, data: problem } }) } as never }) });
     const e = (await bus.dispatch('orderSave', {})).error as BusError;
     expect(e.code).toBe('remote:conflict:stale');
     expect(problemOf(e)).toEqual(problem);
@@ -141,7 +135,7 @@ describe('one failure, whichever path', () => {
 
   it('the safe helpers return the same failure', async () => {
     fetchMock().mockResolvedValue(mockResponse(404, { status: 404, code: 'nope', detail: 'Not here' }));
-    const http = createHttpClient({ retry: 0 });
+    const http = createHttpClient({ retry: false });
     const r = await http.safe.get('/x');
     expect(r.data).toBeNull();
     expect(r.status).toBe(404);
@@ -155,7 +149,7 @@ describe("the client's retry is the bus's rule", () => {
   const calls = () => fetchMock().mock.calls.length;
 
   it('an uncertain failure (every 5xx but 503/504, no response) is re-sent for an idempotent request only', async () => {
-    const http = createHttpClient({ retry: 1 });
+    const http = createHttpClient({ retry: { maxAttempts: 2 } });
     const answers: Array<() => unknown> = [500, 501, 502, 505].map((s) => () => Promise.resolve(mockResponse(s, null)));
     answers.push(() => Promise.reject(new TypeError('Failed to fetch')));
     for (const answer of answers) {
@@ -173,7 +167,7 @@ describe("the client's retry is the bus's rule", () => {
   });
 
   it('idempotent by RFC 9110 9.2.2: GET, HEAD, OPTIONS, PUT, DELETE re-sent; POST, PATCH not', async () => {
-    const http = createHttpClient({ retry: 1 });
+    const http = createHttpClient({ retry: { maxAttempts: 2 } });
     fetchMock().mockResolvedValue(mockResponse(500, null));
     const sent = async (method: string) => {
       fetchMock().mockClear();
@@ -185,14 +179,14 @@ describe("the client's retry is the bus's rule", () => {
   });
 
   it('the key is read as a header name, case-insensitively (RFC 9110 5.1)', async () => {
-    const http = createHttpClient({ retry: 1 });
+    const http = createHttpClient({ retry: { maxAttempts: 2 } });
     fetchMock().mockResolvedValue(mockResponse(500, null));
     await caught(http.post('/x', {}, { headers: { 'idempotency-key': 'k1' } }));
     expect(calls()).toBe(2);
   });
 
   it('a transient one (408, 429, 503) is re-sent for any method; no reply (504, a timeout) only when identified; a verdict (400, 404, 409) never', async () => {
-    const http = createHttpClient({ retry: 1 });
+    const http = createHttpClient({ retry: { maxAttempts: 2 } });
     for (const status of [408, 429, 503]) {
       fetchMock().mockReset();
       fetchMock().mockResolvedValue(mockResponse(status, null, { 'retry-after': '0' }));

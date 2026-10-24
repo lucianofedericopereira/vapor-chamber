@@ -200,7 +200,7 @@ if (sizes) {
   };
   put('sizeBarrel', '.');
   put('sizeCore', 'core: createCommandBus alone');
-  put('sizeConsumer', 'consumer: createCommandBus + logger + createHttpBridge');
+  put('sizeConsumer', 'consumer: createAsyncCommandBus + logger + httpTransport');
   put('sizeTransports', './transports');
   put('sizeSsr', './ssr');
   put('sizeReactive', './reactive');

@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.31.0",
+  "version": "1.32.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -174,6 +174,7 @@
     "scripts",
     "!scripts/ab",
     "!scripts/bench-bands.mjs",
+    "contract",
     "ROADMAP.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -222,7 +223,7 @@
     "coverage:doc": "vitest run --coverage && node scripts/measure-coverage.mjs --md > docs/COVERAGE.md",
     "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build && npm --prefix examples/exo-astro run build",
     "loc": "node scripts/measure-loc.mjs src",
-    "docs": "node scripts/generate-api-docs.mjs && node scripts/generate-errors-doc.mjs",
+    "docs": "node scripts/generate-api-docs.mjs && node scripts/generate-errors-doc.mjs && node scripts/generate-contract.mjs",
     "docs:serve": "node scripts/serve-docs.mjs",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test:run && npm run test:vapor && npm run size:check && npm run lint:check && npm run test:coverage"
   },
@@ -247,7 +248,7 @@
     "pagination"
   ],
   "author": "Luciano Federico Pereira",
-  "license": "LGPL-2.1",
+  "license": "LGPL-2.1-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lucianofedericopereira/vapor-chamber.git"
@@ -259,11 +260,11 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.11",
+    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.13",
     "alien-signals": ">=3.1.2",
     "vite": ">=5.0.0",
     "vitest": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.11"
+    "vue": ">=3.5.0 || >=3.6.0-rc.13"
   },
   "peerDependenciesMeta": {
     "alien-signals": {
@@ -293,24 +294,24 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.3.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "@vitest/browser-playwright": "^5.0.1",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/browser-playwright": "^5.0.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.11",
-    "@vue/runtime-vapor": "^3.6.0-rc.11",
+    "@vue/reactivity": "^3.6.0-rc.13",
+    "@vue/runtime-vapor": "^3.6.0-rc.13",
     "alien-signals": "^3.1.2",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
-    "happy-dom": "^20.11.2",
+    "happy-dom": "^21.0.4",
     "mitt": "^3.0.1",
     "playwright": "^1.63.0",
     "rxjs": "^7.8.2",
     "semver": "^7.8.5",
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2",
-    "vitest": "^5.0.1",
-    "vue": "^3.6.0-rc.11",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue": "^3.6.0-rc.13",
     "vue35": "npm:vue@^3.5.43"
   },
   "engines": {

@@ -44,6 +44,7 @@ class AddToCart
         return [
             'count' => $cart['count'],
             'total' => $cart['cents'] / 100,
+            'totalText' => number_format($cart['cents'] / 100, 2),
             'lastAdded' => $cart['last'],
         ];
     }

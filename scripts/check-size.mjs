@@ -26,7 +26,7 @@ const BUDGETS = {
   //  • +~120-230 B (brotli) for onMissing:'buffer' deferred dispatch in
   //    command-bus.ts (the exo island-hydration feature);
   //  • +~75-160 B raw for createEchoBridge in transports.ts (Reverb/Echo realtime,
-  //    bundled into the IIFEs alongside createHttpBridge).
+  //    bundled into the IIFEs alongside the HTTP transport).
   //   The idempotent plugin lives in plugins-extra and is NOT in these bundles.
 
   // Vite 8 (rolldown-based, replacing esbuild) shifted minified output: brotli got
@@ -724,7 +724,217 @@ const BUDGETS = {
   // they carry the helpers without the second copy: `readAnswer` alone
   // +13/+16, `httpSender` (one send, one bridge signal) the rest, total
   // +45/+37. Bundles with both bridges are -343 min. Raised to measured.
-  'vapor-chamber.iife.min.js':          { rawMax: 48_849, brotliMax: 15_324 },
+  // Then compat step 1 (log 36.25, owner: "rise budget here"): commandKey
+  // keeps NaN and Infinity apart from null, through keyText
+  // (src/canonical.ts), the one key text commandKey and the HTTP client's key
+  // share. The tag alone, written inline as BigInt's was: +72 min. The shared
+  // keyText (a module function and the caller's tag passed in) the rest,
+  // total +126/+53. The HTTP key is not in the IIFEs. Raised to measured.
+  // Then compat step 6 (log 36.35): persist's `version` and `migrate`, a
+  // state saved by another version of the app goes through migrate or loads
+  // as null, one piece: +424/+158. The outbox check and the error registry
+  // row are in no IIFE. Core and elements unchanged. Raised to measured.
+  // Then the V8 round, item 1 (log 36.36): commandKey's key writer built once
+  // per caller, and `typeof` tested where it is compared. The typeof tests
+  // -9/0, the writer built once +10/-6, total +1/-6. Raw raised to
+  // measured, brotli kept.
+  // Then log 36.41: commandKey keeps function, symbol and wrapper targets
+  // apart (owner: size is no issue). Each piece built alone, raw/brotli: the
+  // wrapper check +417/+107, the identity key +210/+39, total +627/+139. The
+  // new top-level names take the minifier's one-letter slots. Raised to
+  // measured.
+  // Then log 36.42: one reader for a response's declared wait. Each piece left
+  // out alone, raw/brotli: the epoch rule for X-RateLimit-Reset +156/+46, a
+  // batched result's headers through the reader +27/+18, the reader through
+  // `_answered` the rest. Total +205/+60. Raised to measured.
+  // Then an app's own client's header names read in any case at the bridges'
+  // three failure sites, and pollWith through the one reader, one piece:
+  // +9/+54. Raised to measured.
+  // Then log 36.45: the transport declared at the async bus. Each piece left
+  // out alone, brotli: `batch` built into httpTransport +411 (owner: kept),
+  // the answers and store states written at the send +79 (moved from the
+  // runner), use()'s refusal +26, transport:failed:send +20, the lookup's
+  // inlined hit path +10 and sendFrom +6 (both speed), disposing the
+  // transports 0, the rest the wsTransport reshape. Total +2341/+646.
+  // Raised to measured.
+  // Then log 36.47: the wire facts. Each piece left out alone, raw/brotli: the
+  // key in a batched command's or a frame's `headers`, appended as text
+  // (speed) +142/+2, the unreserved scan that skips the encode (speed)
+  // +28/+40, a batched result's or a frame's own status +30/+9, a command's
+  // `Accept` in place of X-Requested-With +21/-69 (brotli moves with the
+  // arrangement), the key out of `meta` -50/-1. Total +327/+137. Raised to
+  // measured.
+  // Then log 36.48: one idempotency key. One piece in these bundles (no
+  // idempotent, no outbox): the retry stamps through the one rule, `_keyed`,
+  // +16/+36. Raised to measured.
+  // Then log 36.49: a 202 answers an `Accepted`, in every HTTP bundle (pollWith
+  // was in none). Each piece left out alone, raw/brotli: the Accepted and its
+  // follow, with the poll's GET, +1364/+461; the batched result's 202 +51/-19
+  // (brotli moves with the arrangement); the single answer's +74/+7; `dispose`
+  // +18/+9. Total +1683/+516. Raised to measured.
+  // Then log 36.51: the hold (L5), a held action refused unsent. Each piece
+  // left out alone, raw/brotli: the single send's check +50/-53, its two
+  // records +28/-65, the batched send's check +67/+10, its three records
+  // +62/-61, the sender's `dispose` +10/-43, the WebSocket transport's
+  // check, record and `dispose` +129/+18, the refusal's message +55/-14
+  // (brotli moves with the arrangement). The two shared functions the rest.
+  // From 3d's 54,596/17,100: total +745/+189. Raised to measured.
+  // Then log 36.52: inbound pushes, a store state written and a fact emitted,
+  // never dispatched. Each piece left out alone, raw/brotli: the bus giving
+  // each transport itself (`attach`) +94/+17, the SSE bridge's push and
+  // `events` +153/+47, the WebSocket push frame +113/+17 (brotli moves with
+  // the arrangement). The push applier the rest. Total +686/+191. Raised to
+  // measured.
+  // Then log 36.53: cache groups (RFC 9875). Each piece left out alone,
+  // raw/brotli: the transports' group header read +133/+45, the plugin
+  // `attach` +25/+0 (brotli moves with the arrangement). The field reader
+  // stays in the client. Total +276/+106. Raised to measured.
+  // Then log 36.55 (plan 1.32 step 4b, owner 2026-10-19: the full IIFE carries the
+  // store, persist an imported value, raised to measured). Each piece left out
+  // alone, raw/brotli: the store (`defineChamberStore`, the core store with its
+  // one watcher and the field-event lane of 4a) +6,302/+2,041; `saveTo`
+  // +2,032/+646; the `persist()` plugin removed -1,876/-534. Total +6,458/+2,153.
+  // Then log 36.57: `saveTo` lost `version` and `migrate`, +1,607/+525 now. Total
+  // from 56,303/17,586: +6,033/+2,032. Lowered to measured.
+  // Then log 36.60 (4c): `shareTabs` exported, under budget (62,262/19,588). Log
+  // 36.62 (4e, owner 2026-10-19: "land it"), raw/brotli per arm: the store's
+  // `coalesce` and `deep` +346/+119; action names per definition (speed) +52/+22;
+  // register() building only what a call uses (speed) +13/+23; the registry
+  // folded into the receivers map -91/-46; closures built only when used +76/-9.
+  // 62,262/19,588 -> 62,658/19,697. Raised to measured.
+  // Then log 36.63 (4f): the fast lane's onError single-listener path (speed)
+  // +57 raw; the form on the store and the core cell's watcher field -4 raw;
+  // 62,711/19,725 (+53/+28). Raised to measured.
+  // Then log 36.64 (4g): one piece here, a store's creation writing a state the
+  // page seeded (the entry's `seeded` field and its check) +92/+17; the SSR
+  // module is not in this bundle. 62,803/19,742. Raised to measured.
+  // Then log 36.65: the entry's raw cell and first state (`storeStates` reads
+  // only a written store) +21/+21; 62,824/19,763. Raised to measured.
+  // Then log 36.66 (4h-1), each piece left out alone, raw/brotli: history's
+  // recorder an after-hook, not a chain level, -28/-5; installed past a seal,
+  // as useCommandHistory's, +10/+48 (brotli moves with the arrangement).
+  // 62,806/19,806. Raised to measured.
+  // Then log 36.67 (4h-2): one piece here, the origins history skips read
+  // through one rule the reaction shares (`_unrecorded`) +4/-34 (brotli moves
+  // with the arrangement); no reaction in this bundle. 62,810/19,772. Set to
+  // measured.
+  // Then log 36.68 (4h-3), one undo per click, each piece left out alone,
+  // raw/brotli: the press (members in order, each after the one before landed,
+  // `moveUnlessRefused` answering whether it landed) +208/+63; the two member
+  // walks, read from the stacks at press time, +285/+48; the speed recovery (a
+  // press of one step builds no chain, the walks allocate nothing; undo+redo
+  // 270.3 -> 208.8 ns) +180/+51. 63,483/19,934. Raised to measured.
+  // Then log 36.69 (4i): the async bus's outbox hooks (as in core and
+  // elements) and the ledger leaving an `Accepted` out of the history (the
+  // check and its import) +160/+113, no outbox in this bundle. 63,643/20,047.
+  // Raised to measured.
+  // Then log 36.70 (4h-4, B3: a declared handler child), each piece left out
+  // alone, raw/brotli: a redo carrying the child back after its parent lands
+  // +539/+168; a refused step put back in its place +139/+28; the one `related`
+  // walk with the root lookup the rest (+131 raw). Undo and redo paths only.
+  // 64,452/20,200. Raised to measured.
+  // Then log 36.71, its speed recovery (undo+redo -11.5 ns): a step's place
+  // read top-first and the grouped redo as its own function, +57/+7 together.
+  // 64,509/20,207. Raised to measured.
+  // Then log 36.72 (undo+redo -50 ns against 9d835c3): the move reads its
+  // step top-first, pops it and hands its index to the revert, +14/+36.
+  // 64,523/20,243. Raised to measured.
+  // Then log 36.73 (4i): the buffer queue leaves the bus for its own module,
+  // createBuffer, which this bundle exports. Each piece left out alone,
+  // raw/brotli: the queue out of the bus -741/-149; the module, its Accepted
+  // answer, coded drops and pending count +1245/+374. Net +504/+225.
+  // 65,027/20,468. Raised to measured.
+  // Then log 36.74 (4j): the WS queue goes into the outbox. Built without
+  // wsTransport, c3f28d2 and this tree are byte-identical (62,075/19,617), so
+  // the whole move is the WS piece: its own queue 2,952/851, its own outbox
+  // 7,651/2,312, +4,699/+1,461. 69,726/21,929. Raised to measured.
+  // Then log 36.78 (4k part 1): `register(..., { optimistic })`, the home of
+  // the optimistic and optimisticUndo plugins. The async run apart
+  // (optimisticRun, Blade +134 br), the gate, the declared map and the
+  // register refusal (Blade +98 br), the sync bus's undo on a throw. Cold code:
+  // it runs only for an action declared optimistic. +1,057/+227.
+  // 70,783/22,156. Raised to measured.
+  // Then log 36.79 (4k part 2): `register(..., { exclusive })`, the home of
+  // the serialize plugin: `exclusively` with the scheduler's lanes (Blade
+  // +198 br), the lane read in dispatch and query (+45 br). Cold code.
+  // +988/+263, the run apart (speed) included. 71,771/22,419. Raised to measured.
+  // Then log 36.80 (4k part 3): the store's optimistic and exclusive, and the
+  // bus's turn reshaped so plugins run before the turn and the prediction
+  // shows before it (Blade +194 br). Cold code. +738/+252. 72,509/22,671.
+  // Raised to measured.
+  // Then log 36.81 (4k part 4): the optimistic plugin leaves the full IIFE's
+  // exports, -293/-72. 72,216/22,599. Lowered to measured.
+  // Then log 36.82 (step 4 close, coverage): the ledger's rootOf as one walk,
+  // its unreachable fallback gone, -10/+5. 72,206/22,604. Set to measured.
+  // Then log 36.84 (5a): the command state as the bus's facts observer. Each
+  // piece left out alone, raw/brotli: the two starts +70/+10, the two settles
+  // +74/+14, the sync bare read +32/+2, the slot the rest: the bus +198/+40,
+  // in every IIFE. A fast lane in the observer's place cost the bus +282/+71 (and
+  // +16.8 ns a tracked dispatch). Its setter reads the inspect state, so no bus
+  // carries one. The tracker moved from chamber.ts into command-state.ts with
+  // `subscribe`, and commandState is exported: +192/+82. 72,596/22,726.
+  // Raised to measured.
+  // Then log 36.86 (5b): useCommand and useVaporAsyncCommand lose their own
+  // `loading` and `lastError` (a lazy `pending` on the command state in their
+  // place), useCommandQuery its `lastError`: -320/-89. 72,276/22,637. Lowered to
+  // measured.
+  // Then log 36.87 (step 5 close): each command-state write its own catch, one
+  // helper in place of two try blocks: -33/+10. 72,243/22,647. Set to measured.
+  // Then log 36.90 (6a): pacing leaves the bus for the sender. The debounce and
+  // throttle plugins, register's throttle gate and its timers go, `pace` and the
+  // composables' pace options come in: +217/+98. 72,460/22,745. Raised to
+  // measured (the IIFE rule: legacy, measured).
+  // Then log 36.91 (6b): `bindCommands` carries the command binding (busy,
+  // error, announce, optimistic, the keyboard, the delegation) into the IIFE,
+  // with the form controls and `data-vc-debounce` / `-throttle`: +5,589/+1,824.
+  // 78,049/24,569. Raised to measured.
+  // Then log 36.92 (6c): `bindDisplay` and its store reader: +2,065/+525.
+  // 80,114/25,094. Raised to measured.
+  // Then log 36.93 (6d): `defineWidget`'s three strategies, one shared
+  // IntersectionObserver and a loader, from src/widget.ts: +788/+220.
+  // 80,902/25,314. Raised to measured.
+  // Then log 36.95 (6f): latest wins in `pace` (a controller per key, the
+  // signal handed on) and the IME guard: +767/+208. 81,669/25,522. Raised to
+  // measured.
+  // Then log 36.98 (7a): a plugin made of parts, `use()` placing its `settled`
+  // part as an after-hook (`_settledHook` ~160 raw, `_chainOf` ~110, the rule
+  // and its message ~90, the placement ~70); `logger` and `schemaLogger`
+  // smaller as parts. 81,855/25,715. Raised to measured.
+  // Then log 36.99 (7b): the rules before the work (`_rulesOf`, `_refusal`, `asyncRefused`, `ruleThrew`, the run sites in dispatch and query, `use()` keeping the rules), +1,709/+274, and the five factories as parts. 83,564/25,989. Raised to measured.
+  // Then log 36.100 (7c): the one scope reader `_scoped` for the logger, history and the two composables: +230/+55. 83,794/26,044. Raised to measured.
+  // Then log 36.100 (7c, recovery): `_scoped` classifies the patterns once instead of keeping an answer per action (speed: the lone recorded record +17 -> +6 ns): +177/+6. 83,971/26,050. Raised to measured.
+  // Then log 36.103 (8a): one pattern classifier read by every pattern reader: -77/+85. The classifier cut alone reads -38 brotli in the base and +41 in the head, so brotli moves with the arrangement; raw shrinks. 83,894/26,135. Brotli raised to measured.
+  // Then log 36.105 (8b): the facts slot with more than one observer (`_composeFacts`, the part loop, a part's throw message, an `actionFilter` asked once per action), `metrics` as parts, a query's start: +960/+158. 84,854/26,293. Raised to measured.
+  // Then log 36.106: the sync bus's request() runs the rules (the refusal settled inside `syncRefused` for its three sites): +78/+60. 84,932/26,353. Raised to measured.
+  // Then log 36.107 (8c): the work's steps around the work (`_stepped`, the tickets, `_stepsOf`): +1,735/+352. 86,667/26,705. Raised to measured.
+  // Then log 36.108 (8d): the chain, its runners, `perAction` and `priority` out: -1,355/-356. 85,312/26,349. Lowered to measured.
+  // Then log 36.109 (8e): the public onBefore out, its loops and its cancel: -665/-134. 84,647/26,215. Lowered to measured.
+  // Then log 36.110 (8f): the per-action record, one read per command: +241/+128. 84,888/26,343. Raised to measured.
+  // Then log 36.111: the rules follow a plugin's scope: +42/+35. 84,930/26,378. Raised to measured.
+  // Then log 36.112: the pattern reader in its own module, the same statements in a new order: +1/-2. 84,931/26,376. To measured.
+  // Then log 36.113: the outbox record's key through one writer, `_recordKeyed`: +9/-52. 84,940/26,324. To measured.
+  // Then log 36.114: two header checks read `_headerOf`: -27/+11. 84,913/26,335. To measured.
+  // Then log 36.115 (8g): one install per plugin, inspect's `parts`: +134/+84. 85,047/26,419. Raised to measured.
+  // Then step 8h (log 36.116-36.124): the reporter and its codes. Set to what the build reads (no IIFE work).
+  // Then the 1-7 fix-up, per commit, raw/brotli: 36.F1 the stores' fact lane (the reply's `stores` emit, the `{ entries, lane }` record, its clear, the store's one `write`, `land`, share's agreed state) +284/+76; 36.F2 0; 36.F3 one registry-entry factory +67/+64; 36.F4 the state half as one function +274/+39; 36.F5 the outbox on a state half, its tab locks +888/+377; 36.F6 history's stacks on a state half +486/+207; 36.F7 the buffer's queue on one +201/+53. 88,326/27,626. Raised to measured.
+  // Then the 1-7 fix-up close (36.F9 to 36.F14, IIFEs legacy: no per-commit reading): set to what the build reads. 89,238/27,910.
+  // Then log 36.F16, the outbox dropping the ids it removed from another tab's queue: +176/-4. 89,414/27,906.
+  // Then log 36.F18, the outbox's merge of another tab's queue, its clear count and the share that takes every state: +311/+145. 89,725/28,051.
+  // Then log 36.F30, tabs carry commands and undo (owner 2026-10-22: "sizes ok"), IIFEs raised to measured, all three. 93,922/29,253.
+  // Then log 36.F32, the answer covers what its tab sent before it: +23/+6. 93,945/29,259. Raised to measured.
+  // Then log 36.F38, VaporChamber.mount creates its stores, binds its element, returns unmount(): +160/+52. 94,003/29,285. Raised to measured.
+  // Then log 36.F39, every tab on the lead's runs (the Web Lock, the relay, both rebases in store-share): +2,316/+742. 96,319/30,027. Raised to measured.
+  // Then log 36.F40, every tab's history the same after a meeting (the ledger's `under`, the store's `hear`): +204/+47. 96,523/30,074. Raised to measured.
+  // Then log 36.F41, `store.$ready` (the member, its shared promise, the share's settle): +163/+37. 96,686/30,111. Raised to measured.
+  // Then log 36.F42 (B4), the action's live registrations, the typed Vapor app off the root, form.aria's ids and reads: +373/+91. 97,059/30,202. Raised to measured.
+  // Then log 36.F46 (phase 2 C2, the retry's success with no .then and no thunk): 97,389/30,331. Raised to measured.
+  // Then log 36.F47 (phase 2 C3, a sync handler with no async frame): 97,573/30,367. Raised to measured.
+  // Then log 36.F48 (phase 2 C4, _postJson with no async frame): 97,606/30,380. Raised to measured.
+  // Then log 36.F49 (phase 2 C5, useCommand reads once whether its bus can reject): 97,760/30,436. Raised to measured.
+  // Then log 36.F50 (phase 2 C7, syncQuery builds its command before the depth's try): raw 97,767. Raised to measured.
+  // Then log 36.F55 (supersede refuses a sync bus, attach before the plugin is placed): raw 97,768. Raised to measured.
+  // Then log 36.F56 (one command map on both buses, the signal slot): raw 97,866. Raised to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 97_866, brotliMax: 30_436 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
@@ -763,8 +973,121 @@ const BUDGETS = {
   // Then complexity review F2 (see the full IIFE's note): `readAnswer` alone
   // core +13/+9, elements +13/+3; total core +45/+47, elements +45/+47.
   // Raised to measured.
-  'vapor-chamber-core.iife.min.js':     { rawMax: 33_738, brotliMax: 10_667 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 35_390, brotliMax: 11_151 },
+  // Then compat step 1 (see the full IIFE's note): the tag alone +72 min,
+  // total core +126/+40, elements +126/+42. Raised to measured.
+  // Then the V8 round, item 1 (see the full IIFE's note): the typeof tests
+  // core -8/-5, elements -8/-4, the writer built once core +10/+14, elements
+  // +10/+5. Total core +2/+9, elements +2/+1. Raised to measured.
+  // Then log 36.41 (see the full IIFE's note): the wrapper check core
+  // +412/+107, elements +412/+130, the identity key core +210/+35, elements
+  // +210/+44. Total core +622/+158, elements +622/+168. Raised to measured.
+  // Then log 36.42 (see the full IIFE's note): the epoch rule core +157/+34,
+  // elements +157/+28, the batched result's headers core +27/-2, elements
+  // +27/+1. Total core +206/+39, elements +206/+40. Raised to measured.
+  // Then the custom client's header names (see the full IIFE's note): core
+  // +8/-2, elements +8/+6. Raw raised to measured, core brotli kept.
+  // Then log 36.45 (see the full IIFE's note), brotli, each left out alone:
+  // `batch` core +509, elements +490, the answers at the send core +75,
+  // elements +77, use()'s refusal core +47, elements +36, failed:send core
+  // +26, elements +28, disposing the transports core +17, elements +23,
+  // sendFrom core +19, elements +5, the inlined hit path core +14, elements
+  // +16. Total core +2399/+723, elements +2399/+703. Raised to measured.
+  // Then log 36.47 (see the full IIFE's note), raw/brotli, each left out
+  // alone: the `headers` member core +142/+57, elements +142/+51, the scan
+  // core +29/+30, elements +29/+17, the result's status core +30/+19,
+  // elements +30/+10, `Accept` core +22/+9, elements +22/-5, the key out of
+  // `meta` core -50/-5, elements -50/-13. Total core +325/+121, elements
+  // +325/+125. Raised to measured.
+  // Then log 36.48 (see the full IIFE's note), one piece: core +16/+11,
+  // elements +16/+24. Raised to measured.
+  // Then log 36.49 (see the full IIFE's note), raw/brotli: the Accepted and its
+  // follow core +1366/+450, elements +1366/+453; the batched 202 core +51/+19,
+  // elements +51/+21; the single 202 core +74/+10, elements +74/+13; `dispose`
+  // core +18/+7, elements +18/+5. Total core +1683/+550, elements
+  // +1683/+541. Raised to measured.
+  // Then log 36.51 (see the full IIFE's note), raw/brotli, each left out
+  // alone: the single check core +50/+6, elements +50/+14, its records
+  // core +28/-7, elements +28/+7, the batched check core +67/+7, elements
+  // +67/+23, its records core +62/+7, elements +62/+18, `dispose` core
+  // +10/-1, elements +10/+4, the message core +55/+15, elements +55/+35. No
+  // WebSocket transport here. Total core +615/+167, elements +615/+185 from
+  // 3d's. Raised to measured.
+  // Then log 36.52 (see the full IIFE's note): one piece here, the bus
+  // giving each transport itself (`attach`), core +94/+33, elements +94/+16.
+  // No push reader in either. Raised to measured.
+  // Then log 36.53 (see the full IIFE's note): the transports' group header
+  // read and the plugin `attach`, core +220/+96, elements +220/+107.
+  // Then log 36.62 (4e): one piece here, register() building only what a call
+  // uses (speed, -40 to -122 ns a store creation), core +19/-6, elements
+  // +19/-4. Raw raised to measured, brotli kept.
+  // Then log 36.69 (4i): one piece here, the async bus's outbox hooks (the
+  // option read and `attach`, the resolve's `adapt`, its `dispose`, the key
+  // symbol, the one scope reader), creation code only; no outbox in either.
+  // Core +140/+57, elements +140/+59. Raised to measured.
+  // Then log 36.73 (see the full IIFE's note): the queue out of the bus,
+  // core -741/-212, elements -741/-202; the createBuffer module, core
+  // +1338/+489, elements +1364/+494. Raised to measured.
+  // Then log 36.74 (4j): no WS here, raw identical. The outbox module's import
+  // moved one `var` boundary (the same statements, counted), brotli core +37,
+  // elements +5 from the arrangement. Brotli raised to measured.
+  // Then log 36.78 (see the full IIFE's note): `register(..., { optimistic })`,
+  // core +1,048/+264, elements +1,048/+276. Raised to measured.
+  // Then log 36.79 (see the full IIFE's note): `register(..., { exclusive })`,
+  // core +986/+251 (the brotli -55 from the arrangement once the run moved apart), elements +986/+276. Raised to measured.
+  // Then log 36.80 (see the full IIFE's note): core +505/+176, elements
+  // +505/+181. Raised to measured.
+  // Then log 36.84 (see the full IIFE's note): the bus's facts observer, core
+  // +198/+40, elements +198/+33. Raised to measured.
+  // Then log 36.90 (6a): the two plugins and register's throttle gate out, `pace`
+  // in: core -91/-33, elements -91/-49. Lowered to measured.
+  // Then log 36.91 (6b): `bindCommands` and the command binding, new in both:
+  // core +5,648/+1,829, elements +5,648/+1,826. Raised to measured.
+  // Then log 36.92 (6c): `bindDisplay`, and the core store and `commandState` it
+  // reads, new in both: core +11,468/+3,680, elements +11,468/+3,710. Raised to
+  // measured.
+  // Then log 36.93 (6d): elements only, `defineWidget`'s strategies: +788/+226.
+  // Then log 36.95 (6f): latest wins and the IME guard, core +736/+159,
+  // elements +736/+226. Raised to measured.
+  // Then log 36.98 (7a, see the full IIFE's note): core +276/+89, elements
+  // +276/+92. Raised to measured.
+  // Then log 36.99 (7b, see the full IIFE's note): core +1,706/+352, elements +1,706/+344. Raised to measured.
+  // Then log 36.100 (7c, see the full IIFE's note): core +189/+75, elements +189 raw (brotli -9, the budget kept). Raised to measured.
+  // Then log 36.100 (7c, recovery) (see the full IIFE's note): core +179/+61, elements +179/+53. Raised to measured.
+  // Then log 36.103 (8a, see the full IIFE's note): core -79/-47 (budget kept), elements -80/+26. Elements brotli raised to measured.
+  // Then log 36.105 (8b, see the full IIFE's note): core +961/+316, elements +962/+211. Raised to measured.
+  // Then log 36.106 (see the full IIFE's note): core +80/-5 (budget kept), elements +80/+12. Raised to measured.
+  // Then log 36.107 (8c, see the full IIFE's note): core +1,720/+366, elements +1,719/+424. Raised to measured.
+  // Then log 36.108 (8d, see the full IIFE's note): core -1,358/-402, elements -1,356/-401. Lowered to measured.
+  // Then log 36.109 (8e, see the full IIFE's note): core -664/-81, elements -662/-81. Lowered to measured.
+  // Then log 36.110 (8f, see the full IIFE's note): core +234/+109, elements +232/+109. Raised to measured.
+  // Then log 36.111 (the rules follow a plugin's scope): core +44/+10, elements +44/+23. Raised to measured.
+  // Then log 36.112 (the pattern reader's module, a new order only): core 0/+8, elements 0/-52. To measured.
+  // Then log 36.114 (two header checks read `_headerOf`): core -26/+22, elements -25/+69. To measured.
+  // Then log 36.115 (8g, see the full IIFE's note): core +134/-32, elements +134/+15. To measured.
+  // Then step 8h (see the full IIFE note): set to what the build reads.
+  // Then the 1-7 fix-up (see the full IIFE's note), core and elements raw/brotli: 36.F1 +284/+135 and +284/+115; 36.F3 +63/+43 and +63/+125; 36.F4 +244/+123 and +245/+12; 36.F5 -3/-34 and -4/+72; 36.F6 +4/+45 and +4/-22; 36.F7 +227/+47 and +227/+81. Raised to measured.
+  // Then the 1-7 fix-up close (36.F9 to 36.F14): set to what the build reads.
+  // Then log 36.F41, `store.$ready` (see the full IIFE's note): 69,872/21,896. Raised to measured.
+  // Then log 36.F42 (B4, see the full IIFE's note): 70,187/21,984. Raised to measured.
+  // Then log 36.F45 (phase 2 C1, after-hooks with no async frame): 70,108/21,985. Brotli raised to measured.
+  // Then log 36.F46 (phase 2 C2, see the full IIFE's note): 70,517/22,126. Raised to measured.
+  // Then log 36.F47 (phase 2 C3, see the full IIFE's note): 70,701/22,070. Raw raised to measured.
+  // Then log 36.F48 (phase 2 C4, see the full IIFE's note): 70,734/22,125. Raw raised to measured.
+  // Then log 36.F50 (phase 2 C7): raw 70,741. Raised to measured.
+  // Then log 36.F55: 70,742/22,147. Raised to measured.
+  // Then log 36.F56: raw 70,826. Raised to measured.
+  'vapor-chamber-core.iife.min.js':     { rawMax: 70_826, brotliMax: 22_147 },
+  // Then the bundler alone (rolldown 1.2.12 -> 1.2.15 with vite 8.3.5, no source changed): elements brotli 22,542 -> 22,581 (+39), raw 72,256 -> 72,208. Raised to measured. Full and core moved down and stay under.
+  // Then log 36.F41, `store.$ready` (see the full IIFE's note): 72,321/22,634. Raised to measured.
+  // Then log 36.F42 (B4, see the full IIFE's note): 72,636/22,719. Raised to measured.
+  // Then log 36.F45 (phase 2 C1, after-hooks with no async frame): 72,556/22,727. Brotli raised to measured.
+  // Then log 36.F46 (phase 2 C2, see the full IIFE's note): 72,966/22,870. Raised to measured.
+  // Then log 36.F47 (phase 2 C3, see the full IIFE's note): 73,149/22,901. Raised to measured.
+  // Then log 36.F48 (phase 2 C4, see the full IIFE's note): 73,182/22,932. Raised to measured.
+  // Then log 36.F50 (phase 2 C7): raw 73,189. Raised to measured.
+  // Then log 36.F55: raw 73,190. Raised to measured.
+  // Then log 36.F56: raw 73,274. Raised to measured.
+  'vapor-chamber-elements.iife.min.js': { rawMax: 73_274, brotliMax: 22_932 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

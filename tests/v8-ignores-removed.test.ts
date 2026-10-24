@@ -1,5 +1,6 @@
 /** The invariants three removed `v8 ignore` guards stood on, pinned (log s35.122). */
 import { describe, expect, vi } from 'vitest';
+import { createBuffer } from '../src/buffer';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { it } from '../src/vitest';
 
@@ -27,14 +28,14 @@ describe('a transactional batch stops at its first failure, so a rollback sees o
   });
 });
 
-describe('the deferred buffer is flushed only once it holds something', () => {
-  it('register() on a bus without buffering never reaches the flush', () => {
+describe('a buffer is released only when the bus has one', () => {
+  it('register() on a bus without a buffer never reaches a release', () => {
     const bus = createCommandBus();
     expect(() => bus.register('a', () => 1)).not.toThrow();
   });
 
   it('a buffered command replays when its handler arrives', () => {
-    const bus = createCommandBus({ onMissing: 'buffer' });
+    const bus = createCommandBus({ buffer: createBuffer() });
     bus.dispatch('late', 1);
     const seen: number[] = [];
     bus.register('late', (cmd) => { seen.push(cmd.target); return 1; });

@@ -6,8 +6,8 @@
 // exist in this repo. These declarations exist so the type-check stays
 // focused on its actual goal - catching misuse of vapor-chamber's OWN
 // exported API (the reason this file exists at all:
-// pattern-6-vapor-router.ts called `createHttpBridge({ bus, ... })` as if
-// `bus` were a config option, when it's a plugin you pass to `bus.use()` -
+// pattern-6-vapor-router.ts called a bridge with `{ bus, ... }` as if `bus`
+// were a config option -
 // not on whether an illustrative import target happens to exist in this repo.
 declare module '*.vue';
 declare module '@inertiajs/vue3';

@@ -14,16 +14,47 @@
  *     failed (a VM too noisy to measure), and passing would be a silent pass;
  *   - a workload produced no function at all (it threw, or a row went missing).
  * A "no result" row does not fail: it is the gate saying it cannot tell.
+ * It measures nothing, and passes, when the head ships the same JavaScript as
+ * its base (`sameShippedCode`): a commit that changes docs, CI or FUNDING.yml
+ * only builds the same dist, and an A/B of two identical builds is noise.
  * Each workload's raw rounds go to <out-dir>/<name>.json when --out=<dir> is
  * given. Decisions, 2026-10-02 (owner: "C"); log s35.59.
  */
-import { mkdirSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main } from './ab.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_WORKLOADS = ['track-parts', 'composable', 'create', 'filter-mixed', 'plugins'].map((w) => join(here, 'workloads', `${w}.mjs`));
+
+/** Every shipped JavaScript file under `dir` (source maps and type files left out), by path. */
+function shippedJs(dir, root = dir, out = new Map()) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) shippedJs(path, root, out);
+    else if (/\.(m|c)?js$/.test(entry.name)) out.set(relative(root, path), path);
+  }
+  return out;
+}
+
+/**
+ * Why there is nothing to measure, or undefined: when the head ships the same
+ * JavaScript as its base (a commit that changes docs, CI or FUNDING.yml only),
+ * the A/B compares two identical builds, and any verdict it gives is noise,
+ * a red build included (owner report, log 36.31): two byte-identical copies
+ * once read up to 1.425x apart (docs/V8-RULES.md rule 10).
+ */
+export function sameShippedCode(distBase, distHead) {
+  const base = shippedJs(distBase);
+  const head = shippedJs(distHead);
+  if (base.size !== head.size) return undefined;
+  for (const [path, file] of base) {
+    const other = head.get(path);
+    if (!other || !readFileSync(file).equals(readFileSync(other))) return undefined;
+  }
+  return `head ships the same JavaScript as base (${base.size} files, byte for byte): nothing to measure`;
+}
 
 /**
  * The job's verdict from each workload's summary ({ fn: { verdict, controls } }).
@@ -54,6 +85,11 @@ async function run(argv) {
   const out = argv.find((a) => a.startsWith('--out='))?.slice(6);
   if (pos.length < 2) throw new Error('usage: ci.mjs <distBase> <distHead> [workload.mjs ...] [--k= --lengths= --out=dir]');
   const [base, head, ...given] = pos;
+  const same = sameShippedCode(base, head);
+  if (same) {
+    console.log(`ab:ci SKIP: ${same}`);
+    return true;
+  }
   const workloads = given.length ? given.map((w) => resolve(w)) : DEFAULT_WORKLOADS;
   if (out) mkdirSync(out, { recursive: true });
   const results = {};

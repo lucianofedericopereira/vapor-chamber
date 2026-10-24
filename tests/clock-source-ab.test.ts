@@ -95,10 +95,10 @@ function runOnce(mode: Mode, n: number): void {
   if (mode === 'loaded') {
     // The honest counterweight to the bare-bus row: a clock read is a FIXED
     // cost, so its share shrinks as the rest of the dispatch grows. Same shape
-    // as perf.bench.ts's "3 plugins + 1 listener" case.
-    bus.use((cmd, next) => next());
-    bus.use((cmd, next) => next());
-    bus.use((cmd, next) => next());
+    // as perf.bench.ts's `dispatch.sync.parts3` row: three parts the bus places.
+    bus.use({ started: () => {} });
+    bus.use({ settled: () => {} });
+    bus.use({ begin: () => undefined });
     bus.on('test', () => {});
   }
   if (mode === 'query') for (let i = 0; i < n; i++) bus.query('test', i);

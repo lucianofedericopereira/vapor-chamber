@@ -8,8 +8,15 @@
  * heuristically caches the bundle leaves you testing the library build from
  * ten minutes ago - including a bug you already fixed.
  *
+ * The catalog reads (`/api/items*`) answer `ETag` and `Cache-Groups` (RFC 9875),
+ * and 304 to a matching `If-None-Match`. The write `productStockAdd` answers
+ * `Cache-Group-Invalidation`, so a client that shares one http client between
+ * its transport and its router refreshes the list on screen
+ * (examples/router-demo).
+ *
  *   node examples/static-server.mjs [port]      # default 3000
  */
+import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -51,12 +58,28 @@ const commands = {
   cartState: () => ({ ...cart }),
 };
 
+/** A refusal a command raises: the problem's status, code and detail. */
+class Refusal extends Error {
+  constructor(status, code, detail) {
+    super(detail);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/**
+ * The groups a write made stale, answered as `Cache-Group-Invalidation`
+ * (RFC 9875, a Structured Field List of Strings). The catalog reads name the
+ * same group in `Cache-Groups`.
+ */
+const invalidates = { productStockAdd: '"items"' };
+
 function api(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
-    const json = (status, payload, type = 'application/json') => {
-      res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    const json = (status, payload, type = 'application/json', extra) => {
+      res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...extra });
       res.end(JSON.stringify(payload));
     };
     // A failure is an RFC 9457 problem, as the reference controller answers it.
@@ -79,8 +102,14 @@ function api(req, res) {
         problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;
       }
-      json(200, { state: fn(target, payload) });
+      const state = fn(target, payload);
+      const groups = Object.hasOwn(invalidates, command) ? { 'Cache-Group-Invalidation': invalidates[command] } : undefined;
+      json(200, { state }, 'application/json', groups);
     } catch (e) {
+      if (e instanceof Refusal) {
+        problem(e.status, e.code, e.message);
+        return;
+      }
       console.error(e);
       problem(500, 'internal_error', 'Internal error');
     }
@@ -102,6 +131,35 @@ const CATALOG = Array.from({ length: 47 }, (_, i) => ({
   price: +(3 + ((i * 7) % 23) + 0.99).toFixed(2),
   stock: (i * 13) % 40,
 }));
+
+/** A stock change: `qty` is added to the item's stock (a negative one sells). */
+commands.productStockAdd = (target, payload) => {
+  const item = CATALOG.find((row) => row.id === target?.id);
+  if (!item) throw new Refusal(404, 'not_found', 'No such item');
+  const qty = payload?.qty;
+  if (!Number.isInteger(qty)) throw new Refusal(422, 'invalid_qty', 'qty must be a whole number');
+  if (item.stock + qty < 0) throw new Refusal(409, 'out_of_stock', `Only ${item.stock} in stock`);
+  item.stock += qty;
+  return { ...item };
+};
+
+/**
+ * A catalog read: 200 with its `ETag` and `Cache-Groups`, or 304 when the
+ * request's `If-None-Match` names that tag. `no-cache` lets a client keep the
+ * body and ask again before using it, which the 304 answers.
+ */
+function read(req, res, body) {
+  const text = JSON.stringify(body);
+  const etag = `"${createHash('sha1').update(text).digest('hex').slice(0, 16)}"`;
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, 'Cache-Groups': '"items"' };
+  const sent = req.headers['if-none-match'];
+  if (sent !== undefined && (sent === '*' || sent.split(',').some((tag) => tag.trim() === etag))) {
+    res.writeHead(304, headers).end();
+    return;
+  }
+  res.writeHead(200, headers);
+  res.end(text);
+}
 
 createServer((req, res) => {
   const parsed = new URL(req.url || '/', 'http://localhost');
@@ -135,24 +193,25 @@ createServer((req, res) => {
             : (a, b) => a.id - b.id; // numeric, never string
     const rows = [...CATALOG].sort((a, b) => (desc ? -cmp(a, b) : cmp(a, b)));
     const start = (page - 1) * perPage;
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(
-      JSON.stringify({
-        items: rows.slice(start, start + perPage),
-        page,
-        per_page: perPage,
-        total: rows.length,
-        last_page: Math.ceil(rows.length / perPage),
-      }),
-    );
+    read(req, res, {
+      items: rows.slice(start, start + perPage),
+      page,
+      per_page: perPage,
+      total: rows.length,
+      last_page: Math.ceil(rows.length / perPage),
+    });
     return;
   }
 
   // One item - `load: "/api/items/{id}"`, a path param this time.
   if (url.startsWith('/api/items/')) {
     const item = CATALOG.find((row) => String(row.id) === url.slice('/api/items/'.length));
-    res.writeHead(item ? 200 : 404, { 'Content-Type': item ? 'application/json' : 'application/problem+json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(item ?? { status: 404, code: 'not_found', detail: 'No such item' }));
+    if (item) {
+      read(req, res, item);
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/problem+json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ status: 404, code: 'not_found', detail: 'No such item' }));
     return;
   }
 
@@ -168,14 +227,15 @@ createServer((req, res) => {
 
   if (url === '/api/vc') {
     // Same-origin here, but allow the cross-origin case too - every header the
-    // bridge actually sends must be on the preflight allowlist.
+    // transport actually sends must be on the preflight allowlist.
     res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Accept, X-Requested-With, X-CSRF-TOKEN, X-XSRF-TOKEN, Idempotency-Key',
+      'Content-Type, Accept, X-CSRF-TOKEN, X-XSRF-TOKEN, Idempotency-Key',
     );
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers', 'Cache-Group-Invalidation');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method === 'POST') { api(req, res); return; }
   }

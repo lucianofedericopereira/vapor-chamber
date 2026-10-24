@@ -51,11 +51,6 @@ describe('controls', () => {
     expect(await readAround(() => {})).toEqual({ gets: 1, second: 1 });
   });
 
-  it('invalidateCache with a substring or a RegExp stops the join', async () => {
-    expect(await readAround((h) => h.invalidateCache('/api/a'))).toEqual({ gets: 2, second: 2 });
-    expect(await readAround((h) => h.invalidateCache(/^\/api\/a$/))).toEqual({ gets: 2, second: 2 });
-  });
-
   it('a write to another URL leaves the join', async () => {
     expect(await readAround((h) => h.post('/api/b', { x: 1 }))).toEqual({ gets: 1, second: 1 });
   });

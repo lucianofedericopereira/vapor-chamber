@@ -31,10 +31,7 @@ import { it } from '../src/vitest';
 describe('item 18 - MCP origin attribution on an async bus', () => {
   it('stamps the MCP dispatch and only the MCP dispatch', async ({ asyncBus: bus }) => {
     const origins: Array<{ action: string; origin: unknown }> = [];
-    bus.use(async (cmd, next) => {
-      origins.push({ action: cmd.action, origin: cmd.meta?.origin });
-      return next();
-    });
+    bus.use({ started: (cmd) => { origins.push({ action: cmd.action, origin: cmd.meta?.origin }); } });
 
     let releaseAgentCall: (() => void) | null = null as (() => void) | null;
     bus.register('agentWrite', async () => {
@@ -269,23 +266,18 @@ describe('item 19 - TestBus commands carry meta', () => {
   it('stamps the same meta the real bus does', () => {
     const bus = createTestBus();
     let seen: unknown;
-    bus.use((cmd, next) => {
-      seen = cmd.meta;
-      return next();
-    });
+    bus.use({ started: (cmd) => { seen = cmd.meta; } });
     bus.dispatch('act', {});
 
     expect(seen).toMatchObject({ ts: expect.any(Number), id: expect.any(String) });
   });
 
   it('meta-dependent plugins actually run instead of no-opping', () => {
-    const bus = createTestBus();
-    bus.use(idempotent() as never); // AsyncPlugin on a TestBus, on purpose - see the title
+    const bus = createTestBus({ passthroughHandlers: true });
+    bus.use(idempotent());
     const seen: Array<string | undefined> = [];
-    bus.use((cmd, next) => {
-      seen.push(cmd.meta?.idempotencyKey);
-      return next();
-    });
+    // The key is stamped at the work's step, so the work reads it.
+    bus.register('save', (cmd) => { seen.push(cmd.meta?.idempotencyKey); });
 
     bus.dispatch('save', { id: 1 });
 
@@ -297,10 +289,7 @@ describe('item 19 - TestBus commands carry meta', () => {
   it('query() stamps meta too', () => {
     const bus = createTestBus();
     let seen: unknown;
-    bus.use((cmd, next) => {
-      seen = cmd.meta;
-      return next();
-    });
+    bus.use({ started: (cmd) => { seen = cmd.meta; } });
     bus.query('read', {});
     expect(seen).toMatchObject({ id: expect.any(String) });
   });

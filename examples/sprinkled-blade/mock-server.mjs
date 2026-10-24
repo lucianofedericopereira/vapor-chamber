@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 /** The repo's dist/ directory, with its trailing separator. */
 const DIST = fileURLToPath(new URL('../../dist/', import.meta.url));
 
-/** The one place the cart is turned into text - server and client agree on it
- *  because the client re-renders with the same shape after each dispatch. */
-const summary = (s) => `${s.count} items (total: $${s.total.toFixed(2)})`;
+/** What the page shows and what an answer carries: the cart and its sentence,
+ *  said once, by the side that knows it. */
+const view = (s) => ({ count: s.count, total: s.total, summary: `${s.count} items (total: $${s.total.toFixed(2)})` });
 
 /** A failure a handler declares: answered as its RFC 9457 problem. */
 class Problem extends Error {
@@ -31,17 +31,16 @@ const handlers = {
     const qty = payload?.qty ?? 1;
     _state.count += qty;
     _state.total += 19.99 * qty;
-    return { count: _state.count, total: _state.total };
+    return view(_state);
   },
   cartClear: (_target, _payload, _state) => {
     _state.count = 0;
     _state.total = 0;
-    return { count: 0, total: 0 };
+    return view(_state);
   },
-  // Read-only: what the page asks for on load, because a static file cannot
-  // render the cart the way a Blade template would. The cart lives here and
-  // survives page reloads - reloading the browser must not appear to empty it.
-  cartState: (_target, _payload, _state) => ({ count: _state.count, total: _state.total }),
+  // Read-only: the cart as it stands. The cart lives here and survives page
+  // reloads - reloading the browser must not appear to empty it.
+  cartState: (_target, _payload, _state) => view(_state),
 };
 
 // Per-instance "session" - in a real backend this is the user's cart row.
@@ -52,15 +51,14 @@ const PORT = Number(process.argv[2]) || 3001;
 const server = createServer((req, res) => {
   // CORS for local-dev: allow the static HTML server (default :3000) to POST.
   res.setHeader('Access-Control-Allow-Origin', '*');
-  // X-Requested-With is NOT optional: the HTTP bridge stamps
-  // `X-Requested-With: XMLHttpRequest` on every dispatch (it is what makes
-  // Laravel answer 419/401 as JSON instead of redirecting to a login page).
-  // Leaving it out of the allowlist fails the CORS preflight, and the browser
-  // reports the useless "Failed to fetch" / "header is not allowed" pair.
-  // Any real cross-origin backend needs the same list.
+  // Every header the transport sends that is not CORS-safelisted must be
+  // listed: `Content-Type: application/json` on every dispatch, and
+  // `Idempotency-Key` on a keyed one. A header left out fails the preflight,
+  // and the browser reports the useless "Failed to fetch" / "header is not
+  // allowed" pair. Any real cross-origin backend needs the same list.
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Accept, X-Requested-With, X-CSRF-TOKEN, X-XSRF-TOKEN, Idempotency-Key',
+    'Content-Type, Accept, X-CSRF-TOKEN, X-XSRF-TOKEN, Idempotency-Key',
   );
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
@@ -69,14 +67,17 @@ const server = createServer((req, res) => {
   // Serve the page itself with the cart ALREADY RENDERED INTO IT - this is the
   // Blade half of the pattern, and the reason the demo has no loading flicker
   // on this origin: the first paint is correct, so the page has nothing to ask
-  // for. `data-hydrated` tells the client script to skip its startup fetch.
-  // (Serving it statically instead is still supported - the script falls back
-  // to a `cartState` dispatch. That path is the one that flickers, which is
-  // exactly the cost server-rendering buys away.)
+  // for. The cart is the span's text and, as JSON, its `data-cart` (Blade's
+  // `@json($cart)`), which the page's store starts from. (Serving the page
+  // statically instead is still supported: nothing is rendered, and the count
+  // shows after the first answer.)
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+    const cart = view(state);
+    const json = JSON.stringify(cart).replaceAll('&', '&amp;').replaceAll("'", '&#39;');
     const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8').replace(
-      /<span id="count"[^>]*>[^<]*<\/span>/,
-      `<span id="count" data-cart data-hydrated>${summary(state)}</span>`,
+      /<span id="count"([^>]*)><\/span>/,
+      // A function, not a string: the sentence holds a `$`, which `replace` reads in a string.
+      (_match, attrs) => `<span id="count"${attrs} data-cart='${json}'>${cart.summary}</span>`,
     );
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(html);

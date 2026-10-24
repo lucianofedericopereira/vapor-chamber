@@ -1,7 +1,7 @@
 /**
  * SSR - dehydrated commands embedded in a <script> element.
  *
- * The documented embedding was `<script>window.__VAPOR_COMMANDS__ =
+ * The documented embedding was `<script>window.__VAPOR_STATES__ =
  * ${JSON.stringify(commands)}</script>`. JSON.stringify leaves `</script>`
  * as it is, so any user text in a dehydrated command's target or payload - a
  * search term, a name - could close the element and run script of its own.
@@ -15,7 +15,7 @@ const hostile = [{ action: 'searchSet', target: 'box', payload: { q: '</script><
 
 describe('serializeForScript', () => {
   it('cannot close the script element it is embedded in', () => {
-    const html = `<script>window.__VAPOR_COMMANDS__ = ${serializeForScript(hostile)}</script>`;
+    const html = `<script>window.__VAPOR_STATES__ = ${serializeForScript(hostile)}</script>`;
     expect(html.indexOf('</script>')).toBe(html.length - '</script>'.length);
     expect(html).not.toMatch(/<script>.*<script>/s);
   });

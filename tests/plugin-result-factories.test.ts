@@ -23,11 +23,11 @@ describe('ok / err from the root', () => {
     expect(sameMap(ref, root.err(new Error('x')))).toBe(true);
   });
 
-  it('an app plugin rejects with err(fail(...)): its own owner, the bus\'s map', () => {
+  it('an app rule refuses with err(fail(...)): its own owner, the bus\'s map', () => {
     const bus = createCommandBus();
     bus.register('cartAdd', () => 1);
-    bus.use(Object.assign((cmd: { payload?: { qty?: number } }, next: () => CommandResult, fail: root.Fail) =>
-      (cmd.payload?.qty ?? 0) > 0 ? next() : root.err(fail('invalid:payload', 'qty must be positive')), { id: 'qtyGuard' }));
+    bus.use({ id: 'qtyGuard', validate: () => (cmd, fail: root.Fail) =>
+      ((cmd.payload as { qty?: number } | undefined)?.qty ?? 0) > 0 ? undefined : root.err(fail('invalid:payload', 'qty must be positive')) });
     const r = bus.dispatch('cartAdd', {}, { qty: 0 });
     expect(r.ok).toBe(false);
     expect((r.error as root.BusError).code).toBe('qtyGuard:invalid:payload');

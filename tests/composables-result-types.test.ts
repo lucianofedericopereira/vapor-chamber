@@ -8,7 +8,6 @@ import {
   useCommand,
   useCommandGroup,
   useCommandQuery,
-  useSharedCommandState,
   type AsyncCommandBus,
   type BaseBus,
   type CommandBus,
@@ -30,7 +29,6 @@ function resultTypes(): void {
   expectTypeOf(useCommandQuery().query('a', null)).toEqualTypeOf<R>();
   expectTypeOf(useCommandGroup('g').dispatch('a', null)).toEqualTypeOf<R>();
   expectTypeOf(useCommandGroup('g').query('a', null)).toEqualTypeOf<R>();
-  expectTypeOf(useSharedCommandState().dispatch('a', null)).toEqualTypeOf<R>();
   expectTypeOf(defineVaporCommand('a', () => 1).dispatch(null)).toEqualTypeOf<R>();
 
   // A sync bus: the result.
@@ -38,7 +36,6 @@ function resultTypes(): void {
   expectTypeOf(useCommandQuery({ bus: syncBus }).query('a', null)).toEqualTypeOf<R>();
   expectTypeOf(useCommandGroup('g', { bus: syncBus }).dispatch('a', null)).toEqualTypeOf<R>();
   expectTypeOf(useCommandGroup('g', { bus: syncBus }).query('a', null)).toEqualTypeOf<R>();
-  expectTypeOf(useSharedCommandState({ bus: syncBus }).dispatch('a', null)).toEqualTypeOf<R>();
   expectTypeOf(defineVaporCommand('a', () => 1, { bus: syncBus }).dispatch(null)).toEqualTypeOf<R>();
 
   // An async bus: a promise of it.
@@ -46,7 +43,6 @@ function resultTypes(): void {
   expectTypeOf(useCommandQuery({ bus: asyncBus }).query('a', null)).toEqualTypeOf<P>();
   expectTypeOf(useCommandGroup('g', { bus: asyncBus }).dispatch('a', null)).toEqualTypeOf<P>();
   expectTypeOf(useCommandGroup('g', { bus: asyncBus }).query('a', null)).toEqualTypeOf<P>();
-  expectTypeOf(useSharedCommandState({ bus: asyncBus }).dispatch('a', null)).toEqualTypeOf<P>();
   expectTypeOf(defineVaporCommand('a', () => 1, { bus: asyncBus }).dispatch(null)).toEqualTypeOf<P>();
 
   // A bus typed only as BaseBus: either.
@@ -60,19 +56,26 @@ describe('dispatch result types', () => {
     expect(typeof resultTypes).toBe('function');
   });
 
-  it('on an async bus, a dispatch failed by a throwing subscriber is still a promise', async () => {
+  it('on an async bus, a query failed by a throwing subscriber is still a promise', async () => {
     await waitForVueDetection();
     const bus = createAsyncCommandBus();
-    bus.register('save', async () => 'saved');
-    const { dispatch, loading } = useCommand({ bus });
+    bus.register('read', async () => 'read');
+    const { query, loading } = useCommandQuery({ bus });
     // Control: the signal is Vue's, so the effect is a real subscriber.
     expect(isRef(loading)).toBe(true);
     const boom = new Error('subscriber threw');
     const runner = effect(() => { if (loading.value) throw boom; });
-    const result = dispatch('save', {});
+    const result = query('read', {});
     runner.effect.stop();
     expect(result).toBeInstanceOf(Promise);
     expect(await result).toEqual({ ok: false, error: boom });
+  });
+
+  it('on an async bus, a dispatch that throws (onMissing: throw) is still a promise', async () => {
+    const bus = createAsyncCommandBus({ onMissing: 'throw' });
+    const result = useCommand({ bus }).dispatch('missing', {});
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toMatchObject({ ok: false });
   });
 });
 

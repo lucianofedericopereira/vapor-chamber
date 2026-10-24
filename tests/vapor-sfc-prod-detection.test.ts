@@ -108,9 +108,7 @@ describe('production bundle: both detection channels are absent', () => {
       setup() { return vue.template('<div>mounted</div>', true)(); },
     });
     const host = document.createElement('div');
-    const app = vapor.createVaporChamberApp<{ mount: (el: Element) => void; unmount: () => void }>(
-      Comp as object,
-    );
+    const app = vapor.createVaporChamberApp(Comp as object) as { mount: (el: Element) => void; unmount: () => void };
     app.mount(host);
     expect(host.textContent).toContain('mounted');
     app.unmount();

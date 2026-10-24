@@ -34,28 +34,27 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REF_DIR = resolve(HERE, '__ref', 'async-execute');
 const BASELINE = resolve(REF_DIR, 'command-bus-async-execute-baseline.ts');
 
+// Since phase 2 C2 (log 36.F46) a no-step action calls the work itself, with no
+// closure: the baseline puts back the async closure through `retry.run` for both
+// dispatch and query, and the retry's no-step half returns the result untouched.
 const REVERTS: Array<[string, string]> = [
   [
-    `  const execute = executeOverride ? (): Promise<CommandResult> => executeOverride(cmd) : ((): Promise<CommandResult> => {
-    const handler = s.handlers.get(action);
-    return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, true);
-  });`,
-    `  const execute = executeOverride ? (): Promise<CommandResult> => executeOverride(cmd) : (async (): Promise<CommandResult> => {
-    const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s, cmd, true);
+    `  if (list === null && execute === undefined) {
+    if (retry !== null) retry.begin(cmd);
+    return work(s, rec, cmd, dispatching);
+  }
+  const call = execute ?? ((): CommandResult | Promise<CommandResult> => work(s, rec, cmd, dispatching));`,
+    `  const call = execute ?? (async (): Promise<CommandResult> => {
+    const transport = rec.transport;
+    if (transport !== undefined) return send(transport, cmd, () => runLocal(s, rec, cmd, dispatching), s);
+    const handler = rec.handler;
+    if (!handler) return handleMissing(s, cmd, dispatching);
     return tryCatchAsyncHandler(handler, cmd);
   });`,
   ],
   [
-    `  const execute = (): Promise<CommandResult> => {
-    const handler = s.handlers.get(action);
-    return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, false);
-  };`,
-    `  const execute = async (): Promise<CommandResult> => {
-    const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s, cmd, false);
-    return tryCatchAsyncHandler(handler, cmd);
-  };`,
+    `  return retry === null || rec.steps !== null ? result : retry.end(result, cmd, s, rec, dispatching);`,
+    `  return result;`,
   ],
 ];
 

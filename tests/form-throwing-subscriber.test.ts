@@ -57,13 +57,13 @@ describe('createFormBus: a throwing sync subscriber', () => {
     runner.effect.stop();
   });
 
-  it('set(), TODAY and not fixed: a subscriber throwing on `errors` or on `isDirty` leaves the writes after it stale', () => {
+  it('set(), a subscriber throwing on `errors` or on `isDirty` leaves nothing stale (the form on a store, 4f)', () => {
     const onErrors = emailForm();
     const r1 = effect(() => {
       if (onErrors.errors.value.email) throw boom;
     });
     onErrors.set('email', 'x');
-    expect(state(onErrors)).toEqual({ ...AFTER_SET_X, isDirty: false, isValid: true });
+    expect(state(onErrors)).toEqual(AFTER_SET_X);
     r1.effect.stop();
 
     const onDirty = emailForm();
@@ -71,7 +71,7 @@ describe('createFormBus: a throwing sync subscriber', () => {
       if (onDirty.isDirty.value) throw boom;
     });
     onDirty.set('email', 'x');
-    expect(state(onDirty)).toEqual({ ...AFTER_SET_X, isValid: true });
+    expect(state(onDirty)).toEqual(AFTER_SET_X);
     r2.effect.stop();
   });
 
@@ -151,7 +151,8 @@ describe('createFormBus: a throwing sync subscriber', () => {
     events.length = 0;
 
     f.set('email', 'x');
-    expect(events).toEqual(['values:x', 'rule', 'errors:Invalid email', 'isDirty:true', 'isValid:false']);
+    // The rule runs first: a command builds the form's next state, then writes it once (4f).
+    expect(events).toEqual(['rule', 'values:x', 'errors:Invalid email', 'isDirty:true', 'isValid:false']);
     events.length = 0;
 
     expect(await f.submit()).toBe(false);
@@ -167,7 +168,7 @@ describe('createFormBus: a throwing sync subscriber', () => {
     events.length = 0;
 
     f.set('email', 'a@b.c');
-    expect(events).toEqual(['values:a@b.c', 'rule', 'errors:none', 'isValid:true']);
+    expect(events).toEqual(['rule', 'values:a@b.c', 'errors:none', 'isValid:true']);
     events.length = 0;
 
     expect(await f.submit()).toBe(true);
@@ -202,10 +203,13 @@ describe('createFormBus: a throwing sync subscriber', () => {
  * `try` whose `finally` makes the other three, so they land and the
  * subscriber's error still leaves the handler the way it did.
  *
- * What is NOT fixed, and is pinned as today's behaviour by the second test: a
- * subscriber that throws on `errors` or on `isDirty` still skips the writes
- * after it. The shape that covers those too, and its cost per `set`, are in
- * log s35.23 b; it was not landed.
+ * What that left, a subscriber throwing on `errors` or on `isDirty` skipping
+ * the writes after it (log s35.23 b), went with plan 1.32 4f (log 36.63): the
+ * form's state is one store written once per command, and each public cell is
+ * fed by the store's field events, whose lane logs a subscriber's throw and
+ * goes on. The second test pins it fixed. The control's two `set` lists now
+ * show the rule before the writes: a command builds the next state, then
+ * writes it once. Its two submit lists are unchanged.
  *
  * `submit`. `isValidating = true` and `isSubmitting = true` each stood one
  * line above the `try` whose `finally` clears it. A subscriber throwing on

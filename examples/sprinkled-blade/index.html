@@ -12,7 +12,8 @@
     node mock-server.mjs        # -> http://localhost:3001
 
   Serving it as a plain static file still works and is the cross-origin case
-  (CORS preflight, absolute endpoint, one startup fetch to hydrate the count):
+  (CORS preflight, absolute endpoint, no cart rendered into the page, so one
+  startup read fills the count):
 
     node ../static-server.mjs   # -> http://localhost:3000/examples/sprinkled-blade/index.html
     node mock-server.mjs        # backend on :3001
@@ -31,20 +32,28 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     button { padding: 0.5rem 1rem; cursor: pointer; }
-    button[aria-disabled="true"] { opacity: 0.5; cursor: wait; }
+    button[aria-disabled="true"] { cursor: wait; }
+    button.vc-error { border-color: #c00; color: #c00; }
     .panel { border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; border-radius: 6px; }
     .row { display: flex; gap: 1rem; align-items: center; }
-    /* Nothing below may move when state changes. The status line always
-       occupies its line even while empty, and the counter reserves room for
+    /* Nothing below may move when state changes. The status lines always
+       occupy their line even while empty, and the counter reserves room for
        the digits it will grow into (tabular figures keep them from jittering
        as values change). Reflow is the flicker people actually notice -
        fetch latency is only the half you can see coming. */
-    #status { min-height: 1.4em; margin: 0.75rem 0 0; }
+    #status, #error-msg { min-height: 1.4em; margin: 0.75rem 0 0; }
     #count { font-variant-numeric: tabular-nums; min-width: 18ch; }
+    #count:empty::before { content: 'not read yet'; color: #6b6b6b; }
     #log { min-height: 8.5em; }
     .ok { color: #060; }
     .err { color: #c00; }
     pre { background: #f5f5f5; padding: 0.5rem; border-radius: 4px; overflow: auto; font-size: 12px; }
+    /* A busy display that waits (docs/accessibility.md): bindCommands sets
+       vc-loading from the press to the answer. The dots stay hidden for the
+       first 120 ms, so a fast answer never flashes them. */
+    .vc-loading .busy { visibility: hidden; animation: vc-busy-after 0s 120ms forwards; }
+    @keyframes vc-busy-after { to { visibility: visible; } }
+    .busy { visibility: hidden; }
   </style>
 </head>
 <body>
@@ -59,18 +68,19 @@
   <div class="panel">
     <h2>Cart</h2>
     <div class="row">
-      <button type="button" id="add">Add to cart</button>
-      <button type="button" id="clear">Clear</button>
+      <button type="button" data-vc-command="cartAdd" data-vc-target='{"id":1}' data-vc-payload='{"qty":1}'>Add to cart<span class="busy" aria-hidden="true"> ...</span></button>
+      <button type="button" data-vc-command="cartClear">Clear<span class="busy" aria-hidden="true"> ...</span></button>
+      <button type="button" data-vc-command="cartRemove">Remove (the server has no such command)<span class="busy" aria-hidden="true"> ...</span></button>
       <!-- Served from the backend (http://localhost:3001), this span arrives
-           already filled in and stamped `data-hydrated` - the Blade
-           `{{ $cart->count }}` moment: first paint is correct, no flicker,
-           no startup request. Served as a static file it arrives empty and
-           the script fetches `cartState` once, which is the flicker that
-           server-rendering buys away. What it must never do is hardcode 0:
-           the cart lives on the server and outlives the page. -->
-      <span id="count" data-cart></span>
+           already filled in, with the cart as JSON in `data-cart` - the Blade
+           `@json($cart)` moment: first paint is correct, no flicker, no
+           startup request. Served as a static file it arrives empty and the
+           count shows after the first answer. What it must never do is
+           hardcode 0: the cart lives on the server and outlives the page. -->
+      <span id="count" data-vc-text="cart.summary"></span>
     </div>
     <p id="status" role="status"></p>
+    <p id="error-msg" class="err"></p>
   </div>
 
   <div class="panel">
@@ -85,15 +95,36 @@
   <script src="../../dist/vapor-chamber-core.iife.min.js"></script>
 
   <script>
+    // The cart the server rendered into the page, if it did. Same origin when
+    // the backend served this page (no CORS at all - the real Blade shape),
+    // absolute when it was opened from a static host.
+    const rendered = document.getElementById('count').dataset.cart;
+
     // One-line bus + HTTP transport setup. csrf:true reads the meta tag
     // automatically and attaches X-CSRF-TOKEN to every request.
-    // Same origin when the backend served this page (no CORS at all - the
-    // real Blade shape); absolute when it was opened from a static host.
-    const { bus, dispatch } = VaporChamber.connect({
-      endpoint: document.getElementById('count').hasAttribute('data-hydrated')
-        ? '/api/vc'
-        : 'http://localhost:3001/api/vc',
+    const { bus } = VaporChamber.connect({
+      endpoint: rendered === undefined ? 'http://localhost:3001/api/vc' : '/api/vc',
     });
+
+    // The cart is a store behind the transport: its actions have no local
+    // change (`null`), and whatever the server answers is its state (`answer`).
+    // It starts from the cart the server rendered, never from a number of ours.
+    const cart = VaporChamber.defineChamberStore('cart', {
+      state: () => (rendered === undefined ? { summary: '' } : JSON.parse(rendered)),
+      reducers: { add: null, clear: null, State: null },
+      answer: (_state, value) => value,
+    })(bus);
+
+    // A static host rendered no cart, so the page reads it once: the store action
+    // 'State' is the command cartState, sent by the transport, its answer the state.
+    if (rendered === undefined) cart.State();
+
+    // The buttons and the count are markup. bindCommands dispatches each
+    // data-vc-command, marks the button aria-disabled while it is in flight
+    // (never disabled, which would send keyboard focus to <body>), ignores a
+    // press meanwhile and announces a failure. bindDisplay writes the count.
+    VaporChamber.bindCommands(document.body, { bus });
+    VaporChamber.bindDisplay(document.body, { bus });
 
     // Telemetry: log every successful dispatch + failure to the page.
     const logEl = document.getElementById('log');
@@ -104,59 +135,16 @@
       logEl.textContent = lines.slice(0, 8).join('\n');
     });
 
-    // UI: cart counter
-    const countEl = document.getElementById('count');
+    // The outcome in words. Text, never HTML: a failure's message is the
+    // backend's sentence. The status line is a live region, so a screen reader
+    // hears a success. A failure is already announced by bindCommands, so it
+    // goes to a line that is not one.
     const statusEl = document.getElementById('status');
-    const btn = document.getElementById('add');
-
-    const render = (state) => {
-      countEl.textContent = `${state.count} items (total: $${state.total.toFixed(2)})`;
-    };
-
-    let inFlight = false;
-    const run = async (button, action, target, payload, okMessage) => {
-      // Do NOT blank the status here. Clearing it on click and refilling it a
-      // few ms later is a visible blink on a local round trip - the message is
-      // replaced when the result lands, never emptied in between.
-      //
-      // Same reasoning for the busy state: a busy affordance that shows and
-      // hides inside ~100ms reads as a glitch, not as feedback. It only
-      // appears if the dispatch is genuinely slow enough to be worth showing.
-      //
-      // `aria-disabled`, not `disabled`: disabling the focused button sends a
-      // keyboard user's focus to <body> (HTML's focus fixup), for good. A press
-      // while one is in flight is ignored here instead.
-      if (inFlight) return;
-      inFlight = true;
-      const busy = setTimeout(() => button.setAttribute('aria-disabled', 'true'), 120);
-
-      const result = await dispatch(action, target, payload);
-
-      clearTimeout(busy);
-      button.removeAttribute('aria-disabled');
-      inFlight = false;
-      // Text, never HTML: the message is the backend's sentence. The status
-      // line is a live region, so a screen reader hears the outcome.
-      if (result.ok) render(result.value);
-      statusEl.className = result.ok ? 'ok' : 'err';
-      statusEl.textContent = result.ok ? okMessage : `Error: ${result.error.message}`;
-      return result;
-    };
-
-    btn.addEventListener('click', () => run(btn, 'cartAdd', { id: 1 }, { qty: 1 }, 'Added.'));
-    const clearBtn = document.getElementById('clear');
-    clearBtn.addEventListener('click', () => run(clearBtn, 'cartClear', {}, null, 'Cleared.'));
-
-    // Hydrate the counter ONLY if the server didn't already render it. The
-    // cart is server state: it survives reloads and is shared by every tab
-    // pointed at this backend, so the page must never assume a number - it
-    // either receives one in the HTML or asks for one.
-    if (!countEl.hasAttribute('data-hydrated')) {
-      dispatch('cartState', {}, null).then((result) => {
-        if (result.ok) render(result.value);
-        else countEl.textContent = 'cart unavailable';
-      });
-    }
+    const errorEl = document.getElementById('error-msg');
+    bus.on('cart*', (cmd, result) => {
+      statusEl.textContent = result.ok ? ({ cartAdd: 'Added.', cartClear: 'Cleared.' }[cmd.action] ?? '') : '';
+      errorEl.textContent = result.ok ? '' : `Error: ${result.error.message}`;
+    });
   </script>
 
 </body>

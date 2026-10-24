@@ -13,14 +13,12 @@ import {
   useCommandGroup,
   useCommandHistory,
   useCommandQuery,
-  useCommandState,
   useSharedCommandState,
   useTransitionCommand,
   useVaporAsyncCommand,
   type BaseBus,
 } from '../src/index';
 import * as reactive from '../src/reactive';
-import { useDeepCommandState } from '../src/reactive';
 import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
@@ -33,16 +31,6 @@ const cases: Record<string, Case> = {
     const c = useCommand({ bus });
     c.register('a', () => 1);
     return (await c.dispatch('a', null)).ok && bus.hasHandler('a');
-  },
-  async useCommandState(bus) {
-    const { state } = useCommandState(0, { a: (s) => s + 1 }, { bus });
-    await bus.dispatch('a', null);
-    return state.value === 1;
-  },
-  async useDeepCommandState(bus) {
-    const { state } = useDeepCommandState({ n: 0 }, { a: (s) => ({ n: s.n + 1 }) }, { bus });
-    await bus.dispatch('a', null);
-    return state.value.n === 1;
   },
   async useCommandHistory(bus) {
     const h = useCommandHistory({ bus });
@@ -69,8 +57,11 @@ const cases: Record<string, Case> = {
   },
   async useSharedCommandState(bus) {
     const s = useSharedCommandState({ bus });
-    bus.register('a', () => 1);
-    return (await s.dispatch('a', null)).ok;
+    const key = s.pending('a', null);
+    bus.register('a', () => key.value);
+    const lit = (await bus.dispatch('a', null)).value === true;
+    s.dispose();
+    return lit;
   },
   async defineVaporCommand(bus) {
     const d = defineVaporCommand('a', () => 1, { bus });

@@ -1,59 +1,61 @@
 /**
  * vapor-chamber - Core plugins (sync)
  *
- * logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
+ * logger, validator, history (not a plugin: it installs its own recorder),
+ * authGuard. Pacing is the sender's (`pace`, src/pace.ts).
  */
 
-import { delayOption } from './bounds';
-import { DEV } from './dev';
-import { onSettled, isThenable } from './settled';
-import { createLedger } from './ledger';
+import { createLedger, recordOn } from './ledger';
 import { GLYPH_COMMAND } from './glyphs';
-import type { ActionList, Command, CommandResult, Plugin, CommandBus, AsyncCommandBus, BaseBus } from './command-bus';
-import { commandKey, disposeAll, _okResult, _errResult, _throttleGate, _undo, _isLibraryAction } from './command-bus';
+import type { Command, Fail, PluginParts, CommandBus, AsyncCommandBus, BaseBus, ScopeOptions } from './command-bus';
+import { disposeAll, _errResult } from './command-bus';
+import { matchesPattern } from './pattern';
+import { _registerLocal } from './library-names';
 
 /**
  * Logger plugin - logs all commands and results
  *
  * Successful dispatches log at 'info', failed dispatches at 'error'.
- * The default `level: 'info'` shows both (unchanged output); raise it to
+ * The default `level: 'info'` shows both. Raise it to
  * 'warn' or 'error' to hide successful dispatches and only see failures.
  *
  * @example
- * bus.use(logger()); // logs every dispatch, as before
+ * bus.use(logger()); // logs every dispatch and query
  *
  * @example
  * // Failures only, with fixed-width [  OK  ] / [ FAIL ] badges
  * // (colored via %c in browsers, plain brackets in Node)
  * bus.use(logger({ level: 'error', badges: true }));
  */
-export function logger(options: {
+export function logger(options: ScopeOptions & {
   collapsed?: boolean;
-  filter?: (cmd: Command) => boolean;
   /** Minimum level to log. Ok results log at 'info', failures at 'error'. Default: 'info'. */
   level?: 'debug' | 'info' | 'warn' | 'error';
   /** Prefix the group label with a fixed-width [  OK  ] / [ FAIL ] badge. Default: false. */
   badges?: boolean;
-} = {}): Plugin {
-  const { collapsed = true, filter, level = 'info', badges = false } = options;
+} = {}): PluginParts {
+  const { collapsed = true, level = 'info', badges = false } = options;
   // Ok results log at 'info', failures at 'error' - only 'warn'/'error' can suppress.
   const skipOk = level === 'warn' || level === 'error';
-
-  const plugin: Plugin = (cmd, next) => {
-    if (filter && !filter(cmd)) return next();
-
-    const log = collapsed ? console.groupCollapsed : console.group;
-    const open = (ok: boolean): void => {
+  // A `settled` part: the bus calls it with the result every outcome ends in,
+  // so a refusal from anywhere is logged, wherever the logger is installed.
+  // The group is written whole at the settle, so a nested dispatch's group
+  // prints before its parent's. tests/plugin-settled-part.test.ts.
+  return {
+    id: 'logger',
+    actions: options.actions,
+    actionFilter: options.actionFilter,
+    settled(cmd, result) {
+      if (result.ok && skipOk) return;
+      const log = collapsed ? console.groupCollapsed : console.group;
       const label = `${GLYPH_COMMAND} ${cmd.action}`;
       if (!badges) {
         log(label);
       } else {
-        const badge = `[ ${ok ? ' OK ' : 'FAIL'} ]`;
-        if (typeof window !== 'undefined') log(`%c${badge}%c ${label}`, `background:${ok ? '#2a6' : '#c33'};color:#fff;font-family:monospace`, '');
+        const badge = `[ ${result.ok ? ' OK ' : 'FAIL'} ]`;
+        if (typeof window !== 'undefined') log(`%c${badge}%c ${label}`, `background:${result.ok ? '#2a6' : '#c33'};color:#fff;font-family:monospace`, '');
         else log(`${badge} ${label}`);
       }
-    };
-    const close = (result: CommandResult): CommandResult => {
       console.log('target:', cmd.target);
       if (cmd.payload !== undefined) console.log('payload:', cmd.payload);
       if (result.ok) {
@@ -62,375 +64,127 @@ export function logger(options: {
         console.error('error:', result.error);
       }
       console.groupEnd();
-      return result;
-    };
-
-    // Both paths settle through `onSettled`: on the async bus `next()` is a
-    // promise, and reading `.ok` off it would log every command as an error.
-
-    // Fast path (defaults): open the group before the handler runs so nested
-    // dispatch logs stay grouped.
-    if (!badges && !skipOk) {
-      open(true);
-      return onSettled(next(), close);
-    }
-
-    // Deferred path: the badge / suppression decision needs the result first.
-    const decide = (result: CommandResult): CommandResult => {
-      if (result.ok && skipOk) return result;
-      open(result.ok);
-      return close(result);
-    };
-    return onSettled(next(), decide);
+    },
   };
-  return Object.assign(plugin, { id: 'logger' });
 }
 
 /**
- * Validator plugin - validate commands before execution
+ * Validator - each action's rule, run before every plugin and the work: a
+ * message refuses the command, `null` lets it through. A `validate` part
+ * (PluginParts), so install it with `bus.use()`.
  */
 export function validator(rules: {
   [action: string]: (cmd: Command) => string | null;
-}): Plugin {
+}): PluginParts {
   // Own entries into a Map, once. `rules[cmd.action]` looked up an
   // action name - a string from outside - on an object inheriting from
   // Object.prototype, so `constructor` / `toString` / `valueOf` resolved to
   // inherited functions and ran as rules the caller never wrote (see
-  // ../dict). A Map has no prototype chain to walk and turns the per-dispatch
-  // property load into a hash lookup, the same "classify once at
-  // construction" shape as schemaValidator's `compiled`.
+  // ../dict). A Map has no prototype chain to walk, and the bus asks it
+  // once per action.
   const compiled = new Map(Object.entries(rules));
-  const plugin: Plugin = (cmd, next, fail) => {
-    const rule = compiled.get(cmd.action);
-    if (rule) {
-      const error = rule(cmd);
+  return {
+    id: 'validator',
+    validate(action) {
+      const rule = compiled.get(action);
       // Coded, as the catalogue declares for per-action validation; the
       // message stays the rule's own.
       // tests/errors-match-catalogue.test.ts.
-      if (error) {
-        return _errResult(fail('invalid:payload', error, { action: cmd.action }));
-      }
-    }
-    return next();
+      return rule && ((cmd, fail) => {
+        const error = rule(cmd);
+        return error ? _errResult(fail('invalid:payload', error, { action: cmd.action })) : undefined;
+      });
+    },
   };
-  return Object.assign(plugin, { id: 'validator' });
 }
 
-/**
- * History plugin - tracks command history for undo/redo
- *
- * undo() dispatches `<action>$undo`, which runs the inverse registered with
- * { undo: fn } via bus.register(), and falls back to a data-only pop if none
- * exists.
- */
+/** What `history().getState()` returns: the ledger's stacks, `readonly` (each change writes new ones). */
 export interface HistoryState {
-  past: Command[];
-  future: Command[];
+  past: readonly Command[];
+  future: readonly Command[];
   canUndo: boolean;
   canRedo: boolean;
 }
 
-export function history(options: {
+/**
+ * history - undo/redo of the commands dispatched on `bus`, recorded from the
+ * call on. Not a plugin: the recorder is the ledger's (ledger.ts), so it
+ * records what the caller got wherever plugins sit. undo() dispatches
+ * `<action>$undo`, which runs the inverse registered with `{ undo: fn }` via
+ * bus.register(); with none it only moves the step. `undoAction` /
+ * `redoAction` register actions that press undo and redo.
+ */
+export function history(options: ScopeOptions & {
+  /** Either bus: recorded on, an undo handler read and a redo dispatched through it. */
+  bus: CommandBus | AsyncCommandBus;
   maxSize?: number;
-  filter?: (cmd: Command) => boolean;
-  /** Either bus: an undo handler is read and a redo dispatched through it. */
-  bus?: CommandBus | AsyncCommandBus;
   undoAction?: string;
   redoAction?: string;
-} = {}): Plugin & {
+}): {
   getState: () => HistoryState;
   undo: () => Command | undefined;
   redo: () => Command | undefined;
   clear: () => void;
   dispose: () => void;
 } {
-  const { maxSize, filter, bus, undoAction, redoAction } = options;
-  // The stacks, the recording rule and undo/redo live in ONE place,
-  // createLedger (ledger.ts), shared with useCommandHistory. What is this
-  // plugin's own: recording in the plugin chain once the dispatch settles, and
-  // leaving its trigger actions out.
+  const { maxSize, undoAction, redoAction } = options;
+  const bus: BaseBus = options.bus;
+  // What is this function's own: leaving its trigger actions out. The rest
+  // is the ledger's, shared with useCommandHistory.
   const ledger = createLedger({
     maxSize,
-    filter,
-    bus,
+    actions: options.actions,
+    actionFilter: options.actionFilter,
+    bus: options.bus,
     skip: (cmd) => cmd.action === undoAction || cmd.action === redoAction,
   });
-  const { past, future } = ledger;
-  const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
-    ledger.record(cmd, result);
-    return result;
-  });
-
-  const api = Object.assign(plugin, {
-    id: 'history',
-    getState: (): HistoryState => ({
-      past: [...past],
-      future: [...future],
+  // The trigger actions first: a sealed bus refuses them before anything is installed.
+  const offs: Array<() => void> = [];
+  if (undoAction) offs.push(_registerLocal(bus, undoAction, () => { ledger.undo(); }));
+  if (redoAction) offs.push(_registerLocal(bus, redoAction, () => { ledger.redo(); }));
+  offs.push(recordOn(bus, ledger));
+  return {
+    getState: () => ({
+      past: ledger.past,
+      future: ledger.future,
       canUndo: ledger.canUndo(),
-      canRedo: future.length > 0,
+      canRedo: ledger.future.length > 0,
     }),
     undo: () => ledger.undo(),
     redo: () => ledger.redo(),
     clear: () => ledger.clear(),
-    dispose: () => {
-      disposeAll(_triggerUnregisters);
-    },
-  });
-
-  // Self-registered undo/redo triggers - recording above always skips them.
-  const _triggerUnregisters: Array<() => void> = [];
-  if (undoAction || redoAction) {
-    if (!bus) {
-      if (DEV) {
-        console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option - triggers not registered.");
-      }
-    } else {
-      const either: BaseBus = bus;
-      if (undoAction) _triggerUnregisters.push(either.register(undoAction, () => { api.undo(); }));
-      if (redoAction) _triggerUnregisters.push(either.register(redoAction, () => { api.redo(); }));
-    }
-  }
-
-  return api;
-}
-
-// A required list names what the plugin acts on, so an empty one acts on
-// nothing (1.25). The bus reads a declared `[]` as every action (an
-// ActionScope), so an empty list gets a fresh plugin that only hands on.
-// Fresh, because Object.assign writes each plugin's id onto it. Log s35.148,
-// tests/plugin-empty-list.test.ts.
-const forList = (list: ActionList, plugin: Plugin): Plugin => (list.length === 0 ? ((_cmd, next) => next()) as Plugin : plugin);
-
-/**
- * Debounce plugin - debounce specific actions
- *
- * Runs the latest dispatch per action and target once `wait` passes with no
- * newer one. Returns { pending: true, key } synchronously, `key` being the
- * action and target the timer is kept under (`commandKey`). `list` names what
- * it debounces; `[]` debounces nothing.
- */
-export function debounce(
-  list: ActionList,
-  rawWait: number
-): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
-  // Read once, as the throttle gate reads its wait: NaN is no delay, one past
-  // MAX_TIMEOUT_MS the maximum (tests/nan-options.test.ts, audit D9).
-  const wait = delayOption(rawWait, 0);
-  // One entry per key: its timer and the latest next(), replaced together.
-  const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; next: () => unknown }>();
-
-  const plugin: Plugin = forList(list, (cmd, next) => {
-    // A $ command (a reset, an undo) runs now: { pending } would report it done (log s35.150).
-    if (_isLibraryAction(cmd.action)) return next();
-    const key = commandKey(cmd.action, cmd.target);
-    const existing = pending.get(key);
-    if (existing) clearTimeout(existing.timer);
-
-    pending.set(key, { next, timer: setTimeout(() => {
-      pending.delete(key);
-      try { next(); }
-      catch (e) { console.error('[vapor-chamber] Debounced execution error:', e); }
-    }, wait) });
-
-    return _okResult({ pending: true, key });
-  });
-
-  return Object.assign(plugin, {
-    id: 'debounce',
-    actions: list,
-    dispose(): void { for (const [, e] of pending) clearTimeout(e.timer); pending.clear(); },
-  });
+    dispose: () => disposeAll(offs),
+  };
 }
 
 /**
- * Throttle plugin - execute immediately, then block for wait period.
- * `list` names what it throttles; `[]` throttles nothing.
- */
-export function throttle(
-  list: ActionList,
-  wait: number
-): Plugin & { /** Cancel all pending throttle timers. */ dispose(): void } {
-  const timers = new Set<ReturnType<typeof setTimeout>>();
-  // The gate register({ throttle }) uses; a plugin returns the refusal.
-  const lastRun = new Map<string, number>();
-  const gate = _throttleGate(wait, timers, lastRun);
-  const plugin: Plugin = forList(list, (cmd, next, fail) => {
-    // The plugin's own `fail`: the refusal is the plugin's, not core's.
-    const refused = gate(cmd, fail);
-    return refused ? _errResult(refused) : next();
-  });
-
-  return Object.assign(plugin, {
-    id: 'throttle',
-    actions: list,
-    dispose(): void { for (const t of timers) clearTimeout(t); timers.clear(); lastRun.clear(); },
-  });
-}
-
-/**
- * Auth guard plugin - blocks protected commands when not authenticated.
+ * Auth guard - refuses a protected command when not authenticated, before
+ * every validator, plugin and the work. An `authorize` part (PluginParts), so
+ * install it with `bus.use()`.
  */
 export function authGuard(options: {
   isAuthenticated: () => boolean;
   /**
-   * Protected actions, each a prefix: `'admin'` and `'admin*'` cover every
-   * action that starts with admin, `'*'` every action.
-   * tests/auth-guard-pattern.test.ts.
+   * Protected actions, each a pattern as everywhere in the library: `'admin'`
+   * that action only, `'admin*'` every action that starts with admin, `'*'`
+   * every action. tests/auth-guard-pattern.test.ts.
    */
   protected: string[];
   onUnauthenticated?: (cmd: Command) => void;
-}): Plugin {
+}): PluginParts {
   const { isAuthenticated, onUnauthenticated } = options;
-  // The library's pattern form reads as the prefix it names, once.
-  const protectedPrefixes = options.protected.map((p) => (p.endsWith('*') ? p.slice(0, -1) : p));
-
-  const plugin: Plugin = (cmd, next, fail) => {
-    // A prefix match covers the exact name too.
-    if (protectedPrefixes.some(p => cmd.action.startsWith(p)) && !isAuthenticated()) {
-      if (onUnauthenticated) onUnauthenticated(cmd);
-      return _errResult(fail('unauthenticated:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
-    }
-    return next();
+  const list = options.protected;
+  // One check for every protected action; whether an action is protected is
+  // decided once per action, by the bus asking `authorize`.
+  const check = (cmd: Command, fail: Fail) => {
+    if (isAuthenticated()) return undefined;
+    if (onUnauthenticated) onUnauthenticated(cmd);
+    return _errResult(fail('unauthenticated:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
   };
-  return Object.assign(plugin, { id: 'authGuard' });
-}
-
-/**
- * Optimistic update plugin - apply optimistic state, rollback on failure.
- *
- * Accepts per-action `apply` functions that optimistically mutate state
- * and return a rollback closure. If the handler (or async resolution) fails,
- * the rollback is called automatically.
- *
- * @example
- * bus.use(optimistic({
- *   cartAdd: { apply: (cmd) => { addItem(cmd.target); return () => removeItem(cmd.target); } },
- * }));
- */
-export function optimistic(
-  handlers: Record<string, {
-    apply: (cmd: Command) => (() => void) | null;
-  }>
-): Plugin {
-  // Own entries into a Map - see validator() above. `handlers['constructor']`
-  // resolved to `Object`, whose `.apply` is Function.prototype.apply, so the
-  // plugin called it as the optimistic `apply` and treated the result as a
-  // rollback closure.
-  const compiled = new Map(Object.entries(handlers));
-  const plugin: Plugin = (cmd, next) => {
-    const config = compiled.get(cmd.action);
-    if (!config) return next();
-
-    const rollback = config.apply(cmd);
-
-    // Through `onSettled`: settle the result, roll back if it failed, hand the
-    // settled result on - synchronously on the sync bus.
-    return onSettled(next(), (result) => {
-      if (!result.ok && rollback) {
-        try { rollback(); }
-        catch (e) { console.error(`[vapor-chamber] Rollback error for "${cmd.action}":`, e); }
-      }
-      return result;
-    });
+  return {
+    id: 'authGuard',
+    // The library's one pattern rule (`matchesPattern`); `[]` protects nothing.
+    authorize: (action) => (list.some((p) => matchesPattern(p, action)) ? check : undefined),
   };
-  return Object.assign(plugin, { id: 'optimistic' });
 }
 
-// ---------------------------------------------------------------------------
-// optimisticUndo - auto-rollback using registered undo handlers
-// ---------------------------------------------------------------------------
-
-export type OptimisticUndoOptions = {
-  /**
-   * Predict the optimistic result returned immediately to the caller.
-   * If omitted, returns `{ ok: true, value: undefined }` as the optimistic result.
-   */
-  predict?: (cmd: Command) => any;
-  /**
-   * Called when the real handler fails and the undo handler runs.
-   * Use this to notify the UI of the rollback (e.g. show a toast).
-   */
-  onRollback?: (cmd: Command, error: Error) => void;
-  /**
-   * Called when the undo handler itself throws during rollback.
-   * If omitted, errors are logged to console.error.
-   */
-  onRollbackError?: (cmd: Command, undoError: Error, originalError: Error) => void;
-};
-
-/**
- * Optimistic dispatch plugin that auto-rollbacks using the bus's registered undo handlers.
- *
- * Unlike `optimistic()`, this plugin does **not** require separate `apply`/rollback
- * closures - it uses the undo handler already registered via `register(action, handler, { undo })`.
- *
- * **How it works on an async bus:**
- * 1. Immediately returns `{ ok: true, value: predict(cmd) }` to the caller.
- * 2. The real handler runs in the background.
- * 3. If the real handler fails, the registered undo handler is called automatically.
- *
- * **On a sync bus:** behaves like the regular `optimistic()` - runs handler synchronously,
- * rolls back via undo handler if it fails.
- *
- * **Requires** undo handlers to be registered for the targeted actions.
- * Actions without undo handlers are passed through unchanged. `list` names
- * the targeted actions; `[]` targets none.
- *
- * @example
- * bus.register('cartAdd', addToCart, { undo: removeFromCart });
- * bus.use(optimisticUndo(bus, ['cartAdd'], {
- *   predict: (cmd) => ({ id: cmd.target.id, qty: cmd.payload.qty }),
- *   onRollback: (cmd, err) => toast.error(`Failed to add item: ${err.message}`),
- * }));
- * // dispatch returns immediately with predicted result
- * const result = await bus.dispatch('cartAdd', { id: 5 }, { qty: 2 });
- * // result.ok === true, result.value === { id: 5, qty: 2 }
- */
-export function optimisticUndo(
-  bus: CommandBus | AsyncCommandBus,
-  list: ActionList,
-  options: OptimisticUndoOptions = {},
-): Plugin {
-  const { predict, onRollback, onRollbackError } = options;
-
-  const plugin: Plugin = forList(list, (cmd, next) => {
-    const undoHandler = bus.getUndoHandler(cmd.action);
-    if (!undoHandler) return next(); // no undo registered - passthrough
-
-    const result = next();
-
-    // The rollback was written out twice - once inside the `.then` below and
-    // once for the sync path - and the two copies had to stay in step by hand.
-    // This plugin cannot use `onSettled` (see the return values below), but
-    // nothing about that required the BODY to be duplicated as well.
-    const rollbackIfFailed = (r: CommandResult): void => {
-      if (r.ok) return;
-      // The rollback is the `$undo` command; a failed or refused one is reported.
-      onSettled(_undo(bus, cmd), (u: CommandResult) => {
-        if (!u.ok) {
-          if (onRollbackError) onRollbackError(cmd, u.error as Error, r.error!);
-          else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, u.error);
-        }
-        if (onRollback) onRollback(cmd, r.error!);
-        return u;
-      });
-    };
-
-    // THE TWO PATHS RETURN DIFFERENT THINGS, and that is the feature rather
-    // than an oversight: on an async bus the point is to answer NOW with the
-    // prediction and reconcile in the background, so the settled result is
-    // deliberately not handed on. That is why `onSettled` - whose whole
-    // contract is to pass the settled result through - cannot serve here, and
-    // why a sync bus, having nothing to wait for, returns the real result
-    // instead (documented above).
-    if (isThenable(result)) {
-      const optimisticValue = predict ? predict(cmd) : undefined;
-      (result as Promise<CommandResult>).then(rollbackIfFailed);
-      return _okResult(optimisticValue);
-    }
-
-    rollbackIfFailed(result as CommandResult);
-    return result;
-  });
-  return Object.assign(plugin, { id: 'optimisticUndo', actions: list });
-}

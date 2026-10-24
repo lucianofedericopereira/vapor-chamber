@@ -1,7 +1,7 @@
 /** The batching bridge: a dispatch's abort settles that dispatch, before or after the flush (log s35.168). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createBatchingHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -21,8 +21,7 @@ function backend(ms = 20) {
 }
 
 const bridged = (window: number | 'microtask' = 30) => {
-  const bus = createAsyncCommandBus({ retry: false });
-  bus.use(createBatchingHttpBridge({ endpoint: '/b', window }));
+  const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', batch: { window } }) });
   return bus;
 };
 const code = (r: { ok: boolean; value?: unknown; error?: unknown }) => (r.ok ? r.value : (r.error as { code: string }).code);
@@ -89,8 +88,7 @@ describe('an aborted dispatch', () => {
 
   it("with the bridge's own signal too, a command's abort still cancels its batch of one", async () => {
     const posts = backend(50);
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: new AbortController().signal }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: new AbortController().signal, batch: {} }) });
     const ac = new AbortController();
     const p = bus.dispatch('save', { id: 1 }, undefined, { signal: ac.signal });
     setTimeout(() => ac.abort(), 10);
@@ -104,8 +102,7 @@ describe('an aborted dispatch', () => {
     (AbortSignal as { any?: unknown }).any = undefined;
     try {
       const posts = backend(30);
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', signal: new AbortController().signal }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', signal: new AbortController().signal, batch: {} }) });
       const ac = new AbortController();
       const p = bus.dispatch('save', { id: 1 }, undefined, { signal: ac.signal });
       setTimeout(() => ac.abort(), 5);

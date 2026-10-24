@@ -1,11 +1,11 @@
 /**
- * FIXTURE - `createBatchingHttpBridge` never posts an empty batch, on any way
+ * FIXTURE - `httpTransport` with `batch` never posts an empty batch, on any way
  * a flush gets scheduled. The long note is at the end.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { createBatchingHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 /** A backend that answers every command, and records the size of every batch. */
 function backend(onPost?: (n: number) => void) {
@@ -21,12 +21,11 @@ function backend(onPost?: (n: number) => void) {
 }
 
 function busWith(window?: number) {
-  const bus = createAsyncCommandBus({ retry: false });
-  bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', ...(window === undefined ? {} : { window }) }));
+  const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc/batch', batch: window === undefined ? {} : { window } }) });
   return bus;
 }
 
-describe('createBatchingHttpBridge: a flush always carries at least one command', () => {
+describe('httpTransport with batch: a flush always carries at least one command', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();

@@ -1,0 +1,426 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-1",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractEcho",
+            "target": {
+              "id": 1
+            },
+            "payload": {
+              "n": 1
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "state": {
+              "n": 1
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-2",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 409,
+              "code": "stale"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "content": {
+            "status": 409,
+            "code": "stale",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-3",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 429,
+              "code": "busy",
+              "retryAfter": 3
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Retry-After": [
+            "3"
+          ]
+        },
+        "body": {
+          "content": {
+            "status": 429,
+            "code": "busy",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-4",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 500,
+              "code": "boom"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 500,
+        "body": {
+          "content": {
+            "status": 500,
+            "code": "boom",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-5",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractValidate",
+            "target": {},
+            "payload": {}
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "content": {
+            "status": 422,
+            "code": "validation_failed",
+            "detail": "Any text.",
+            "errors": [
+              {
+                "pointer": "/payload/name",
+                "detail": "Any text."
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.errors[*].detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-6",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractNope",
+            "target": {}
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "content": {
+            "status": 404,
+            "code": "unknown_command",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-7",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractEcho",
+            "target": {},
+            "payload": {
+              "s": " a ",
+              "e": ""
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "state": {
+              "s": " a ",
+              "e": ""
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "core-8",
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 409,
+              "code": "stale",
+              "type": "https://example.com/problems/stale",
+              "title": "Stale write"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "content": {
+            "status": 409,
+            "code": "stale",
+            "detail": "Any text.",
+            "type": "https://example.com/problems/stale",
+            "title": "Stale write"
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

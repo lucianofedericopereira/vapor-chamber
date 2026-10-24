@@ -272,13 +272,14 @@ describe('vaporChamberHMR', () => {
         .replace(/import\.meta/g, '__importMeta');
 
       const stubGlobal: Record<string, any> = { ...(deps.seedGlobal ?? {}) };
-      const captured: { accept?: (cb: () => void) => void; dispose?: (data: any) => void } = {};
+      const captured: { accept?: (cb: () => void) => void; dispose?: (data: any) => void; on: Record<string, () => void> } = { on: {} };
       const hotData: Record<string, any> = {};
       const importMeta = {
         hot: {
           data: hotData,
           accept: (cb: any) => { captured.accept = cb; },
           dispose: (cb: any) => { captured.dispose = cb; },
+          on: (event: string, cb: any) => { captured.on[event] = cb; },
         },
       };
 
@@ -336,6 +337,15 @@ describe('vaporChamberHMR', () => {
 
       captured.dispose!(hotData);
       expect(getCommandBus).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks a hot update from vite:beforeUpdate to vite:afterUpdate, the window a store carries its state in', async () => {
+      const { captured, stubGlobal } = await runShim({ getCommandBus: () => ({}), seedGlobal: { __VAPOR_CHAMBER_BUS__: null } });
+      expect(stubGlobal.__VAPOR_CHAMBER_HOT__).toBeUndefined();
+      captured.on['vite:beforeUpdate']!();
+      expect(stubGlobal.__VAPOR_CHAMBER_HOT__).toBeInstanceOf(WeakMap);
+      captured.on['vite:afterUpdate']!();
+      expect(stubGlobal.__VAPOR_CHAMBER_HOT__).toBeUndefined();
     });
 
     it('swallows a getCommandBus() throw and preserves the last-stored bus', async () => {

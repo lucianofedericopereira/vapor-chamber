@@ -1,120 +1,104 @@
 /**
- * Feature example: persist plugin - localStorage / sessionStorage / custom storage
+ * Feature example: a store's persist - localStorage / sessionStorage / custom storage
  * ==================================================================================
- * Auto-saves state to storage after each successful command.
- * Loads and rehydrates on page reload.
+ * A store with `persist` saves its state after its writes, once per microtask,
+ * and reads it back when it is created on the next page load. Reload this page:
+ * every "on load" line shows what the last visit saved.
  */
 
-// One entry for a Vue app: `vapor-chamber/vue` carries the bus and its
-// plugins too, and wires Vue (the root would not).
-import { createCommandBus, setCommandBus, persist, indexedDbStorage, useCommandState } from 'vapor-chamber/vue'
+import { createCommandBus, indexedDbStorage, saveTo } from 'vapor-chamber'
+import { defineChamberStore } from 'vapor-chamber/store'
 
 const bus = createCommandBus()
-setCommandBus(bus)
 
-// ─── Basic: persist cart state to localStorage ────────────────────────────────
+// ─── Basic: the cart in localStorage ─────────────────────────────────────────
 
-type CartState = { items: Array<{ id: number; name: string; price?: number; qty: number }>; total: number }
+type Line = { id: number; name: string; price: number; qty: number }
+type CartState = { items: Line[]; total: number }
 
-const defaultCart: CartState = { items: [], total: 0 }
-
-// Create the persist plugin
-const cartPersist = persist<CartState>({
-  key: 'vc:cart',
-  getState: () => cartState.state.value,
-  // Only cart commands (ignore analytics, etc.): the bus skips persist for the rest
-  actions: ['cart*'],
-})
-bus.use(cartPersist)
-
-// Load previously saved state (null if nothing stored or parse failed)
-const savedCart = cartPersist.load()
-
-// Initialize state with saved or default
-// Outside a component, for brevity: in an app this runs in setup(). Here nothing
-// disposes it automatically (the DEV heads-up says so); call dispose() when done.
-const cartState = useCommandState<CartState>(
-  savedCart ?? defaultCart,
-  {
-    'cartAdd': (state, cmd) => ({
-      ...state,
-      items: [...state.items, { ...cmd.target, qty: cmd.payload?.qty ?? 1 }],
-      total: state.total + (cmd.target.price ?? 0) * (cmd.payload?.qty ?? 1),
+// The saved cart is the store's first state; `state()` stays the default,
+// which `$reset()` goes back to.
+const useCart = defineChamberStore('cart', {
+  state: (): CartState => ({ items: [], total: 0 }),
+  reducers: {
+    add: (state, line: Line) => ({
+      items: [...state.items, line],
+      total: state.total + line.price * line.qty,
     }),
-    'cartRemove': (state, cmd) => {
-      const gone = state.items.find(i => i.id === cmd.target.id)
-      return {
-        items: state.items.filter(i => i.id !== cmd.target.id),
-        // The removed line's amount comes off the total.
-        total: state.total - (gone ? (gone.price ?? 0) * gone.qty : 0),
-      }
-    },
-    'cartClear': () => defaultCart,
-  }
-)
-
-// Dispatch commands - state is auto-saved after each one
-bus.dispatch('cartAdd', { id: 1, name: 'T-Shirt', price: 29.99 }, { qty: 2 })
-bus.dispatch('cartAdd', { id: 2, name: 'Hoodie', price: 59.99 })
-
-console.log('Cart:', cartState.state.value)
-console.log('Saved to localStorage key "vc:cart"')
-
-// ─── SessionStorage: clear on tab close ───────────────────────────────────────
-
-type SearchState = { query: string; results: any[]; page: number }
-
-const searchPersist = persist<SearchState>({
-  key: 'vc:search',
-  getState: () => searchState.state.value,
-  storage: typeof sessionStorage !== 'undefined' ? sessionStorage : undefined,
-})
-bus.use(searchPersist)
-
-const searchState = useCommandState<SearchState>(
-  searchPersist.load() ?? { query: '', results: [], page: 1 },
-  {
-    'searchQuery': (state, cmd) => ({ ...state, query: cmd.target.q, page: 1 }),
-    'searchNextPage': (state) => ({ ...state, page: state.page + 1 }),
-  }
-)
-
-// ─── Custom serialization: compress large state ────────────────────────────────
-
-const analyticsPrefs = persist<{ events: string[]; userId: string }>({
-  key: 'vc:analytics',
-  getState: () => ({ events: ['page_view', 'click'], userId: 'usr_123' }),
-  // Custom serializer - e.g. LZString compression for large state
-  serialize: (state) => btoa(JSON.stringify(state)),
-  deserialize: (raw) => {
-    try { return JSON.parse(atob(raw)) }
-    catch { return null }
   },
-})
-bus.use(analyticsPrefs)
-
-// ─── Manual operations ────────────────────────────────────────────────────────
-
-// Trigger an immediate save (e.g. on beforeunload)
-window.addEventListener('beforeunload', () => {
-  cartPersist.save()
+  persist: saveTo({ key: 'vc:cart' }),
 })
 
-// Clear on logout
-function onLogout() {
-  cartPersist.clear()
-  searchPersist.clear()
-  analyticsPrefs.clear()
+// Outside a component, for brevity: in an app this runs in setup(), and the
+// store is disposed with its last holder. Here the caller owns $dispose().
+const cart = useCart(bus)
+console.log('Cart on load:', cart.state.value)
+
+// A first visit fills the cart, a later one finds it there.
+if (cart.state.value.items.length === 0) {
+  cart.add({ id: 1, name: 'T-Shirt', price: 29.99, qty: 2 })   // dispatches `cartAdd`: saved after it
+  cart.add({ id: 2, name: 'Hoodie', price: 59.99, qty: 1 })
 }
 
-// ─── IndexedDB: large state, no localStorage quota ────────────────────────────
-// Its answers are promises: read the saved state with hydrate(), before the
-// first dispatch. load() reads a synchronous storage only.
+// ─── sessionStorage: gone when the tab closes ────────────────────────────────
 
-const dataset = { rows: [] as number[] }
-const idbPersist = persist({ key: 'large-dataset', getState: () => dataset, storage: indexedDbStorage() })
-bus.use(idbPersist)
-const savedDataset = await idbPersist.hydrate()
-if (savedDataset) dataset.rows = savedDataset.rows
+type SearchState = { query: string; page: number }
 
-export { onLogout }
+const search = defineChamberStore('search', {
+  state: (): SearchState => ({ query: '', page: 1 }),
+  reducers: {
+    query: (state, q: string) => ({ ...state, query: q, page: 1 }),
+    nextPage: (state) => ({ ...state, page: state.page + 1 }),
+  },
+  persist: saveTo({ key: 'vc:search', storage: sessionStorage }),
+})(bus)
+console.log('Search on load:', search.state.value)
+search.query('shirt')
+search.nextPage()
+
+// ─── Custom serialization: any format the storage holds ──────────────────────
+
+type Prefs = { userId: string }
+
+const prefs = defineChamberStore('prefs', {
+  state: (): Prefs => ({ userId: 'usr_123' }),
+  reducers: { identify: (_state, userId: string) => ({ userId }) },
+  persist: saveTo({
+    key: 'vc:prefs',
+    // e.g. LZString compression for a large state
+    serialize: (state) => btoa(JSON.stringify(state)),
+    deserialize: (raw) => {
+      try { return JSON.parse(atob(raw)) }
+      catch { return null }
+    },
+  }),
+})(bus)
+console.log('Prefs on load:', prefs.state.value)
+prefs.identify('usr_456')
+
+// ─── IndexedDB: large state, no localStorage quota ───────────────────────────
+// Its answers are promises: the store starts on `state()` and takes the saved
+// state when the read lands, the writes made before then replayed on top.
+
+const dataset = defineChamberStore('dataset', {
+  state: () => ({ rows: [] as number[] }),
+  reducers: { visit: (state) => ({ rows: [...state.rows, state.rows.length + 1] }) },
+  persist: saveTo({ key: 'large-dataset', storage: indexedDbStorage() }),
+})(bus)
+dataset.$onField('rows', (rows) => console.log('Dataset rows:', rows))
+dataset.visit()                      // one more row each visit, replayed on the saved rows
+
+await Promise.resolve()               // the save runs one microtask after the write
+console.log('Prefs are stored as:', localStorage.getItem('vc:prefs'))
+
+// ─── Logout ──────────────────────────────────────────────────────────────────
+
+// Each store goes back to its default, and that is what is saved.
+function onLogout() {
+  cart.$reset()
+  search.$reset()
+  prefs.$reset()
+  dataset.$reset()
+}
+
+export { onLogout, cart }

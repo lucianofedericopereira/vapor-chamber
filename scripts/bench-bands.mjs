@@ -13,7 +13,7 @@
  *     rule 15: fast lane vs mitt stamped 2.33, 1.79-1.92 five runs later);
  *   - a `cost` (ns per call) as the median, with `<name>PerFrame`, the calls
  *     that fit in one 60 fps frame;
- *   - `benchProvenance`: CPU, OS, Node, vitest and the peers' versions, and N.
+ *   - `benchProvenance`: CPU, OS, Node, vitest, Vue and the peers' versions, and N.
  *
  * Fewer than MIN_RUNS runs, or a ratio missing from a run, writes nothing and
  * exits 1: a band from two draws or a renamed row would publish a wrong value
@@ -84,9 +84,9 @@ export function cpuName(model) {
   return model.replace(/\((R|TM)\)/gi, '').replace(/\s+CPU\b.*$/, '').replace(/\s+/g, ' ').trim();
 }
 
-export function provenance({ node, vitest, peers, cpu, os, runs }) {
+export function provenance({ node, vitest, vue, peers, cpu, os, runs }) {
   const libs = Object.entries(peers).map(([name, v]) => `${name} ${v}`).join(', ');
-  return `${cpu}, ${os}, Node ${node}, vitest ${vitest}, ${libs}, ${runs} runs`;
+  return `${cpu}, ${os}, Node ${node}, vitest ${vitest}, Vue ${vue}, ${libs}, ${runs} runs`;
 }
 
 /**
@@ -152,6 +152,7 @@ function main(argv) {
   bench.benchProvenance = provenance({
     node: process.versions.node,
     vitest: versionOf(root, 'vitest'),
+    vue: versionOf(root, 'vue'),
     peers: Object.fromEntries(PEERS.map((p) => [p, versionOf(root, p)])),
     cpu: cpuName(cpus()[0]?.model ?? 'unknown CPU'),
     os: { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[platform()] ?? platform(),

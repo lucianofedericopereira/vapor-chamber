@@ -1,9 +1,9 @@
 /** A plugin's memory of a command ends when its undo lands, so a redo runs (log s35.181). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { cache, idempotent } from '../src/plugins-extra';
 import { defineChamberStore } from '../src/store';
+import { history } from '../src/plugins-core';
 
 type List = { items: string[] };
 const useCart = defineChamberStore('cart', {
@@ -17,7 +17,6 @@ describe('history redo runs after the undo, past a plugin that remembered the co
   it.each([['cart*'], ['cartAdd']])('sync bus, cache({ actions: [%j] })', (scope) => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     bus.use(cache({ actions: [scope] }));
     const cart = useCart(bus);
     cart.add('milk');
@@ -31,7 +30,6 @@ describe('history redo runs after the undo, past a plugin that remembered the co
   it("async bus, idempotent({ actions: ['cart*'] })", async () => {
     const bus = createAsyncCommandBus({ retry: false });
     const h = history({ bus });
-    bus.use(h);
     bus.use(idempotent({ actions: ['cart*'] }));
     const cart = useCart(bus);
     await cart.add('milk');
@@ -47,7 +45,6 @@ describe('history redo runs after the undo, past a plugin that remembered the co
   it('an app handler registered with undo, behind idempotent', async () => {
     const bus = createAsyncCommandBus({ retry: false });
     const h = history({ bus });
-    bus.use(h);
     bus.use(idempotent({ actions: ['docSave'] }));
     let saved = 0;
     bus.register('docSave', async () => ++saved, { undo: () => { saved--; } });
@@ -89,7 +86,6 @@ describe('controls: memory that no undo touched is kept', () => {
   it('no plugin: redo restores the step', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const cart = useCart(bus);
     cart.add('milk');
     h.undo();
@@ -101,7 +97,6 @@ describe('controls: memory that no undo touched is kept', () => {
   it('a cached read stays cached across an undo of another command', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     bus.use(cache({ actions: ['userGet'] }));
     let reads = 0;
     bus.register('userGet', () => ++reads);
@@ -117,7 +112,6 @@ describe('controls: memory that no undo touched is kept', () => {
   it('a command the custom key skips is never kept: undo and redo run it', async () => {
     const bus = createAsyncCommandBus({ retry: false });
     const h = history({ bus });
-    bus.use(h);
     bus.use(idempotent({ key: () => null }));
     let saved = 0;
     bus.register('docSave', async () => ++saved, { undo: () => { saved--; } });

@@ -13,6 +13,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createCommandBus, conditionOf, ownerOf } from '../src/command-bus';
 import { stubEnv } from '../src/vitest-pure';
+import { pace } from '../src/pace';
 
 afterEach(() => {
   vi.resetModules();
@@ -23,23 +24,24 @@ async function production() {
   vi.resetModules();
   return {
     bus: await import('../src/command-bus'),
-    io: await import('../src/plugins-io'),
+    store: await import('../src/store/core'),
     vapor: await import('../src/chamber-vapor'),
   };
 }
 
 describe('toJSON: the members a problem needs', () => {
-  it('type (its condition), detail, and code, action and the context as extensions', () => {
+  it('type (its condition), detail, and code, action and the context as extensions', async () => {
     const bus = createCommandBus();
-    bus.register('save', () => 'ok', { throttle: 10_000 });
-    bus.dispatch('save', 1);
-    const refused = bus.dispatch('save', 1).error as BusError;
+    bus.register('save', () => 'ok');
+    const send = pace(bus.dispatch, { throttle: 10_000 });
+    await send('save', 1);
+    const refused = (await send('save', 1)).error as BusError;
 
     const problem = JSON.parse(JSON.stringify(refused));
     expect(problem).toEqual({
       type: 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#limited',
       detail: refused.message,
-      code: 'core:limited:handler',
+      code: 'pace:limited:dispatch',
       action: 'save',
       retryIn: expect.any(Number),
       wait: 10_000,
@@ -83,7 +85,7 @@ describe('a code outside the vocabulary', () => {
 describe('the code is read-only', () => {
   it('cannot be rewritten, so neither the owner nor the condition can', () => {
     const e = createCommandBus().dispatch('missing', 1).error as BusError;
-    expect(() => { (e as { code: string }).code = 'core:limited:handler'; }).toThrow(TypeError);
+    expect(() => { (e as { code: string }).code = 'pace:limited:dispatch'; }).toThrow(TypeError);
     expect(e.code).toBe('core:missing:handler');
     expect(ownerOf(e)).toBe('core');
     expect(conditionOf(e)).toBe('missing');
@@ -127,6 +129,15 @@ describe('production messages carry the fact, not the fix', () => {
     expect(() => b.register('Bad', () => 1)).toThrow(/^Action "Bad" does not match naming pattern \/\^\[a-z\]\+\$\/\.$/);
   });
 
+  it('use() of a plugin already installed', async () => {
+    using _env = stubEnv('NODE_ENV', 'production');
+    const { bus } = await production();
+    const b = bus.createCommandBus();
+    const p = { settled() {} };
+    b.use(p);
+    expect(() => b.use(p)).toThrow(/^use\(\) installs a plugin once, and this one is installed\.$/);
+  });
+
   it("an app's $ name", async () => {
     using _env = stubEnv('NODE_ENV', 'production');
     const { bus } = await production();
@@ -140,13 +151,13 @@ describe('production messages carry the fact, not the fix', () => {
     expect(() => vapor.createVaporChamberApp({})).toThrow(/Pass it: configureVue\(Vue\)\.$/);
   });
 
-  it('persist: a stored value that fails validation', async () => {
+  it("a store's persist: a stored value that fails validation", async () => {
     using _env = stubEnv('NODE_ENV', 'production');
-    const { io } = await production();
-    const storage = { getItem: () => '{"n":1}', setItem() {}, removeItem() {} };
+    const { bus, store } = await production();
+    const storage = { getItem: () => '{"n":1}', setItem() {} };
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const p = io.persist({ key: 'k', storage: storage as never, getState: () => ({}), validate: () => false });
-    expect(p.load()).toBeNull();
-    expect(warn).toHaveBeenCalledWith('[vapor-chamber] persist: validation failed for key "k" - returning null.');
+    const s = store.defineChamberStore('k', { state: () => ({ n: 0 }), reducers: {}, persist: store.saveTo({ key: 'k', storage, validate: () => false }) })(bus.createCommandBus());
+    expect(s.state.value).toEqual({ n: 0 });
+    expect(warn).toHaveBeenCalledWith('[vapor-chamber] [ WARN ] persist:invalid:state: validation failed for key "k", so the store starts fresh');
   });
 });

@@ -71,10 +71,18 @@ scripts/
   check-ascii.mjs      Plain ASCII in src/, typographic characters elsewhere
   stamp-docs.mjs       Republishes generated numbers into prose, --check gates
   gate.mjs             The whole chain in one command, in the house order
+  contract-cases.mjs   The wire contract's cases, the one table both sides read
+  generate-contract.mjs Writes contract/ and the fixture class from the table
+  verify-contract.mjs  Runs pact-verifier on contract/ against a backend
+contract/              Pact V4 files, generated (npm run docs)
+php/                   The Composer package: the contract's Laravel provider,
+                       test commands, development routes, fixture class
+composer.json          The Composer package's manifest
 docs/
   whitepaper.md        Design philosophy + integration patterns
   performance.md       Performance & tuning reference
   V8-RULES.md          The settled V8 rules, short, each with its evidence
+  TESTING_PROCEDURE.md How to measure a speed or size change, step by step
   rc-alignment.md      What to do when a new Vue RC lands
   rc-alignment-log.md  The record of each RC cycle (dev-only)
   decisions.md         Append-only decision log
@@ -166,7 +174,9 @@ rather than what it does, which a test cannot:
 CI runs these guards and the typecheck on Node 22, on Linux. It runs the build,
 both test projects and the size check on Node 22 and 24, on Linux and macOS
 (.github/workflows/ci.yml). The split is deliberate: every check on every cell
-takes too long and races on GitHub.
+takes too long and races on GitHub. A push that changes only files no check
+reads (`paths-ignore` in ci.yml: the funding file, the issue and PR templates)
+runs no CI.
 
 `test:run` is not the whole suite. `tests/vapor/**` runs only under
 `vitest.vapor.config.ts`, which aliases `vue` to a build that includes Vapor
@@ -184,7 +194,8 @@ the root does exercise that example's code.
 If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`),
 read [docs/V8-RULES.md](./docs/V8-RULES.md) first. It holds the shape,
 allocation and measuring rules this project has already settled, each with its
-evidence.
+evidence. [docs/TESTING_PROCEDURE.md](./docs/TESTING_PROCEDURE.md) gives the
+steps of a measurement, from the shapes apps use to the log section.
 
 1. Build the base and your change (`npm run ab:dists`), then run `npm run ab`
    on a workload in `scripts/ab/workloads/` that runs the changed path
@@ -281,6 +292,16 @@ the expensive way:
 ## Releasing (maintainer-only)
 
 1. Update [CHANGELOG.md](./CHANGELOG.md) with a new section for the release.
+   Check the Laravel side against the wire contract: build the demo with
+   `examples/laravel-app/setup.sh`, serve it, and run
+   `node scripts/verify-contract.mjs --base http://127.0.0.1:8000`
+   ([`pact-verifier`](https://github.com/pact-foundation/pact-reference/releases)
+   on the `PATH`). Every case must pass. Then replay the last release's
+   contract against the same demo:
+   `node scripts/verify-contract.mjs --base http://127.0.0.1:8000 --against v<last release>`.
+   A case that fails there is a change an app sees: it needs its CHANGELOG
+   line, or the backend is wrong. A release with no `contract/` (before
+   1.32) has nothing to check.
 2. Bump `version` in [package.json](./package.json).
 3. Commit: `release: vX.Y.Z`.
 4. Tag: `git tag vX.Y.Z && git push --tags`.

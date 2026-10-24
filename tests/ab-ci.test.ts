@@ -1,6 +1,6 @@
 // CI's speed check decides from the A/B summaries: each failure it must catch, seeded.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WORKLOADS, decide } from '../scripts/ab/ci.mjs';
+import { DEFAULT_WORKLOADS, decide, sameShippedCode } from '../scripts/ab/ci.mjs';
 
 const row = (verdict: string, controls = [true], ratios = [1]) => ({ verdict, controls, ratios, fit: null });
 const clean = () => ({
@@ -42,6 +42,40 @@ describe('ab:ci decide', () => {
     const { existsSync } = await import('node:fs');
     expect(DEFAULT_WORKLOADS.map((w: string) => w.split('/').pop())).toEqual(['track-parts.mjs', 'composable.mjs', 'create.mjs', 'filter-mixed.mjs', 'plugins.mjs']);
     for (const w of DEFAULT_WORKLOADS) expect(existsSync(w)).toBe(true);
+  });
+});
+
+describe('ab:ci skips a head that ships the same JavaScript as its base', () => {
+  // A commit that touches docs, CI or FUNDING.yml only builds the same dist:
+  // an A/B of two identical builds can only report noise (log 36.31).
+  const dists = async (files: Record<string, string>, other: Record<string, string>) => {
+    const { mkdirSync, mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { dirname, join } = await import('node:path');
+    const write = (root: string, set: Record<string, string>) => {
+      for (const [path, text] of Object.entries(set)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), text);
+      }
+      return root;
+    };
+    return [write(mkdtempSync(join(tmpdir(), 'vc-a-')), files), write(mkdtempSync(join(tmpdir(), 'vc-b-')), other)] as const;
+  };
+  const same = { 'index.js': 'a', 'chunks/x.js': 'b', 'iife.min.js': 'c' };
+
+  it('skips identical JavaScript, saying why, even when maps, types and other files differ', async () => {
+    const [a, b] = await dists({ ...same, 'index.js.map': '1', 'index.d.ts': 'x', 'LICENSE.txt': 'one' }, { ...same, 'index.js.map': '2', 'index.d.ts': 'y', 'LICENSE.txt': 'two' });
+    expect(sameShippedCode(a, b)).toMatch(/same JavaScript as base \(3 files, byte for byte\): nothing to measure/);
+  });
+
+  it.each([
+    ['one byte differs', { ...same, 'chunks/x.js': 'B' }],
+    ['a file only the head has', { ...same, 'new.js': 'n' }],
+    ['a file only the base has', { 'index.js': 'a', 'chunks/x.js': 'b' }],
+    ['a file renamed', { 'index.js': 'a', 'chunks/y.js': 'b', 'iife.min.js': 'c' }],
+  ])('measures when %s', async (_label, head) => {
+    const [a, b] = await dists(same, head);
+    expect(sameShippedCode(a, b)).toBeUndefined();
   });
 });
 
@@ -98,6 +132,18 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     };
     const across = check(old);
     expect([across.status, across.out]).toEqual([1, expect.stringMatching(/1\.0\.0 release, head is 1\.1\.0/)]);
+    expect(check(same)).toEqual({ status: 0, out: '' });
+    // Released (tagged as upstream does, `v1.1`): a later commit on it has no new release to measure.
+    git('tag', 'v1.1', same);
+    const released = check(same);
+    expect([released.status, released.out]).toEqual([1, 'head is 1.1.0, already released (tag v1.1): no new release, nothing to measure']);
+    // And the `vX.Y.Z` form the release steps write.
+    git('tag', '-d', 'v1.1');
+    git('tag', 'v1.1.0', same);
+    expect(check(same).out).toBe('head is 1.1.0, already released (tag v1.1.0): no new release, nothing to measure');
+    // Control: another version's tag does not count.
+    git('tag', '-d', 'v1.1.0');
+    git('tag', 'v1.0', old);
     expect(check(same)).toEqual({ status: 0, out: '' });
   });
 

@@ -27,7 +27,7 @@
  *      `constructor` resolved to `Object`, passed the `router:missing:component`
  *      check, was called as a lazy import and rendered as a BLANK component -
  *      a coded error degraded into a silently empty outlet.
- *    - `plugins-core.ts` `validator()` and `optimistic()`, and
+ *    - `plugins-core.ts` `validator()` and the former `optimistic()`, and
  *      `plugins-schema.ts` `validateSchemas()`: maps keyed by action name ran
  *      an inherited member as a rule, a handler config or a schema.
  *    - `form.ts`: a rule for a field named after an inherited member ran on a
@@ -39,7 +39,7 @@
  *    - `command-bus.ts` `commandKey`: an own `__proto__` key - exactly what
  *      `JSON.parse` of a server response produces - was dropped from the
  *      canonical serialization, so two different targets produced the SAME key.
- *      That key backs `idempotent`, `cache`, `serialize` and `supersede`, so
+ *      That key backs `idempotent`, `cache`, `supersede` and the former `serialize`, so
  *      distinct commands collapsed into one.
  *    - `router/url.ts` `parseQuery`: `?__proto__=a` assigned an array through
  *      that setter, replacing the parsed object's prototype outright.

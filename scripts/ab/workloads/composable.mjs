@@ -15,7 +15,7 @@ export function raw_dispatch(n) { let s = 0; for (let i = 0; i < n; i++) s += bu
 export function composable_dispatch(n) { let s = 0; for (let i = 0; i < n; i++) s += cmd.dispatch('inc', null, i).value; return s; }
 export function composable_create(n) {
   let s = 0;
-  for (let i = 0; i < n; i++) { const sc = effectScope(); const c = sc.run(() => useCommand()); s += c.loading.value ? 1 : 0; sc.stop(); }
+  for (let i = 0; i < n; i++) { const sc = effectScope(); const c = sc.run(() => useCommand()); s += typeof c.dispatch === 'function' ? 1 : 0; sc.stop(); }
   return s;
 }
 export const check = () => [raw_dispatch(10), composable_dispatch(10), composable_create(10)];

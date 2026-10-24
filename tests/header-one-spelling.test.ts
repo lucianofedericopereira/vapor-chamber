@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
 import { idempotent } from '../src/plugins-extra';
-import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 function ok(status = 200, body = '{"state":1}') {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -38,14 +38,13 @@ describe('one spelling per header name', () => {
     stubFetch();
     await postCommand('/vc', {}, { headers: { 'content-type': 'application/vnd.api+json' } });
     expect(sent[0].get('content-type')).toBe('application/vnd.api+json');
-    expect(names[0]).toEqual(['Content-Type', 'X-Requested-With']);
+    expect(names[0]).toEqual(['Content-Type', 'Accept']);
   });
 
   it('the bridge: an app idempotency-key header and the command key are one header, the command key', async () => {
     stubFetch();
-    const bus = createAsyncCommandBus({ retry: false });
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', headers: { 'idempotency-key': '"app"' } }) });
     bus.use(idempotent());
-    bus.use(createHttpBridge({ endpoint: '/vc', headers: { 'idempotency-key': '"app"' } }));
     await bus.dispatch('cartAdd', { id: 1 });
     const key = sent[0].get('idempotency-key') as string;
     expect(key).not.toContain(',');
@@ -54,9 +53,8 @@ describe('one spelling per header name', () => {
 
   it('the batching bridge: two commands carrying one name in two spellings send it once', async () => {
     stubFetch(() => 200, (init) => JSON.stringify({ results: JSON.parse(String(init.body)).commands.map((c: { id: string }) => ({ id: c.id, state: 1 })) }));
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use((cmd, next) => { cmd.meta!.request = { headers: cmd.action === 'a' ? { 'X-Tenant': '1' } : { 'x-tenant': '2' } }; return next(); }, { priority: 10 });
-    bus.use(createBatchingHttpBridge({ endpoint: '/vc' }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', batch: {} }) });
+    bus.use({ started: (cmd) => { cmd.meta!.request = { headers: cmd.action === 'a' ? { 'X-Tenant': '1' } : { 'x-tenant': '2' } }; } });
     await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
     expect(sent[0].get('x-tenant')).toBe('2');
   });
@@ -92,7 +90,7 @@ describe('one spelling per header name', () => {
     stubFetch();
     await postCommand('/vc', {}, { csrf: true, headers: { 'x-csrf-token': 'app' } });
     expect(sent[0].get('x-csrf-token')).toBe('meta-token');
-    expect(names[0]).toEqual(['Content-Type', 'X-Requested-With', 'x-csrf-token']);
+    expect(names[0]).toEqual(['Content-Type', 'Accept', 'x-csrf-token']);
   });
 
   it('the client: csrf: true on a POST sends its token once', async () => {
@@ -110,7 +108,7 @@ describe('controls', () => {
     await postCommand('/vc', {}, { csrf: true, headers: { Authorization: 'Bearer t' } });
     await createHttpClient().get('/r', { headers: { 'Accept-Language': 'it' } });
     expect(names).toEqual([
-      ['Content-Type', 'X-Requested-With', 'Authorization', 'X-CSRF-TOKEN'],
+      ['Content-Type', 'Accept', 'Authorization', 'X-CSRF-TOKEN'],
       ['Accept', 'X-Requested-With', 'Accept-Language'],
     ]);
   });
@@ -135,7 +133,7 @@ describe('controls', () => {
       init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }));
     vi.stubGlobal('fetch', fetch);
-    await postCommand('/vc', {}, { retry: 1, timeout: 10, headers: { 'IDEMPOTENCY-KEY': '"k"' } }).catch(() => {});
+    await postCommand('/vc', {}, { retry: { maxAttempts: 2 }, timeout: 10, headers: { 'IDEMPOTENCY-KEY': '"k"' } }).catch(() => {});
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -143,7 +141,7 @@ describe('controls', () => {
     stubFetch();
     const extra = JSON.parse('{"__proto__":"x","X-A":"1"}') as Record<string, string>;
     await postCommand('/vc', {}, { headers: extra });
-    expect(names[0]).toEqual(['Content-Type', 'X-Requested-With', '__proto__', 'X-A']);
+    expect(names[0]).toEqual(['Content-Type', 'Accept', '__proto__', 'X-A']);
   });
 });
 

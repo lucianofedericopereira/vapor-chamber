@@ -28,7 +28,7 @@ describe('async request()', () => {
   it('the responder receives the command the plugins saw', async () => {
     const bus = createAsyncCommandBus({ retry: false });
     let seen: unknown;
-    bus.use((cmd, next) => { cmd.meta!.idempotencyKey = 'K1'; seen = cmd.meta!.id; return next(); });
+    bus.use({ started: (cmd) => { cmd.meta!.idempotencyKey = 'K1'; seen = cmd.meta!.id; } });
     let got: { id?: unknown; key?: unknown } = {};
     bus.respond('q', async (cmd: Command) => { got = { id: cmd.meta?.id, key: cmd.meta?.idempotencyKey }; return 1; });
     await bus.request('q', {});

@@ -2,7 +2,7 @@
  * vapor-chamber - scheduled runs.
  *
  * One mechanism behind the features that run a command later or in order:
- * `serialize()` (ordered by a key), the async bus's retry (again, after a wait) and the
+ * `register({ exclusive })` (ordered by a key), the async bus's retry (again, after a wait) and the
  * outbox (in order, when back online). What differs between them is data, not
  * code: the lane a run joins (its ordering key), when it runs, and who
  * receives its result.

@@ -5,7 +5,8 @@ measuring one. A rule is here only with evidence in this repository: a test, a
 measured A/B, or a recorded log section, named at the rule. What V8's design
 suggests but nothing here has measured yet is under "Open" at the end, and
 becomes a rule when it is measured. The full record, with the numbers, is
-[performance.md](./performance.md).
+[performance.md](./performance.md). The steps of a measurement are in
+[TESTING_PROCEDURE.md](./TESTING_PROCEDURE.md).
 
 ## Writing code
 
@@ -32,21 +33,28 @@ becomes a rule when it is measured. The full record, with the numbers, is
    every bare dispatch kept a dead meta.
    Built before the try, the meta went: bare dispatch 0.62-0.71x (7-12 ns).
    Move the build out of the try. A one-use `const` does not do it: the
-   bundler folds it back into the literal.
+   bundler folds it back into the literal. The query took the same shape on
+   2026-10-24, Node 24.22.1, an Intel i7-8650U: a bare query 0.967-0.971x
+   (2.8-3.1 ns), its dispatch control 1.000 (log 36.F50).
 3. **Decide a mode once, not on every call.** Choose behaviour at factory or
    build time and keep the branch off the hot path. The fast lane picks its
-   `removal` mode at factory time. Unifying the sync and async commands was
-   declined because it puts a `signal` store on the sync dispatch path.
+   `removal` mode at factory time. Rule 3 is about a branch, not a field: a
+   `signal` slot in every command literal, `undefined` on the sync bus, read
+   no cost on a bare sync dispatch (0.999x, MDE 0.1%, log 36.F56), so both
+   buses build one command map (rule 1).
    ([performance.md, "Two doorways"](./performance.md#two-doorways-general-bus-vs-fast-lane))
 4. **No closure per call on a hot path.** A closure that captures a call's
    arguments is an allocation. V8 did not remove it in either case measured.
    One was the composable dispatch thunk (removed: 0.915-0.934x, 2.7-3.9 ns).
    The other was a filter's `patterns.some(p => matchesPattern(p, action))`
    (removed: 0.979-0.986x, 4.6-6.6 ns, on a chain of four scoped plugins and a
-   listener). The one kept, `buildRunner`'s `next` per plugin level, is kept
-   for correctness, with its cost recorded in its PERF NOTE
-   (`src/command-bus.ts`). A new one needs a measured reason like that.
-   (log s35.44, s35.53)
+   listener). The plugin chain's `next` per level was kept for correctness, at
+   13.5% on "3 plugins + 1 listener" (v1.12.0); it went with the chain in 1.32
+   (log 36.108). A new one needs a measured reason like that.
+   (log s35.44, s35.53) A function handed to a builtin is never removed:
+   JSON.stringify calls its replacer from C++. `keyText` built its replacer
+   per call, with a context for the parameter it read. `keyTextFor` builds it
+   once per caller (`src/canonical.ts`, log 36.36).
 5. **Call the target directly, not through a generic helper.** A helper that
    takes a function (`untracked(fn)`) and calls it at one site serves every
    caller from that site. `runDispatch` calls `bus.dispatch` / `bus.query`
@@ -65,8 +73,45 @@ becomes a rule when it is measured. The full record, with the numbers, is
 8. **No loop-syntax micro-optimizations.** Cached `length`, index loops
    against `for...of`: TurboFan handles these, and the few index loops kept
    are documented where they are. Rule 4 is not this: a callback that
-   captures per-call state is an allocation, not syntax.
+   captures per-call state is an allocation, not syntax. Nor is rule 19.
    ([performance.md, "Philosophy"](./performance.md#philosophy))
+
+A rule added after rule 18 takes the next number, so a cited number never
+moves.
+
+19. **Test `typeof` where it is compared.** Write `typeof x === 'string'` at
+    each test, never one `typeof` kept in a variable and compared later. V8
+    compiles the first to an inline type check. The second calls its `Typeof`
+    builtin, unless the values seen were all numbers, all strings or all
+    functions. Measured 2026-10-14, Node 24.21.0, 10 processes: `commandKey`
+    over string and number targets read 0.765x, 1.1 ns per key (row
+    `key_primitives`, log 36.36). Over numbers only it read 0.999, as V8
+    speculates (row `primitive_cache`). `Number.isFinite` needs no such care:
+    TurboFan inlines it. (V8 13.6 as Node 24.21.0 ships it, under
+    https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/:
+    interpreter/bytecode-generator.cc 7415-7474,
+    compiler/bytecode-graph-builder.cc 3520-3570,
+    compiler/js-type-hint-lowering.cc 419-437,
+    maglev/maglev-graph-builder.cc 8000-8030,
+    compiler/turboshaft/graph-builder.cc 2055-2056,
+    compiler/js-call-reducer.cc 7841.)
+
+20. **No async frame, `.then` or thenable resolve on an async hot path
+    that does not need one.** Each is a promise and a microtask job per
+    call. An `async` function allocates its promise and resumes its frame.
+    `.then` allocates the promise it returns. An `async` function that
+    returns a promise resolves its own with a thenable, which queues two
+    jobs (ECMAScript 27.2.1.3.2). Run the work in a plain function and hand
+    off only when a value is a thenable. Measured 2026-10-24, Node 24.22.1,
+    an Intel i7-8650U, each against the commit before it: after-hooks in a
+    plain loop, an async dispatch with two hooks 0.894x (61 ns, log 36.F45).
+    The retry's success read with no `.then`, a local async operation 0.970x
+    (71 ns, log 36.F46). `_postJson` with no `async`, a sent command 0.951x
+    (203 ns, log 36.F48). A sync handler outside an async frame and a
+    composable with no `.then` on a bus that cannot reject leaned the same
+    way without counting (log 36.F47, 36.F49). The turn count of a call is
+    its test: each change has one that counts the microtask turns to settle
+    against a path with no such step.
 
 ## Measuring
 
@@ -80,9 +125,12 @@ becomes a rule when it is measured. The full record, with the numbers, is
     band. Two byte-identical copies once read up to 1.425x apart.
     (`tests/clock-source-ab.test.ts`, `tests/vue-version-ab.test.ts`.
     [performance.md, the note under "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36))
-11. **Use the real chain's shape.** One function at every plugin level keeps a
+11. **Use the real plugins' shape.** One function at every plugin keeps a
     call site near-monomorphic and understates the cost. Measure with distinct
-    functions. (`tests/plugin-throw-ab.test.ts`)
+    functions: the chain's boundary read 0.886-0.909x sync with distinct
+    plugins and about 1.00x with one (log 30.10). The bench's
+    `dispatch.sync.parts3` and `dispatch.async.parts3` rows install three
+    different parts.
 12. **A change only moves the paths that run it.** Diff the two arms and
     attribute a movement only to a timed path that executes the changed code.
     Each arm is its own copy of every function. So an edit elsewhere can move
@@ -274,3 +322,16 @@ rule when it is measured and recorded.
   defines), not Node's CommonJS Vue and not a hand-edited `dist`. Used for
   every A/B since the 1.26 evaluation, where the other harness read a false
   1.2x. To be committed as a test and recorded.
+- **The replacer form of JSON.stringify.** Read 2026-10-14 in V8 13.6, as
+  Node 24.21.0 ships it. JSON.stringify calls a replacer from C++ once per
+  value, and allocates a holder object per call. `Object.create(null)` and a
+  `{ __proto__: null }` literal both get a dictionary map. JSON.stringify
+  serializes a dictionary-mode object on its slow path, which collects its
+  keys into a list and then looks each one up. V8's newer fast JSON.stringify
+  runs only with no replacer and no indent, behind a flag off by default in
+  13.6. `keyTextFor` pays each of these: a C++ call per value, a holder per
+  key and one `dict()` per object level. Not measured: the next lead for
+  `commandKey`'s object path. (Under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/:
+  json/json-stringifier.cc 547-551, 726-752, 950-954, 1317-1334, 1401-1429
+  and 3466-3470, builtins/builtins-object-gen.cc 1269-1276,
+  runtime/runtime-literals.cc 382-387, flags/flag-definitions.h 758.)

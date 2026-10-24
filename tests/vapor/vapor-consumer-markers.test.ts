@@ -16,15 +16,12 @@
  * composables - with rolldown, and asks two questions the router-only check
  * cannot: does the wiring entry drag in anything vDOM, and does the graph
  * carry ONE chamber module or two. The runtime probe is the fingerprint: one
- * copy of chamber.ts, one `import("vue")`. (A literal, not the `vuePkg`
- * variable chamber.ts writes: this library's own build folds the constant
- * into the dist, and `@vite-ignore` is what keeps a consumer's bundler from
- * resolving it.)
+ * copy of chamber.ts, one `VUE_PKG = "vue"` binding (log 36.F26).
  *
  * And one fact the static entries and `vaporChamberWire()` both rest on,
  * pinned here because this is where the consumer's bundler runs: even when
- * the app BUNDLES Vue, that probe stays a bare `import("vue")` - no Vue chunk
- * is made for it - so in a browser with no import map it cannot resolve.
+ * the app BUNDLES Vue, that probe stays a runtime name - no Vue chunk is made
+ * for it - so in a browser with no import map it cannot resolve.
  *
  * WHY BINDINGS, NOT TEXT, for the vDOM markers. `vue` is external, so anything
  * vDOM the app pulls shows up as a name imported from it. A raw text search
@@ -85,7 +82,9 @@ afterAll(() => {
 });
 
 /** chamber.ts's runtime probe as it lands in a consumer bundle. */
-const PROBE = /import\(\s*(?:\/\*[^*]*\*\/\s*)?["']vue["']\s*\)/g;
+const PROBE = /\bVUE_PKG(?:\$\d+)?\s*=\s*["']vue["']/g;
+/** The literal the probe must never become: a bundler would resolve it. */
+const LITERAL = /import\(\s*(?:\/\*[^*]*\*\/\s*)*["'`]vue["'`]\s*\)/;
 
 /** Production app build; the entry chunk, and every lazy chunk kept apart. */
 async function bundle(vueExternal = true): Promise<{ entry: string; lazy: string[] }> {
@@ -143,15 +142,16 @@ describe('Vapor consumer bundle (vapor-chamber/vapor + router/vapor, Vite)', () 
     for (const code of lazy) expect(importsFrom(code, 'vue')).not.toContain('vaporInteropPlugin');
   });
 
-  it('the runtime probe stays a bare import("vue") even when the app bundles Vue', async () => {
+  it('the runtime probe stays a name even when the app bundles Vue', async () => {
     const external = await bundle(true);
     const bundled = await bundle(false);
     // Vue is really in the bundled build - the app's own static imports pull it.
     expect(bundled.entry.length).toBeGreaterThan(external.entry.length * 3);
-    // ...and the probe still names the bare specifier: the bundler made no
-    // chunk for it and rewrote it to nothing. In a browser, with no import
-    // map, that import rejects, which is why wiring has to be static.
+    // ...and the probe is still a name: the bundler made no chunk for it and
+    // wrote no literal. In a browser, with no import map, that import rejects,
+    // which is why wiring has to be static.
     expect(bundled.entry.match(PROBE) ?? []).toHaveLength(1);
+    expect(LITERAL.test(bundled.entry)).toBe(false);
     expect(bundled.lazy.some((code) => /\bcreateVaporApp\b/.test(code))).toBe(false);
   });
 });

@@ -2,10 +2,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
-import { createHttpBridge } from '../src/transports';
+import { httpTransport } from '../src/transports';
 
 type Cart = { items: number[]; v?: number };
-const reducers = { add: (s: Cart, id: number) => ({ items: [...s.items, id] }) };
+// Sent: no local change, the answer is the state.
+const reducers = { add: null };
 
 /** An http client whose post answers `{ state }` with each value in turn. */
 const answering = (...states: unknown[]) => ({
@@ -17,8 +18,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 describe('an answer that is not a state', () => {
   it('null, a number or undefined from `answer` is not written; the dispatch is ok; development warns once', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: answering(null, 3, { items: [7] }) as never }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: answering(null, 3, { items: [7] }) as never }) });
     let mapped = 0;
     const cart = defineChamberStore('cart', {
       state: (): Cart => ({ items: [1] }),
@@ -37,8 +37,7 @@ describe('an answer that is not a state', () => {
 
   it('with `version`, a null answer is not written and the dispatch is ok', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: answering(null) as never }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: answering(null) as never }) });
     const cart = defineChamberStore('cart', {
       state: (): Cart => ({ items: [1], v: 1 }),
       reducers,
@@ -52,8 +51,7 @@ describe('an answer that is not a state', () => {
   });
 
   it('control: an object answer is written', async () => {
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.use(createHttpBridge({ endpoint: '/vc', httpClient: answering({ items: [9] }) as never }));
+    const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: answering({ items: [9] }) as never }) });
     const cart = defineChamberStore('cart', { state: (): Cart => ({ items: [1] }), reducers, answer: (_s, value) => value as Cart })(bus);
     await cart.add(2);
     expect(cart.state.value).toEqual({ items: [9] });

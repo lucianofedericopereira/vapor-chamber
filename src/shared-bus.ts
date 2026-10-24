@@ -10,6 +10,7 @@
  */
 
 import { createCommandBus, type AsyncCommandBus, type BaseBus, type CommandBus, type CommandMap, type CommandResult } from './command-bus';
+import { _report } from './report';
 import type { SharedCommandMap } from './chamber';
 import { DEV } from './dev';
 
@@ -54,7 +55,7 @@ export function getCommandBus<M extends CommandMap = SharedCommandMap>(): Comman
  */
 export function setCommandBus(bus: CommandBus | AsyncCommandBus): void {
   if (DEV && fallbackBus !== null && bus !== fallbackBus) {
-    console.warn('[vapor-chamber] setCommandBus() replaced the bus getCommandBus() had created and already handed out. Code that called getCommandBus() before this keeps the old bus, so its dispatches and listeners are split from the new one. Call setCommandBus() before anything calls getCommandBus().');
+    _report('warn', 'core:conflict:bus', 'setCommandBus() replaced the bus getCommandBus() had created and already handed out. Code that called getCommandBus() before this keeps the old bus, so its dispatches and listeners are split from the new one. Call setCommandBus() before anything calls getCommandBus().');
     fallbackBus = null;
   }
   sharedBus = bus as CommandBus;

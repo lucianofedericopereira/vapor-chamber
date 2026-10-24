@@ -6,10 +6,12 @@ import { effectScope } from 'vue';
 import { createCommandBus } from '__DIST__/index.js';
 import { logger, metrics, cache } from '__DIST__/index.js';
 import { useSharedCommandState } from '__DIST__/vue.js';
+// Arms one key: `pending` from 1.32 step 5, `isLoading` in the base arm.
+const armKey = (s, a, t) => (s.pending ?? s.isLoading)(a, t);
 
 const chain = createCommandBus();
 chain.register('x', (cmd) => cmd.target + 1);
-chain.use(logger({ filter: () => false }));
+chain.use(logger({ filter: () => false, actionFilter: () => false }));
 chain.use(cache({ actions: ['never*'] }));
 chain.use(metrics({ maxSize: 8 }));
 chain.on('x', () => {});
@@ -18,7 +20,7 @@ const tracked = createCommandBus();
 tracked.register('x', (cmd) => cmd.target + 1);
 const scope = effectScope();
 const shared = scope.run(() => useSharedCommandState({ bus: tracked }));
-shared.isLoading('x', 1);
+armKey(shared, 'x', 1);
 if (typeof shared.outcome === 'function') shared.outcome('x', 2);
 
 const run = (bus, n) => { let s = 0; for (let i = 0; i < n; i++) s += bus.dispatch('x', i & 3).value; return s; };

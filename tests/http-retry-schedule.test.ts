@@ -37,33 +37,33 @@ afterEach(() => {
 describe("the client's own wait", () => {
   it('a GET re-sent after a 503 waits under 200 ms x 2^n', async () => {
     const at = wire([503, 503, 503, 200]);
-    expect((await settle(createHttpClient().get('/a', { retry: 3 }))).ok).toBe(true);
+    expect((await settle(createHttpClient().get('/a', { retry: { maxAttempts: 4 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([100, 200, 400]);
   });
 
   it('the same after no reply', async () => {
     const at = wire(['lost', 'lost', 200]);
-    expect((await settle(createHttpClient().get('/a', { retry: 2 }))).ok).toBe(true);
+    expect((await settle(createHttpClient().get('/a', { retry: { maxAttempts: 3 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([100, 200]);
   });
 
   it('postCommand with retry above 0 waits the same', async () => {
     const at = wire([503, 503, 200]);
-    expect((await settle(postCommand('/c', {}, { retry: 2 }))).ok).toBe(true);
+    expect((await settle(postCommand('/c', {}, { retry: { maxAttempts: 3 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([100, 200]);
   });
 
   it('is capped at 20 s', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.999);
     const at = wire([503, 503, 503, 503, 503, 503, 503, 503, 200]);
-    expect((await settle(createHttpClient().get('/a', { retry: 8 }))).ok).toBe(true);
+    expect((await settle(createHttpClient().get('/a', { retry: { maxAttempts: 9 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([199, 399, 799, 1598, 3196, 6393, 12787, 20_000]);
   });
 
   it("draws the bus's waits for the same random values", async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.37);
     const at = wire([503, 503, 503, 200]);
-    await settle(createHttpClient().get('/a', { retry: 3 }));
+    await settle(createHttpClient().get('/a', { retry: { maxAttempts: 4 } }));
     const bus = createAsyncCommandBus({ retry: { maxAttempts: 4 } });
     const calls: number[] = [];
     bus.register('save', async () => {
@@ -79,19 +79,19 @@ describe("the client's own wait", () => {
 describe('control: a declared wait is unchanged', () => {
   it('Retry-After sets the wait', async () => {
     const at = wire([[503, { 'retry-after': '2' }], 200]);
-    expect((await settle(createHttpClient().get('/a', { retry: 1 }))).ok).toBe(true);
+    expect((await settle(createHttpClient().get('/a', { retry: { maxAttempts: 2 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([2000]);
   });
 
   it("one over the bus's 20 s and under the client's 30 s is still slept", async () => {
     const at = wire([[503, { 'retry-after': '25' }], 200]);
-    expect((await settle(postCommand('/c', {}, { retry: 1 }))).ok).toBe(true);
+    expect((await settle(postCommand('/c', {}, { retry: { maxAttempts: 2 } }))).ok).toBe(true);
     expect(gaps(at)).toEqual([25_000]);
   });
 
   it('one over 30 s ends the request', async () => {
     const at = wire([[503, { 'retry-after': '31' }], 200]);
-    const e = await settle(createHttpClient().get('/a', { retry: 2 }).catch((x: unknown) => x));
+    const e = await settle(createHttpClient().get('/a', { retry: { maxAttempts: 3 } }).catch((x: unknown) => x));
     expect((e as BusError).context).toMatchObject({ status: 503, retryIn: 31_000 });
     expect(at).toHaveLength(1);
   });

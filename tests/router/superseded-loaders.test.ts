@@ -158,7 +158,7 @@ describe('abort listeners left on a signal after its navigation settles', () => 
 
   it('fetchLoaders over a real server: none left on the committed navigation, none on the bus under supersede', async () => {
     await countingAbortListeners(async (left, added) => {
-      const http = createHttpClient({ baseURL: base, retry: 0 });
+      const http = createHttpClient({ baseURL: base, retry: false });
       let seen!: AbortSignal;
       const inner = fetchLoaders({ http });
       const router = await build(

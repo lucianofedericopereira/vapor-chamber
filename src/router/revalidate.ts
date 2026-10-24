@@ -3,7 +3,10 @@
  *
  * A BUS plugin that lives on the ROUTER side. After a command that changed
  * server state, the data behind the current route is stale; this re-runs the
- * affected loaders and patches the snapshot.
+ * affected loaders and patches the snapshot. It listens to settled results
+ * (`attach`, one `on` per pattern), and holds no `next`. Where the server
+ * declares what a write made stale (RFC 9875 `Cache-Group-Invalidation`), the
+ * router refreshes those reads itself, with no map (index.ts `refreshGroup`).
  *
  *   bus.use(revalidateRoutes(router, loaders, {
  *     'cart*':        ['shop.cart'],   // command pattern -> record names
@@ -14,8 +17,8 @@
  * needs `runLoaders` from the router, and there is no public substitute
  * (`reload()` reloads the TABLE, not data); bus-side, it would have to import
  * a router module into the root barrel, which is forbidden. What it needs from
- * the BUS is a single function shape, `(cmd, next) => result`, declared inline
- * below, so the edge exists in exactly one direction, the cheap one.
+ * the BUS is two shapes, the plugin function and `on`, declared inline below,
+ * so the edge exists in exactly one direction, the cheap one.
  *
  * WHY `loaders` IS AN ARGUMENT. `createRouter` closes over its `LoaderHandlers`
  * and does not expose them, so the plugin cannot recover the preset the router
@@ -36,12 +39,13 @@
 
 import { shallowRef } from 'vue';
 import { routerError } from './errors';
-import { type LoaderHandlers, runLoaders } from './loaders';
+import { _report } from '../report';
+import { type LoaderHandlers, _routerClients, runLoaders } from './loaders';
 import type { Router } from './router-type';
 import type { TableRecord } from './types';
 
 /**
- * The bus's plugin shape, declared here rather than imported.
+ * The bus's plugin and listener shapes, declared here rather than imported.
  *
  * Structural on purpose - it is the whole of this module's dependency on the
  * bus, and importing it would pull the command bus into the router's graph to
@@ -49,11 +53,19 @@ import type { TableRecord } from './types';
  */
 type BusResult = { ok: boolean; value?: unknown; error?: unknown };
 type BusCommand = { action: string };
-export type RevalidatePlugin = ((cmd: BusCommand, next: () => unknown) => unknown) & {
+type ListeningBus = { on(pattern: string, listener: (cmd: BusCommand, result: BusResult) => void): () => void };
+// A plugin made of an `attach` part, so `bus.use(revalidateRoutes(...))`
+// type-checks on either bus as docs/router.md writes it (tests/router/cache-groups.test.ts).
+export type RevalidatePlugin = {
+  readonly id: 'revalidateRoutes';
   /** True while at least one plugin-driven refresh is in flight. */
   isRevalidating: { readonly value: boolean };
   /** Stop revalidating and abort anything in flight. */
   dispose: () => void;
+  /** The map's patterns, each one listener (`attach`). */
+  readonly actions: string[];
+  /** `use()` gives the bus: one listener per pattern (PluginParts.attach). */
+  attach: (bus: ListeningBus) => () => void;
 };
 
 /** Command pattern -> record names to refresh, or 'affected' for the current
@@ -65,15 +77,6 @@ export type RevalidateOptions = {
    *  a failed refresh must not take down the command that succeeded. */
   onError?: (error: unknown) => void;
 };
-
-/** Prefix glob, matching the bus's `matchesPattern` semantics without
- *  importing it: `'*'` matches everything, `'cart*'` matches by prefix, and
- *  anything else is an exact match. */
-function matches(pattern: string, action: string): boolean {
-  if (pattern === '*') return true;
-  if (pattern.endsWith('*')) return action.startsWith(pattern.slice(0, -1));
-  return pattern === action;
-}
 
 export function revalidateRoutes(
   router: Router,
@@ -87,7 +90,7 @@ export function revalidateRoutes(
    *  already succeeded, and a refresh must not take it down. */
   const report = (error: unknown): void => {
     if (options.onError) options.onError(error);
-    else console.error('[vapor-chamber-router] revalidateRoutes refresh failed', error);
+    else _report('error', 'router:failed:revalidate', 'a revalidateRoutes refresh failed; the page keeps its data', error);
   };
 
   /**
@@ -105,16 +108,23 @@ export function revalidateRoutes(
     flag.value = inFlight.size > 0;
   }
 
-  // `Object.hasOwn`, never `map[action]`: the keys are command patterns, which
-  // are external strings, and a `{}` answers for `constructor`/`toString`. The
-  // rule and its evidence live in `../dict`.
+  // Own keys only: an action never indexes the map, the bus matches it to a
+  // pattern (`on`), so `constructor` or `toString` never answers. See `../dict`.
   const patterns = Object.keys(map);
+  const detaches = new Set<() => void>();
 
-  function targetsFor(action: string): readonly string[] | 'affected' | null {
-    for (const pattern of patterns) {
-      if (matches(pattern, action) && Object.hasOwn(map, pattern)) return map[pattern] as never;
-    }
-    return null;
+  // A settled result: refresh after a success, and after an `Accepted`'s
+  // `done` settles ok (read by its shape: the router imports no bus).
+  function settled(targets: readonly string[] | 'affected', result: BusResult): void {
+    if (disposed || !result.ok) return;
+    const done = (result.value as { done?: unknown } | null | undefined)?.done;
+    // settled.ts isThenable's test, inline: importing it split a shared chunk out
+    // of the store's bundle (tests/chamber-store.test.ts).
+    if (typeof (done as PromiseLike<unknown> | undefined)?.then === 'function') {
+      void (done as Promise<BusResult>).then((end) => {
+        if (!disposed && end.ok) revalidate(targets);
+      });
+    } else revalidate(targets);
   }
 
   function revalidate(targets: readonly string[] | 'affected'): void {
@@ -172,7 +182,7 @@ export function revalidateRoutes(
     const at = snapshot.location;
     syncFlag();
 
-    void runLoaders(loaders, records, at, own.signal, undefined, true)
+    void runLoaders(loaders, records, at, own.signal, undefined, true, _routerClients.get(router))
       .then((fresh) => {
         if (own.signal.aborted) return;
         // Superseded by a navigation while we were fetching: the data belongs
@@ -190,31 +200,24 @@ export function revalidateRoutes(
       });
   }
 
-  const plugin = ((cmd: BusCommand, next: () => unknown) => {
-    const result = next();
-    if (disposed) return result;
-    const targets = targetsFor(cmd.action);
-    if (!targets) return result;
-
-    // Async buses hand back a promise; revalidate only once it has resolved ok,
-    // so a failed mutation never refreshes as though it had worked.
-    if (result && typeof (result as Promise<BusResult>).then === 'function') {
-      void (result as Promise<BusResult>).then((settled) => {
-        if (!disposed && settled?.ok) revalidate(targets);
-      });
-      return result;
-    }
-    if ((result as BusResult)?.ok) revalidate(targets);
-    return result;
-  }) as RevalidatePlugin;
-
-  Object.defineProperty(plugin, 'id', { value: 'revalidateRoutes' });
-  plugin.isRevalidating = flag;
-  plugin.dispose = () => {
+  // A listener, not a wrapper: `attach` subscribes one `on` per pattern, so
+  // the bus's matcher decides and its listeners hear every settled result
+  // (plan-router gap 1). An action two patterns match refreshes both targets.
+  const attach = (bus: ListeningBus): (() => void) => {
+    const offs = patterns.map((pattern) => bus.on(pattern, (_cmd, result) => settled(map[pattern], result)));
+    const detach = (): void => {
+      detaches.delete(detach);
+      for (const off of offs) off();
+    };
+    detaches.add(detach);
+    return detach;
+  };
+  const dispose = (): void => {
     disposed = true;
+    for (const detach of detaches) detach();
     for (const entry of inFlight) entry.controller.abort();
     inFlight.clear();
     flag.value = false;
   };
-  return plugin;
+  return { id: 'revalidateRoutes', actions: patterns, attach, dispose, isRevalidating: flag };
 }

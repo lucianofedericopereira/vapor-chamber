@@ -15,12 +15,10 @@ import {
   describeSchema,
   createSchemaCommandBus,
   createAsyncSchemaCommandBus,
-  getErrorEntry,
-  describeErrorCodes,
   busApiSchema,
-  ERROR_CODE_REGISTRY,
   type BusSchema,
 } from '../src/schema';
+import { ERROR_CODE_REGISTRY, describeErrorCodes, getErrorEntry } from '../src/error-registry';
 import { it } from '../src/vitest';
 
 
@@ -199,7 +197,7 @@ describe('busApiSchema', () => {
 
     const expectedMethods = [
       'dispatch', 'query', 'emit', 'register', 'use',
-      'onBefore', 'onAfter', 'on', 'once',
+      'onAfter', 'on', 'once',
       'request', 'respond', 'hasHandler', 'registeredActions', 'clear',
     ];
     expect(Object.keys(api).sort()).toEqual([...expectedMethods].sort());

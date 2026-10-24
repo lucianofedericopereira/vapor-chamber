@@ -32,9 +32,47 @@ test. The open items are in [ROADMAP.md](../ROADMAP.md).
 - **Form errors point at their field.** FormBus takes a failure's field
   errors and gives each field its `aria` facts, an `errorId` and
   `firstInvalid` (tests/form-a11y.test.ts,
-  tests/browser/form-errors.browser.test.ts).
+  tests/browser/form-errors.browser.test.ts). An input with its own hint
+  passes the hint's id, `v-bind="form.aria('email', 'email-hint')"`, in
+  place of a static `aria-describedby`: the hint stays named and the error's
+  id follows it while shown. A render that binds it follows the error, in
+  both renderers (tests/form-aria-render.test.ts).
 - **Undo is honest.** Both histories move their stacks back when an undo or a
   redo does not land (tests/history-undo-lands.test.ts).
+
+- **Plain HTML gets the same.** `bindCommands(root, { bus })` mounts the
+  directive's interaction on every `[data-vc-command]`, so a page with no Vue
+  keeps focus, answers the keyboard and announces failures the same way
+  (tests/browser/bind-commands.browser.test.ts).
+
+## A busy display that waits
+
+`aria-disabled` and the in-flight guard apply at once. Whether a spinner
+shows at once is a display choice, the app's, so the library has no option
+for it. `vc-loading` is set from the press to the answer, by `v-vc-command`,
+by `bindCommands` and by `data-vc-pending`. A CSS delay keeps a fast answer
+from flashing a spinner:
+
+```css
+.vc-loading .busy { visibility: hidden; animation: vc-busy-after 0s 120ms forwards; }
+@keyframes vc-busy-after { to { visibility: visible; } }
+```
+
+The `.busy` child stays hidden for the first 120 ms and shows after, and it
+goes with the class when the answer lands
+(tests/browser/busy-recipe.browser.test.ts).
+
+On Vapor, a placeholder that waits is `VcTransition`
+(`vapor-chamber/transitions/vapor`) with `:show` bound to `pending`, and
+nothing more from the library. The transition inserts its content as soon as
+`show` turns true, so the placeholder starts hidden in its own style. The
+app's `<ns>Enter` handler shows it after its delay, and `<ns>EnterCancelled`
+clears that delay when the answer comes first. The content leaves only when
+`<ns>Leave` answers, on an async bus. Give the transition a bus of its own:
+on the app's bus its commands would count in `anyPending` and `errors`.
+examples/vapor-sfc's CartPanel shows it; tests/vapor/busy-placeholder.test.ts
+pins a fast command never showing it and a slow one showing it until Leave
+answers.
 
 The library holds no words of its own beyond a failure's message. A
 backend's `detail` arrives localized. An app that wants other words, or its
@@ -73,7 +111,7 @@ feature can meet or break.
 | 2.1.1 keyboard | the directive on `role="button"` | holds | command-keyboard.browser |
 | 2.5.2 action on release | the directive listens to `click` | holds | directive tests |
 | 3.2.1, 3.2.2 no change on focus or input | preheat on hover or focus never navigates; a query-only navigation moves no focus | holds | announce test (query-only), router/preheat-gate (a warm-up never navigates) |
-| 2.2.1 timing adjustable | a 419 refreshes the CSRF token and resends, so no user-facing expiry | holds | bridge tests |
+| 2.2.1 timing adjustable | a 419 refreshes the CSRF token and resends, so no user-facing expiry | holds | transport tests |
 | 4.1.3 status messages | `announce()`: the directive's failures, the router's page changes | holds for commands and the router | a11y-announce, command-errors.browser |
 | 3.3.1, 3.3.3 error identified and suggested | a failure's `detail` and field; FormBus `setErrors`, `aria`, `errorId`, `firstInvalid` | holds for FormBus; focusing the first invalid field is open | form-a11y, form-errors.browser |
 | 3.3.4 error prevention | both histories move back when an undo or redo does not land | holds | history-undo-lands |

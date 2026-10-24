@@ -1,12 +1,11 @@
 /** A NaN option behaves like a missing one, and a delay past the timer maximum is capped, at every site bounds.ts's rule names. Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Accepted } from '../src/accepted';
 import { resetCommandBus, setCommandBus, useCommandError, useSharedCommandState } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { debounce, throttle } from '../src/plugins-core';
+import { pace } from '../src/pace';
 import { rateLimit } from '../src/plugins-extra';
-import { pollWith } from '../src/poll-with';
-import { createSSRPlugin } from '../src/ssr';
-import { createBatchingHttpBridge, createWsBridge } from '../src/transports';
+import { httpTransport, wsTransport } from '../src/transports';
 import { createReaction } from '../src/utilities';
 
 afterEach(() => { resetCommandBus(); vi.restoreAllMocks(); });
@@ -46,17 +45,17 @@ describe('NaN reads as the default', () => {
     }
   });
 
-  it('pollWith interval and maxWait: the defaults, never a hot loop or an endless wait', async () => {
+  it('httpTransport poll interval and maxWait: the defaults, never a hot loop or an endless wait', async () => {
     for (const [interval, most] of [[NaN, 1], [10, 6]] as const) {
       let gets = 0;
-      const httpClient = { get: async () => { gets++; return { status: 202, data: null, headers: {}, ok: true, url: '', redirected: false }; } };
-      const bus = createAsyncCommandBus({ retry: false });
-      const pw = pollWith({ bus, interval, maxWait: NaN, httpClient: httpClient as never });
-      bus.use(pw);
-      bus.use(async (cmd) => { cmd.meta!.response = { status: 202, headers: { location: '/jobs/1' }, url: 'http://x/vc' } as never; return { ok: true, value: 1, error: undefined }; });
-      await bus.dispatch('reportExport', {});
+      const httpClient = {
+        post: async () => ({ ok: true, status: 202, headers: { location: '/jobs/1' }, data: {}, url: 'http://x/vc' }),
+        get: async () => { gets++; return { status: 202, data: null, headers: {}, ok: true }; },
+      };
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/vc', httpClient: httpClient as never, poll: { interval, maxWait: NaN } }) });
+      void ((await bus.dispatch('reportExport', {})).value as Accepted).done;
       await tick(60);
-      pw.dispose();
+      bus.dispose();
       expect(gets, String(interval)).toBeLessThanOrEqual(most);
     }
   });
@@ -78,15 +77,6 @@ describe('NaN reads as the default', () => {
     expect(state.errors.value).toHaveLength(10);
   });
 
-  it('createSSRPlugin maxSize: the default 500, never nothing', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus();
-    bus.register('cmd', () => 'ok');
-    const ssr = createSSRPlugin({ maxSize: NaN });
-    bus.use(ssr.plugin);
-    for (let i = 0; i < 3; i++) bus.dispatch('cmd', { i });
-    expect(ssr.size()).toBe(3);
-  });
 });
 
 describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer maximum', () => {
@@ -111,13 +101,12 @@ describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer m
     close() { this.readyState = 3; }
   }
 
-  it('createWsBridge timeout: the default 10 s', async () => {
+  it('wsTransport timeout: the default 10 s', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('WebSocket', SilentWs);
     const at = async (timeout?: number) => {
-      const bus = createAsyncCommandBus({ retry: false });
-      const ws = createWsBridge({ url: 'ws://x', reconnect: false, ...(timeout === undefined ? {} : { timeout }) });
-      bus.use(ws);
+      const ws = wsTransport({ url: 'ws://x', reconnect: false, ...(timeout === undefined ? {} : { timeout }) });
+      const bus = createAsyncCommandBus({ retry: false, transport: ws });
       ws.connect();
       SilentWs.last.readyState = 1;
       SilentWs.last.onopen!();
@@ -133,7 +122,7 @@ describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer m
     expect(await at(3e9)).toEqual([false, false]);
   });
 
-  it('createBatchingHttpBridge window: NaN is the default, a microtask; Infinity the timer maximum', async () => {
+  it('httpTransport batch window: NaN is the default, a microtask; Infinity the timer maximum', async () => {
     vi.useFakeTimers();
     let posts = 0;
     vi.stubGlobal('fetch', async (_u: string, init: { body: string }) => {
@@ -144,8 +133,7 @@ describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer m
     /** POSTs after the microtasks, then after 1 s of timers. */
     const at = async (window: number | 'microtask') => {
       posts = 0;
-      const bus = createAsyncCommandBus({ retry: false });
-      bus.use(createBatchingHttpBridge({ endpoint: '/b', window }));
+      const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/b', batch: { window } }) });
       void bus.dispatch('a', {});
       void bus.dispatch('b', {});
       for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -180,53 +168,49 @@ describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer m
   }
 });
 
-describe('a throttle wait: NaN is the default, no throttle; Infinity the timer maximum', () => {
+describe('a pace wait: NaN is no wait; Infinity the timer maximum', () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  /** Five dispatches 30 ms apart through each entry: 1 ran, 0 refused. */
-  function runs(wait: number): { plugin: string; register: string } {
+  it('throttle: five calls 30 ms apart, 1 ran, 0 refused', async () => {
     vi.useFakeTimers();
-    const a = createCommandBus();
-    a.register('save', () => 'ok');
-    a.use(throttle(['save'], wait));
-    const b = createCommandBus();
-    b.register('save', () => 'ok', { throttle: wait });
-    let plugin = '';
-    let register = '';
-    for (let i = 0; i < 5; i++) {
-      plugin += a.dispatch('save', {}).ok ? 1 : 0;
-      register += b.dispatch('save', {}).ok ? 1 : 0;
-      vi.advanceTimersByTime(30);
-    }
-    return { plugin, register };
-  }
-
-  it('both entries read a bad wait the same way', () => {
-    expect(runs(10)).toEqual({ plugin: '11111', register: '11111' }); // control
-    expect(runs(1000)).toEqual({ plugin: '10000', register: '10000' }); // control
-    expect(runs(NaN)).toEqual({ plugin: '11111', register: '11111' });
-    expect(runs(Infinity)).toEqual({ plugin: '10000', register: '10000' });
+    const runs = async (wait: number): Promise<string> => {
+      const bus = createCommandBus();
+      bus.register('save', () => 'ok');
+      const send = pace(bus.dispatch, { throttle: wait });
+      let out = '';
+      for (let i = 0; i < 5; i++) {
+        out += (await send('save', {})).ok ? 1 : 0;
+        await vi.advanceTimersByTimeAsync(30);
+      }
+      send.dispose();
+      return out;
+    };
+    expect(await runs(10)).toBe('11111'); // control
+    expect(await runs(1000)).toBe('10000'); // control
+    expect(await runs(NaN)).toBe('11111');
+    expect(await runs(Infinity)).toBe('10000');
   });
 
-  it('debounce: NaN is no delay, Infinity the timer maximum, never 1 ms', () => {
+  it('debounce: NaN is no delay, Infinity the timer maximum, never 1 ms', async () => {
     vi.useFakeTimers();
     /** Whether the debounced handler has run after 0 ms, then after 50 ms more. */
-    const at = (wait: number): boolean[] => {
+    const at = async (wait: number): Promise<boolean[]> => {
       const bus = createCommandBus();
       let ran = false;
       bus.register('search', () => { ran = true; });
-      bus.use(debounce(['search'], wait));
-      bus.dispatch('search', {});
-      vi.advanceTimersByTime(0);
+      const send = pace(bus.dispatch, { debounce: wait });
+      void send('search', {});
+      await vi.advanceTimersByTimeAsync(0);
       const first = ran;
-      vi.advanceTimersByTime(50);
+      await vi.advanceTimersByTimeAsync(50);
+      send.dispose();
       return [first, ran];
     };
-    expect(at(20)).toEqual([false, true]); // control
-    expect(at(0)).toEqual([true, true]); // control: no delay
-    expect(at(NaN)).toEqual([true, true]);
-    expect(at(Infinity)).toEqual([false, false]);
-    expect(at(3e9)).toEqual([false, false]);
+    expect(await at(20)).toEqual([false, true]); // control
+    expect(await at(0)).toEqual([true, true]); // control: no delay
+    expect(await at(NaN)).toEqual([true, true]);
+    expect(await at(Infinity)).toEqual([false, false]);
+    expect(await at(3e9)).toEqual([false, false]);
   });
 });
 
@@ -236,21 +220,21 @@ describe('a throttle wait: NaN is the default, no throttle; Infinity the timer m
  * Seven sites read their option raw (audit B14): `rateLimit({ max: NaN })`
  * let 20 of 20 through and `window: NaN` refused for good with no
  * `retryIn`; `createReaction({ maxHops: NaN })` ran a self loop to the depth
- * bound; `pollWith({ interval: NaN })` polled in a hot loop and `maxWait:
- * NaN` never ended; `maxSize: NaN` kept every error in both composables;
- * `createSSRPlugin({ maxSize: NaN })` recorded nothing. Each now reads
+ * bound; `pollWith({ interval: NaN })` (now `httpTransport({ poll })`) polled in a
+ * hot loop and `maxWait: NaN` never ended; `maxSize: NaN` kept every error in both composables.
+ * Each now reads
  * through `countOption` with its default. Zero keeps its released meaning
  * (`max: 0` refuses every call), so the minimum stays 0. Log s35.174.
  */
 
 /*
- * The timeouts (audit D8, log 36.11). createWsBridge's `timeout` and
+ * The timeouts (audit D8, log 36.11). wsTransport's `timeout` and
  * request()'s `timeout`, on both buses, went to setTimeout as given. A timer
  * fires at once on NaN and on anything past 2^31-1, Infinity included. So a
  * timeout read from a config that failed to parse, or "no limit", failed
  * every WebSocket command and every request after about 1 ms. They now read
  * through countOption with MAX_TIMEOUT_MS as the ceiling, as the http
- * client's timeout and the ws bridge's other three options already did.
+ * client's timeout and the ws transport's other three options already did.
  * `null` still means the default (`?? 5000` before the read), and 0 still
  * fires at once.
  */
@@ -262,13 +246,15 @@ describe('a throttle wait: NaN is the default, no throttle; Infinity the timer m
  * through. So the default is no throttle. Before, the two entries disagreed:
  * `throttle(list, NaN)` refused every call for good (`now - last >= NaN` is
  * false) while `register(..., { throttle: NaN })` throttled nothing, and
- * Infinity refused even the first call in both. The shared gate now reads its
- * wait once, through countOption with MAX_TIMEOUT_MS as the ceiling.
+ * Infinity refused even the first call in both. The gate read its wait once,
+ * through countOption with MAX_TIMEOUT_MS as the ceiling. Both entries left
+ * the bus in 1.32 step 6a: `pace({ throttle })` keeps the rule.
  */
 
 /*
  * debounce (audit D9, the same rule): its wait went to setTimeout as given,
  * so NaN, Infinity and anything past 2^31-1 ran the handler after about 1 ms.
- * It now reads its wait once, as the throttle gate does: NaN is no delay, the
+ * It read its wait once, as the throttle gate did: NaN is no delay, the
  * default a wait of 0 gives, and a larger wait the timer maximum.
+ * `pace({ debounce })` keeps the rule.
  */

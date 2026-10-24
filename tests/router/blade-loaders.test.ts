@@ -23,7 +23,7 @@ const HOME = { Home: defineComponent({ render: () => h('span', 'home') }) };
 
 /** Minimal fake HttpClient - only get() is used by the router. */
 function fakeHttp(get: (url: string, config?: unknown) => Promise<{ data: unknown }>): HttpClient {
-  return { get } as unknown as HttpClient;
+  return { get, onInvalidateGroup: () => () => {} } as unknown as HttpClient;
 }
 
 describe('blade rows', () => {
@@ -39,7 +39,8 @@ describe('blade rows', () => {
     await router.isReady();
 
     expect(await router.push('/report')).toBeNull();
-    expect(fetchBlade).toHaveBeenCalledWith('/admin/report');
+    // The second argument is the router's client: none here.
+    expect(fetchBlade).toHaveBeenCalledWith('/admin/report', undefined);
     const render = router.currentRoute.value.render;
     expect(render[render.length - 1].component).toBeTypeOf('object'); // makeBladeComponent result
   });
@@ -91,7 +92,8 @@ describe('table loaders', () => {
     });
     await router.isReady();
 
-    expect(get).toHaveBeenCalledWith('/api/routes', expect.objectContaining({ retry: 2 }));
+    // No count of its own: the client's default re-sends a read (tests/router/one-client.test.ts).
+    expect(get).toHaveBeenCalledWith('/api/routes');
     expect(router.currentRoute.value.location.name).toBe('home');
 
     await router.reload();

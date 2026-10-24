@@ -3,7 +3,7 @@ import { describe, expect, vi } from 'vitest';
 import type { BusError } from '../src/command-bus';
 import { effectScope } from 'vue';
 import { createCommandBus, inspectBus } from '../src/command-bus';
-import { ERROR_CODE_REGISTRY } from '../src/schema';
+import { ERROR_CODE_REGISTRY } from '../src/error-registry';
 import { defineChamberStore } from '../src/store';
 import { it } from '../src/vitest';
 import { stubEnv } from '../src/vitest-pure';

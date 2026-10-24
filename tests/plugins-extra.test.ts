@@ -1,7 +1,6 @@
 import { describe, expect, vi } from 'vitest';
 import { _failures, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
-import { stubEnv } from '../src/vitest-pure';
 import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
@@ -44,33 +43,7 @@ describe('cache', () => {
     expect(calls).toBe(2);
   });
 
-  it('invalidate(action, target) removes specific entry', ({ bus }) => {
-    const handler = vi.fn(() => 42);
-    bus.register('get', handler);
-    const c = cache({ ttl: 60_000 });
-    bus.use(c);
 
-    bus.query('get', { id: 1 });
-    c.invalidate('get', { id: 1 });
-    bus.query('get', { id: 1 });
-
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
-
-  it('invalidate(action) removes all entries for that action', ({ bus }) => {
-    const handler = vi.fn(() => 1);
-    bus.register('get', handler);
-    const c = cache({ ttl: 60_000 });
-    bus.use(c);
-
-    bus.query('get', { id: 1 });
-    bus.query('get', { id: 2 });
-    c.invalidate('get');
-    bus.query('get', { id: 1 });
-    bus.query('get', { id: 2 });
-
-    expect(handler).toHaveBeenCalledTimes(4);
-  });
 
   it('clear() empties the cache', ({ bus }) => {
     const handler = vi.fn(() => 1);
@@ -287,13 +260,13 @@ describe('circuitBreaker', () => {
   // bugs must not lock an action out. It neither counts nor resets the
   // consecutive-failure run (tests/plugin-throw-fixture.test.ts has the
   // conversion itself).
-  it('does not count a plugin:failed:plugin from a plugin inside it', () => {
+  it('does not count a plugin:failed:plugin from a step after it', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.register('op', () => 'ok');
     const cb = circuitBreaker({ threshold: 2 });
-    bus.use(cb, { priority: 10 });
-    bus.use(() => { throw new Error('plugin bug'); }, { priority: 1 });
+    bus.use(cb);
+    bus.use({ begin: () => { throw new Error('plugin bug'); } });
 
     for (let i = 0; i < 5; i++) expect((bus.dispatch('op', {}).error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(cb.getState('op')).toBe('closed');
@@ -304,9 +277,9 @@ describe('circuitBreaker', () => {
     const bus = createCommandBus();
     bus.register('op', () => { throw new Error('server down'); });
     const cb = circuitBreaker({ threshold: 2 });
-    bus.use(cb, { priority: 10 });
+    bus.use(cb);
     let pluginBug = false;
-    bus.use((_c, next) => { if (pluginBug) throw new Error('plugin bug'); return next(); }, { priority: 1 });
+    bus.use({ begin: () => { if (pluginBug) throw new Error('plugin bug'); return undefined; } });
 
     bus.dispatch('op', {}); // real failure 1
     pluginBug = true;
@@ -330,13 +303,13 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
   });
 
-  it('async bus: a rejecting plugin inside it is not counted', async () => {
+  it('async bus: a rejecting step is not counted', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('op', async () => 'ok');
     const cb = circuitBreaker({ threshold: 2 });
-    bus.use(cb, { priority: 10 });
-    bus.use(() => Promise.reject(new Error('plugin bug')), { priority: 1 });
+    bus.use(cb);
+    bus.use({ reuse: () => Promise.reject(new Error('plugin bug')) });
 
     for (let i = 0; i < 4; i++) expect(((await bus.dispatch('op', {})).error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(cb.getState('op')).toBe('closed');
@@ -500,76 +473,9 @@ describe('cache - key derivation and invalidation', () => {
     expect(handler).toHaveBeenCalledTimes(1); // second call hit the custom key
   });
 
-  it('warns that invalidate(action, target) cannot address custom-key entries', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus();
-    bus.register('getUser', (cmd: any) => cmd.target.id);
-    const c = cache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` });
-    bus.use(c);
 
-    bus.query('getUser', { id: 1 });
-    expect(c.size()).toBe(1);
 
-    // A custom key may depend on the payload, so (action, target) is not enough
-    // to recompute it. Saying so beats deleting nothing quietly.
-    c.invalidate('getUser', { id: 1 });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cannot address entries stored'));
 
-    // Action-wide invalidation is index-driven and still works for any key shape.
-    c.invalidate('getUser');
-    expect(c.size()).toBe(0);
-  });
-
-  it('stays silent about custom-key invalidation in production (DEV=false)', async () => {
-    // The `if (DEV)` FALSE arm of the warning above. The diagnostic is a
-    // build-time aid; in production the call must be a quiet no-op for the
-    // targeted form while action-wide invalidation keeps working.
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
-    vi.resetModules();
-    const { cache: prodCache } = await import('../src/plugins-extra');
-    const { createCommandBus: prodBus } = await import('../src/command-bus');
-
-    const bus = prodBus();
-    bus.register('getUser', (cmd: any) => cmd.target.id);
-    const c = prodCache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` });
-    bus.use(c);
-
-    bus.query('getUser', { id: 1 });
-    expect(c.size()).toBe(1);
-
-    c.invalidate('getUser', { id: 1 });
-    expect(warn).not.toHaveBeenCalled(); // no diagnostic...
-    expect(c.size()).toBe(1); // ...and, as in dev, nothing was removed
-
-    c.invalidate('getUser'); // action-wide still works
-    expect(c.size()).toBe(0);
-
-    vi.resetModules();
-  });
-
-  it('invalidating an action with nothing cached is a no-op', () => {
-    const c = cache({ ttl: 60_000 });
-    expect(() => c.invalidate('neverCached')).not.toThrow();
-    expect(c.size()).toBe(0);
-  });
-
-  it('drops the action index once its last key is invalidated', ({ bus }) => {
-    bus.register('getUser', (cmd: any) => cmd.target.id);
-    const c = cache({ ttl: 60_000 });
-    bus.use(c);
-
-    bus.query('getUser', { id: 1 });
-    bus.query('getUser', { id: 2 });
-    expect(c.size()).toBe(2);
-
-    c.invalidate('getUser', { id: 1 });
-    expect(c.size()).toBe(1);
-    // Removing the last one must also drop the empty action bucket, or the
-    // index grows forever with sets nobody reads.
-    c.invalidate('getUser', { id: 2 });
-    expect(c.size()).toBe(0);
-  });
 });
 
 describe('cache - async bus', () => {
@@ -610,7 +516,7 @@ describe('cache - async bus', () => {
 
 // ---------------------------------------------------------------------------
 // A `limited` refusal declares when to come back (`context.retryIn`), as a
-// throttle and a Retry-After do, so a caller and the outbox wait for it.
+// throttled call (`pace`) and a Retry-After do, so a caller and the outbox wait for it.
 // ---------------------------------------------------------------------------
 
 describe('a limited refusal declares when to come back', () => {

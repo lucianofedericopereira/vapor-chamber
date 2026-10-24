@@ -1,29 +1,31 @@
 <!--
-  Fire-and-forget hot path via `defineVaporCommand`.
+  Search as you type, paced at the sender.
 
-  Search-as-you-type and telemetry events are high-frequency. `useCommand`
-  allocates two reactive signals (loading, lastError) once, then writes them
-  on every dispatch, so each keystroke would pay those writes for state this
-  panel never shows. `defineVaporCommand` has no such state - handler runs,
-  fire-and-forget.
-
-  The local `query` signal is a plain Vue ref for the input value.
+  `useCommand({ debounce })` waits for a pause in the typing, then sends the
+  last text only. The typed text is the PAYLOAD, so every keystroke shares one
+  key. A call that a newer one replaced settles aborted and is ignored here.
+  The results are the dispatch's own result.
 -->
 <script setup vapor lang="ts">
-// The Vapor entry wires Vue at build time, so `query` is a real ref once built.
-import { defineVaporCommand, signal } from 'vapor-chamber/vapor';
+import { signal, useCommand } from 'vapor-chamber/vapor';
+import type { Product } from './shop';
+
+const { dispatch, pending } = useCommand({ debounce: 250 });
+const searching = pending('productSearch');
 
 const query = signal('');
+const results = signal<Product[] | null>(null);
 
-// No loading/error signals: a dispatch writes no loading or error state.
-const { dispatch: search } = defineVaporCommand('searchExecute', async (cmd) => {
-  // In a real app, forward to your search backend. Here we just log the term.
-  console.log('[searchExecute]', cmd.target);
-});
-
-function onInput(e: Event) {
+async function onInput(e: Event) {
   query.value = (e.target as HTMLInputElement).value;
-  if (query.value.length >= 2) search(query.value);
+  const term = query.value.trim();
+  if (term.length < 2) {
+    results.value = null;
+    return;
+  }
+  const result = await dispatch('productSearch', undefined, term);
+  // Only the text still in the box: an older answer never replaces a newer one.
+  if (result.ok && term === query.value.trim()) results.value = result.value as Product[];
 }
 </script>
 
@@ -31,19 +33,24 @@ function onInput(e: Event) {
   <section class="panel">
     <h2>Search</h2>
     <p>
-      Demonstrates the fire-and-forget hot path. Each keystroke (after 2
-      chars) dispatches a <code>searchExecute</code> command - no reactive
-      loading state is allocated per call.
+      Type at least 2 characters. The search waits for a pause in the typing,
+      then sends the last text only.
     </p>
-    <!-- query is a top-level ref - auto-unwrapped in the template, no .value -->
     <input
-      type="text"
+      type="search"
       :value="query"
       @input="onInput"
-      placeholder="Type to search..."
+      placeholder="Try: usb, wireless, stand"
       aria-label="Search"
-      style="padding: 0.4rem; width: 200px;"
+      style="padding: 0.4rem; width: 220px;"
     />
-    <p>Open the console - <code>[searchExecute]</code> logs each dispatch.</p>
+    <p role="status">
+      <template v-if="searching">Searching...</template>
+      <template v-else-if="results && results.length === 0">No product matches "{{ query }}".</template>
+      <template v-else-if="results">{{ results.length }} result{{ results.length > 1 ? 's' : '' }}</template>
+    </p>
+    <ul v-if="results && results.length">
+      <li v-for="p in results" :key="p.id">{{ p.name }} - ${{ (p.cents / 100).toFixed(2) }}</li>
+    </ul>
   </section>
 </template>

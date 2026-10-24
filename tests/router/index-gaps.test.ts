@@ -87,7 +87,7 @@ describe('inline routes source', () => {
 describe('remote routes source', () => {
   it('warns when a fetched payload declares a base the history cannot adopt', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }) } as any;
+    const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }), onInvalidateGroup: () => () => {} } as any;
 
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,
@@ -103,7 +103,7 @@ describe('remote routes source', () => {
 
   it('does not warn when the caller passed base explicitly', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }) } as any;
+    const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }), onInvalidateGroup: () => () => {} } as any;
 
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,
@@ -117,7 +117,7 @@ describe('remote routes source', () => {
   });
 
   it('wraps a transport failure as router:failed:routes', async () => {
-    const http = { get: vi.fn().mockRejectedValue(new Error('502 bad gateway')) } as any;
+    const http = { get: vi.fn().mockRejectedValue(new Error('502 bad gateway')), onInvalidateGroup: () => () => {} } as any;
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,
       components: {},
@@ -131,7 +131,7 @@ describe('remote routes source', () => {
   it('passes a coded router error through unwrapped', async () => {
     // A payload with no routes array makes readRoutesPayload throw a coded
     // error inside the try - it must not be re-wrapped as router:failed:routes.
-    const http = { get: vi.fn().mockResolvedValue({ data: { nope: true } }) } as any;
+    const http = { get: vi.fn().mockResolvedValue({ data: { nope: true } }), onInvalidateGroup: () => () => {} } as any;
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,
       components: {},
@@ -411,7 +411,7 @@ describe('bladeFetcher', () => {
   ];
 
   /** Minimal HttpClient stand-in: only `.get` is reached from here. */
-  const htmlClient = (html: string) => ({ get: vi.fn(async () => ({ data: html })) }) as any;
+  const htmlClient = (html: string) => ({ get: vi.fn(async () => ({ data: html })), onInvalidateGroup: () => () => {} }) as any;
 
   it('falls back to doc.body when the blade root selector matches nothing', async () => {
     // `(doc.querySelector(bladeRoot) ?? doc.body).innerHTML` - the `?? doc.body`

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createFormBus } from '../src/form';
+import type { CreateSignal } from '../src/signal';
 import { createCommandBus } from '../src/command-bus';
 import { history, logger } from '../src/plugins';
 
@@ -127,10 +128,7 @@ describe('createFormBus - validation', () => {
 describe('createFormBus - plugin integration', () => {
   it('plugins receive formSet commands', () => {
     const intercepted: string[] = [];
-    const spy = (cmd: any, next: any) => {
-      intercepted.push(cmd.action);
-      return next();
-    };
+    const spy = { started: (cmd: { action: string }) => { intercepted.push(cmd.action); } };
     const form = createFormBus({ fields: { name: '' } });
     form.use(spy);
     form.set('name', 'Alice');
@@ -221,10 +219,7 @@ describe('createFormBus - bus injection', () => {
   it('form commands visible to plugins on injected bus', () => {
     const sharedBus = createCommandBus();
     const entries: Array<{ action: string }> = [];
-    sharedBus.use((cmd, next) => {
-      entries.push({ action: cmd.action });
-      return next();
-    });
+    sharedBus.use({ started: (cmd) => { entries.push({ action: cmd.action }); } });
 
     const form = createFormBus({ fields: { x: 0 }, bus: sharedBus });
     form.set('x', 42);
@@ -233,7 +228,7 @@ describe('createFormBus - bus injection', () => {
     expect(entries.map(e => e.action)).toEqual(['formSet', 'formReset']);
   });
 
-  it('creates isolated bus by default (backward compat)', () => {
+  it('creates an isolated bus by default', () => {
     const sharedBus = createCommandBus();
     const seen: string[] = [];
     sharedBus.onAfter((cmd) => seen.push(cmd.action));
@@ -432,7 +427,7 @@ describe('reactive option', () => {
     const { configureSignal } = await import('../src/signal');
     const { createFormBus: make } = await import('../src/form');
     let made = 0;
-    configureSignal(<T>(value: T) => { made++; return { value }; });
+    configureSignal(((<T>(value: T) => { made++; return { value }; }) as CreateSignal));
     make({ fields: { a: '' } });
     const reactive = made;
     make({ fields: { a: '' }, reactive: false });
@@ -444,7 +439,6 @@ describe('history on a form bus', () => {
   it('records formSet, and its undo moves the stacks but restores no field', () => {
     const bus = createCommandBus();
     const h = history({ bus });
-    bus.use(h);
     const form = createFormBus({ fields: { email: '' }, bus });
     form.set('email', 'a@x');
     form.set('email', 'b@x');

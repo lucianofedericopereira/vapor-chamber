@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/transitions/vapor';
 
 ### VcTransition
 
-**Variable** - [src/transitions/vapor.ts:93](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions/vapor.ts#L93)
+**Variable** - [src/transitions/vapor.ts:94](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions/vapor.ts#L94)
 
 ```ts
 VcTransition: import("vue").DefineVaporComponent<{ show: BooleanConstructor; appear: BooleanConstructor; namespace: StringConstructor; bus: PropType<BaseBus>; timeout: NumberConstructor; }, string, import("vue").ExtractPropTypes<{ show: BooleanConstructor; appear: BooleanConstructor; namespace: StringConstructor; bus: PropType<BaseBus>; timeout: NumberConstructor; }>, {}, string, { [x: string]: import("vue").VaporSlot; }, Record<string, any>, Node | import("vue").VaporFragment<import("vue").Block> | import("vue").DynamicFragment | import("vue").VaporComponentInstance<{}, {}, { [x: string]: import("vue").VaporSlot; }, Record<string, any>, import("vue").Block, Record<string, any>>, {}, true, import("vue").VaporPublicProps, { show: boolean; appear: boolean; } & { timeout?: number | undefined; namespace?: string | undefined; bus?: BaseBus | undefined; } & {}, { show: boolean; appear: boolean; }>

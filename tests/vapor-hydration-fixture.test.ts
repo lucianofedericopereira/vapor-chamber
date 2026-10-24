@@ -4,11 +4,11 @@
  *
  * WHOSE PATH THIS IS, stated accurately because the first version of this
  * header got it wrong. It said examples/exo-astro hydrates a Vapor app. It does
- * not: that example imports nothing from vue and runs a hand-rolled directive
- * scanner over the bus, and its `v-command` is its own directive, not
- * `v-vc-command`. Checked across all three examples - vapor-sfc mounts with
- * `createVaporApp` (client, no SSR), vapor-island-cart's `hydrate()` is a lazy
- * `customElements.define` upgrade, not Vue hydration, and none of the three
+ * not: that example imports nothing from vue and binds plain HTML with
+ * `bindCommands`, whose `data-vc-command` is not `v-vc-command`. Checked
+ * across all three examples - vapor-sfc mounts with `createVaporApp` (client,
+ * no SSR), vapor-island-cart's `hydrate()` is a lazy `customElements.define`
+ * upgrade, not Vue hydration, and none of the three
  * uses `v-vc-command` in a Vapor template at all.
  *
  * So this is a CONSUMER path, not a path this repository ships: someone doing

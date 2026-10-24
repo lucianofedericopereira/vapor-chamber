@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "exo-style declarative event-bus directives for Astro pages, over the vapor-chamber bus. Run with `npm install && npm run dev`.",
+  "description": "Static Astro HTML made live by data-vc-* attributes over the vapor-chamber bus and two stores. Run with `npm install && npm run dev`.",
   "scripts": {
     "ensure-lib": "node ../ensure-lib.mjs",
     "predev": "npm run ensure-lib",
@@ -16,7 +16,7 @@
     "vapor-chamber": "file:../.."
   },
   "devDependencies": {
-    "astro": "^7.2.9",
+    "astro": "^7.4.2",
     "typescript": "^6.0.3"
   },
   "engines": {

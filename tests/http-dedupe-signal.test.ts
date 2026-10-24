@@ -32,7 +32,7 @@ afterAll(() => new Promise<void>((r) => server.close(() => r())));
 beforeEach(() => { requests = 0; abortedOnServer = 0; });
 
 const settle = (p: Promise<unknown>) => p.then((r: any) => ({ ok: true, data: r.data }), (e: any) => ({ ok: false, code: e?.code }));
-const client = () => createHttpClient({ baseURL: base, retry: 0 });
+const client = () => createHttpClient({ baseURL: base, retry: false });
 /** Wait for `cond`, up to 2 s; fail naming it rather than return as if it held. */
 const until = async (cond: () => boolean) => {
   for (const end = Date.now() + 2000; !cond(); await new Promise((r) => setTimeout(r, 5))) {

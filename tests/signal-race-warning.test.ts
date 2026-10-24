@@ -27,7 +27,7 @@ describe('signal() pre-detection race warning', () => {
       expect(warn).not.toHaveBeenCalled(); // creation itself is silent
 
       // Reactive backing arrives late (what chamber.ts does after its async probe).
-      const fakeRef = <T>(v: T) => ({ value: v });
+      const fakeRef = (<T>(v: T) => ({ value: v })) as import('../src/signal').CreateSignal;
       configureSignal(fakeRef);
       expect(warn).toHaveBeenCalledOnce();
       expect(String(warn.mock.calls[0][0])).toContain('before a reactive backing');

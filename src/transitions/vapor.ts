@@ -11,6 +11,7 @@
  */
 
 import { createIf, defineVaporComponent, nextTick, onScopeDispose, shallowRef, watch } from 'vue';
+import { _report } from '../report';
 import type { PropType } from 'vue';
 import { delayOption } from '../bounds';
 import { resolveBus } from '../shared-bus';
@@ -149,8 +150,8 @@ export const VcTransition = defineVaporComponent({
       };
       const mine = (timer = setTimeout(() => {
         if (DEV) {
-          console.warn(
-            `[vapor-chamber] transition "${action}" did not settle within ${timeout}ms; ` +
+          _report('warn', 'transition:timeout:settle',
+            `transition "${action}" did not settle within ${timeout}ms; ` +
               'going on so the element is not stuck mid-transition. Raise `timeout` ' +
               'if the handler is legitimately slow.',
           );

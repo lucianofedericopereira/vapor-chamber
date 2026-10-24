@@ -89,6 +89,25 @@ split the same way.
 Forgetting one is a coded error, never a silent failure: `router:missing:http`
 for a `{ url }` table, `router:missing:fetchBlade` for a blade row.
 
+The router's `http` is the client for every request it makes. Its loaders get
+it as `LoaderContext.http`, and `fetchBlade` as its second argument.
+`fetchLoaders()` and `bladeFetcher()` read through it unless given their own
+`http`; `bladeFetcher()` marks it as router traffic. With none anywhere, each
+builds its own, as before. One client is one cache, so a write through it
+reaches a loader's cached read. `routerHttp({ http })` marks the app's own
+client instead of building a second one:
+
+```ts
+const http = createHttpClient({ csrf: true });           // the app's one client
+createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient: http }) });
+createRouter({
+  routes: { url: '/api/vc/routes' }, http: routerHttp({ http }),
+  loaders: fetchLoaders(), fetchBlade: bladeFetcher(),   // both on that client
+});
+```
+
+(tests/router/one-client.test.ts)
+
 Reads answer plain JSON, like a loader. The `{ url }` endpoint (and an inline
 element) holds the table itself, `{ routes, base? }`. A failure is a non-2xx
 `application/problem+json` (`router:failed:routes`, the client's error as its
@@ -122,7 +141,29 @@ same effects on the bus, emit them as facts ("Navigation as a command" below).
 ### Refreshing data after a mutation
 
 After a command changes server state, the data behind the current route is
-stale. `revalidateRoutes` closes that loop as a bus plugin. It adds no router
+stale. Two sources say which data: the server, or a map in the app.
+
+**The server's groups (RFC 9875).** A loader read's `Cache-Groups` names the
+groups its data belongs to, and a write's `Cache-Group-Invalidation` names the
+groups it changed. `fetchLoaders()` reports a read's groups
+(`LoaderContext.cacheGroups`), and the router listens to its client
+(`onInvalidateGroup`). A group refreshes the records on screen whose read named
+it, past the client's cache and the browser's (`cacheMode: 'no-cache'`), with
+`router.isRevalidating` true meanwhile. The router imports no bus: the write
+reaches it through the client, so give the transport the router's client.
+
+```ts
+const http = createHttpClient({ csrf: true });
+createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient: http }) });
+createRouter({ routes, http, loaders: fetchLoaders() });
+```
+
+A stale cached read refreshed with its `ETag` and answered 304 keeps its data
+object, and the router writes no snapshot for it, so nothing re-renders
+(tests/router/cache-groups.test.ts).
+
+**A map in the app.** Where the server declares no groups, `revalidateRoutes`
+closes the loop as a bus plugin. It adds no router
 capability: it composes `runLoaders`, `currentRoute` and `setRouteData`, all
 already public. It ships from the main `vapor-chamber/router` entry rather than
 a subpath of its own. It imports nothing the router core does not already
@@ -147,16 +188,20 @@ HTTP client and a second cache, silently diverging from the router's.
 
 The plugin's rules:
 
+- It listens to settled results, one bus listener per pattern, and holds no
+  `next`. An action two patterns match refreshes both targets.
 - Only successful commands refresh. A failed mutation refreshing as though it
-  had worked is the bug this avoids.
+  had worked is the bug this avoids. An `Accepted` answer (a 202) refreshes
+  when its `done` settles ok.
 - A superseded navigation drops its refresh.
 - A rejected refresh leaves the stale data on screen.
 - A record name that is not in the current load chain is a loud
   `router:missing:record`, not a silent no-op.
 
 **It flips its own `isRevalidating`, not the router's.** `router.isRevalidating`
-means "a LOADER handed the engine a refresh through `ctx.revalidate`". It has
-exactly one writer inside the engine. Two independent refresh sources get two
+means "a refresh runs behind data on screen": a loader's through
+`ctx.revalidate`, or a cache group's. It has exactly one writer inside the
+engine. Two independent refresh sources get two
 flags rather than one flag with two writers. OR them if you want a single
 spinner.
 
@@ -231,11 +276,16 @@ rejects. Without it, a stale-while-revalidate response refreshes your cache but
 never the page.
 
 **Read past your cache when `ctx.refresh` is true.** The fifth argument's other
-member says why the loader runs. It is `true` when `revalidateRoutes` refreshes
+member says why the loader runs. It is `true` when `revalidateRoutes` or a cache group refreshes
 the page after a command changed its data, and `false` on a navigation or a
 query refetch. A handler that caches must not answer a refresh from the cache,
-or the page gets the copy from before the change. `fetchLoaders` drops its URL
-from the client's cache first (`tests/router-fetch/revalidate-past-cache.test.ts`).
+or the page gets the copy from before the change. `fetchLoaders` reads with
+`cacheMode: 'no-cache'`, so the server is asked before the client's copy or the
+browser's is used (`tests/router-fetch/revalidate-past-cache.test.ts`).
+
+**Name your read's groups through `ctx.cacheGroups(groups)`.** A read whose
+response carries `Cache-Groups` (RFC 9875) hands over its group names, and a
+write naming one refreshes the record. `fetchLoaders` does it.
 
 `vapor-chamber/router-fetch` is a worked example of the **`url` handler**
 specifically. Read it for the signature, the abort behaviour and the
@@ -403,7 +453,7 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 
 ## Vapor interop
 
-Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->, the installed version the
+Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->, the installed version the
 fixtures run on, not inferred from the
 [Vapor roadmap](https://github.com/vuejs/core/issues/13687). Two fixtures, and
 the split matters:
@@ -436,7 +486,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it needs:
 
-- **Measured saving: <!-- vc:outletSaving -->23.05<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->73.8<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->17.97<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.0<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop.
   `tests/vapor/vapor-outlet-size.test.ts` re-derives it every test run from a
   Vite production build rather than quoting it. The same harness builds the
@@ -444,7 +494,7 @@ What it costs, and what it needs:
   limits. The saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB.
   The Vapor outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.49<!-- /vc:outletOwnArm --> KB). The
+  (measured <!-- vc:outletOwnArm -->4.14<!-- /vc:outletOwnArm --> KB). The
   subpath's own cost is <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention. With no interop
@@ -567,7 +617,7 @@ bus.dispatch('routeGo', '/orders/42');
 ```
 
 The payoff is uniformity, not capability. The navigation now appears in the
-devtools timeline, `onBefore` can cancel it alongside everything else, and
+devtools timeline, an `authorize` rule on `routeGo` can refuse it as it refuses any other command, and
 `history` treats it like any other command. Nothing in the router or the store
 depends on this. It is sugar, and skipping it costs nothing.
 

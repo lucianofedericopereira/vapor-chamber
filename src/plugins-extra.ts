@@ -3,7 +3,7 @@
  *
  * cache, circuitBreaker, rateLimit, metrics
  *
- * These are optional, tree-shaken, and use only the public Plugin/AsyncPlugin types.
+ * These are optional, tree-shaken, and declared as parts (PluginParts) the bus places.
  *
  * ON THE DUPLICATION IN HERE, so it is not "cleaned up" a second time.
  *
@@ -27,16 +27,13 @@
  * the one entry that ships this code.
  */
 
-import { DEV } from './dev';
-import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
-import type { ActionScope, Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
+import type { ActionScope, BaseBus, Command, CommandResult, Fail, PluginParts, WorkTicket } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { abortedResult, commandKey, _isBug, _errResult, _isLibraryAction } from './command-bus';
-import { _isCancel } from './failure';
+import { abortedResult, commandKey, _groupsAt, _isBug, _isSyncBus, _setHub, _errResult, _isLibraryAction, _keyed } from './command-bus';
+import { _failures, _isCancel } from './failure';
 import { freezeCached } from './freeze';
-import { createLanes } from './scheduler';
-import { _combineSignals } from './http';
+import { _combineSignals, _groupHub } from './http';
 
 
 // ---------------------------------------------------------------------------
@@ -66,9 +63,7 @@ export type CacheOptions = {
  * bus.query('getUser', { id: 42 }); // handler runs
  * bus.query('getUser', { id: 42 }); // cache hit, handler skipped
  */
-export function cache(options: CacheOptions = {}): Plugin & {
-  /** Manually invalidate a cache entry. */
-  invalidate(action: string, target?: any): void;
+export function cache(options: CacheOptions = {}): PluginParts & {
   /** Clear the entire cache. */
   clear(): void;
   /** Current cache size. */
@@ -93,18 +88,12 @@ export function cache(options: CacheOptions = {}): Plugin & {
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
   const store = new Map<string, { result: CommandResult; expiresAt: number; action: string }>();
 
-  // action -> the keys stored under it. Entries are keyed by `getKey`, which a
-  // custom `key` option can make ANY shape, so action-wide invalidation cannot
-  // recompute them from `action:target`; recording the mapping at insert time
-  // makes it work for any key shape.
-  const byAction = new Map<string, Set<string>>();
-
   // The reads in flight. An invalidation that lands while one runs marks its
   // ticket stale, and a stale read answers its own caller but is not stored:
   // its answer is from before the write the invalidation stands for. Held only
   // while a read runs, so the set is bounded by the reads in flight. The HTTP
   // client's cache closes the same window the same way (http-cache.ts, `read`).
-  const tickets = new Set<{ key: string; action: string; stale: boolean }>();
+  const tickets = new Set<{ key: string; stale: boolean; action: string }>();
   function markStale(match: (t: { key: string; action: string }) => boolean): void {
     for (const t of tickets) if (match(t)) t.stale = true;
   }
@@ -115,30 +104,6 @@ export function cache(options: CacheOptions = {}): Plugin & {
     return keyFn && !_isLibraryAction(cmd.action) ? keyFn(cmd) : commandKey(cmd.action, cmd.target);
   }
 
-  function remember(key: string, action: string): void {
-    let keys = byAction.get(action);
-    if (!keys) {
-      keys = new Set();
-      byAction.set(action, keys);
-    }
-    keys.add(key);
-  }
-
-  /** Single removal path - the index must never outlive the entry. */
-  function dropKey(key: string): void {
-    const entry = store.get(key);
-    if (entry === undefined) return;
-    store.delete(key);
-    // `!` not a guard: the index is written on every insert into `store` and
-    // this is the single removal path, so an entry in `store` always has its
-    // action in `byAction` - the docstring above is that invariant. A miss
-    // would mean the index outlived the entry, which is worth throwing over
-    // rather than silently leaking a stale key set.
-    const keys = byAction.get(entry.action)!;
-    keys.delete(key);
-    if (keys.size === 0) byAction.delete(entry.action);
-  }
-
   function evictIfNeeded(): void {
     // Walk insertion order and stop at the bound. Bounding the ITERATION
     // cannot spin, where `while (store.size > maxSize)` can: under a negative
@@ -146,83 +111,77 @@ export function cache(options: CacheOptions = {}): Plugin & {
     // (Deleting the current key mid-iteration is well-defined for a Map.)
     for (const key of store.keys()) {
       if (store.size <= maxSize) break;
-      dropKey(key); // oldest first
+      store.delete(key); // oldest first
     }
   }
 
-  const plugin: Plugin = (cmd, next) => {
+  function store_(k: string, r: CommandResult, action: string): void {
+    // Every later hit gets this exact object back - see freeze.ts.
+    store.set(k, { result: freezeCached(r), expiresAt: Date.now() + ttl, action });
+    evictIfNeeded();
+  }
 
-    const k = getKey(cmd);
-    const cached = store.get(k);
-    if (cached && cached.expiresAt > Date.now()) {
-      // Move to end for LRU
-      store.delete(k);
-      store.set(k, cached);
-      return cached.result;
-    }
+  // The key `reuse` computed, so `begin` on the same command builds none.
+  let lastCmd: Command | undefined;
+  let lastKey = '';
+  const keyOf = (cmd: Command): string => (cmd === lastCmd ? lastKey : getKey(cmd));
 
-    dropKey(k);
-    const ticket = { key: k, action: cmd.action, stale: false };
-    tickets.add(ticket);
-
-    function store_(r: CommandResult): void {
-      // Every later hit gets this exact object back - see freeze.ts.
-      store.set(k, { result: freezeCached(r), expiresAt: Date.now() + ttl, action: cmd.action });
-      remember(k, cmd.action);
-      evictIfNeeded();
-    }
-
-    // Through `onSettled`: settle the result, store it if it succeeded, hand
-    // it on - synchronously on the sync bus.
-    // next() does not throw: the runner turns a plugin's or a handler's throw
-    // into a result, so the ticket always leaves the set here.
-    return onSettled(next(), (result) => {
-      tickets.delete(ticket);
-      // A $ command (a reset, an undo) is a state change: never stored, so
-      // never answered from here (log s35.150). An overtaken read is not
-      // stored either (see `tickets`).
-      if (result.ok && !ticket.stale && !_isLibraryAction(cmd.action)) store_(result);
-      return result;
-    });
-  };
-
-  return Object.assign(plugin, {
+  // Two steps (PluginParts): `reuse` answers a fresh entry, so a hit never
+  // reaches a limit or the work; `begin` opens the read's ticket, and its
+  // `landed` stores a success.
+  return {
     id: 'cache',
     actions,
     actionFilter: options.actionFilter,
-    // An undone command's answer is stale: its redo runs (log s35.181).
-    forget(cmd: Command): void { const k = getKey(cmd); dropKey(k); markStale((t) => t.key === k); },
-    invalidate(action: string, target?: any): void {
-      if (target !== undefined) {
-        // Targeted invalidation needs the entry's exact key, and a custom
-        // `key` fn receives the whole Command - payload included - so there is
-        // nothing to recompute from (action, target) alone. Say so instead of
-        // deleting nothing quietly; action-wide invalidation below still works.
-        if (keyFn) {
-          if (DEV) {
-            console.warn(
-              `[vapor-chamber] cache().invalidate("${action}", target) cannot address entries stored ` +
-                'under a custom `key` function - the key may depend on the payload. ' +
-                `Use invalidate("${action}") to clear every entry for the action.`,
-            );
-          }
-          return;
-        }
-        const k = commandKey(action, target);
-        dropKey(k);
-        markStale((t) => t.key === k);
-        return;
-      }
-      markStale((t) => t.action === action);
-      // Invalidate all entries for this action - index-driven, so it holds for
-      // any key shape.
-      const keys = byAction.get(action);
-      if (!keys) return;
-      for (const k of [...keys]) dropKey(k);
+    // A group goes (RegisterOptions.cacheGroups, from any source): the results of
+    // its actions are dropped and their reads in flight not stored. The bus's
+    // hub, or this reader's own on a bus with none. tests/cache-groups-hub.test.ts.
+    attach(bus: BaseBus): () => void {
+      const g = _groupsAt(bus);
+      const hub = g.hub ?? _setHub(g, _groupHub());
+      return hub.onInvalidateGroup((group) => {
+        const joins = (t: { action: string }): boolean => g.members.get(t.action)?.includes(group) === true;
+        for (const [k, entry] of store) if (joins(entry)) store.delete(k);
+        markStale(joins);
+      });
     },
-    clear(): void { store.clear(); byAction.clear(); markStale(() => true); },
+    reuse(cmd: Command): CommandResult | undefined {
+      const k = getKey(cmd);
+      const cached = store.get(k);
+      if (cached && cached.expiresAt > Date.now()) {
+        lastCmd = undefined;
+        // Move to end for LRU
+        store.delete(k);
+        store.set(k, cached);
+        return cached.result;
+      }
+      lastCmd = cmd;
+      lastKey = k;
+      return undefined;
+    },
+    begin(cmd: Command): WorkTicket {
+      const k = keyOf(cmd);
+      lastCmd = undefined;
+      store.delete(k);
+      const action = cmd.action;
+      const ticket = {
+        key: k, stale: false, action,
+        landed(result: CommandResult): void {
+          tickets.delete(ticket);
+          // A $ command (a reset, an undo) is a state change: never stored, so
+          // never answered from here (log s35.150). An overtaken read is not
+          // stored either (see `tickets`).
+          if (result.ok && !ticket.stale && !_isLibraryAction(action)) store_(k, result, action);
+        },
+      };
+      tickets.add(ticket);
+      return ticket;
+    },
+    // An undone command's answer is stale: its redo runs (log s35.181).
+    forget(cmd: Command): void { const k = getKey(cmd); store.delete(k); markStale((t) => t.key === k); },
+    clear(): void { store.clear(); markStale(() => true); },
     size(): number { return store.size; },
-  });
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +211,7 @@ type CircuitState = 'closed' | 'open' | 'half-open';
  * @example
  * bus.use(circuitBreaker({ threshold: 3, resetTimeout: 10_000, actions: ['api*'] }));
  */
-export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
+export function circuitBreaker(options: CircuitBreakerOptions = {}): PluginParts & {
   /** Get the current circuit state for an action. */
   getState(action: string): CircuitState;
   /** Manually reset a circuit. */
@@ -278,22 +237,8 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     return c;
   }
 
-  const plugin: Plugin = (cmd, next, fail) => {
-
-    const c = getCircuit(cmd.action);
-
-    if (c.state === 'open') {
-      // Past resetTimeout -> half-open; before it, the refusal declares the
-      // time left (`retryIn`), which the async bus's retry and the outbox wait for.
-      const retryIn = resetTimeout - (Date.now() - c.openedAt);
-      if (retryIn <= 0) {
-        c.state = 'half-open';
-      } else {
-        return _errResult(fail('limited:action', `Circuit breaker is open for "${cmd.action}". Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, resetTimeout, failCount: c.failCount } }));
-      }
-    }
-
-    return onSettled(next(), (result) => {
+  // The work's outcome, counted: a success closes, a real failure counts.
+  function counted(cmd: Command, c: { state: CircuitState; failCount: number; openedAt: number }, result: CommandResult): void {
     if (result.ok) {
       if (c.state === 'half-open') {
         c.state = 'closed';
@@ -322,22 +267,37 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
         if (onOpen) onOpen(cmd.action, c.failCount);
       }
     }
+  }
 
-    return result;
-  });
-  };
-
-  return Object.assign(plugin, {
+  // Two steps (PluginParts): `admit` refuses while open, so a refusal from a
+  // limit or a rule is never counted; the ticket counts the work's outcome.
+  return {
     id: 'circuitBreaker',
     actions,
     actionFilter: options.actionFilter,
+    admit(cmd: Command, fail): CommandResult | undefined {
+      const c = getCircuit(cmd.action);
+      if (c.state !== 'open') return undefined;
+      // Past resetTimeout -> half-open; before it, the refusal declares the
+      // time left (`retryIn`), which the async bus's retry and the outbox wait for.
+      const retryIn = resetTimeout - (Date.now() - c.openedAt);
+      if (retryIn <= 0) {
+        c.state = 'half-open';
+        return undefined;
+      }
+      return _errResult(fail('limited:action', `Circuit breaker is open for "${cmd.action}". Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, resetTimeout, failCount: c.failCount } }));
+    },
+    begin(cmd: Command): WorkTicket {
+      const c = getCircuit(cmd.action);
+      return { landed: (result) => counted(cmd, c, result) };
+    },
     getState(action: string): CircuitState {
       return getCircuit(action).state;
     },
     reset(action: string): void {
       circuits.delete(action);
     },
-  });
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -357,14 +317,14 @@ export type RateLimitOptions = {
 
 /**
  * rateLimit - per-action sliding window rate limiter.
- * Unlike throttle (one run per `wait` per action+target, the rest rejected
- * until it ends), rateLimit allows `max` per sliding window per action and
+ * Unlike a throttle (`pace`: one run per `wait` per action+target, the rest
+ * rejected until it ends), rateLimit allows `max` per sliding window per action and
  * rejects the excess immediately.
  *
  * @example
  * bus.use(rateLimit({ max: 5, window: 1000, actions: ['api*'] }));
  */
-export function rateLimit(options: RateLimitOptions = {}): Plugin {
+export function rateLimit(options: RateLimitOptions = {}): PluginParts {
   const { actions } = options;
   // A NaN behaves like a missing option (bounds.ts); 0 keeps its meaning.
   const max = countOption(options.max, 10);
@@ -372,12 +332,19 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
 
   // Per-action sliding window: { timestamps[], head } - head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
+  const windowOf = (action: string): { ts: number[]; head: number } => {
+    let win = windows.get(action);
+    if (!win) { win = { ts: [], head: 0 }; windows.set(action, win); }
+    return win;
+  };
 
-  const plugin: Plugin = (cmd, next, fail) => {
+  // Two steps (PluginParts): `admit` refuses a full window, a check that
+  // takes nothing, and `begin` takes the slot, so a command another step or
+  // rule refused never spends one (tests/work-steps.test.ts).
+  const admit = (cmd: Command, fail: Fail): CommandResult | undefined => {
 
     const now = Date.now();
-    let win = windows.get(cmd.action);
-    if (!win) { win = { ts: [], head: 0 }; windows.set(cmd.action, win); }
+    const win = windowOf(cmd.action);
 
     // Advance head past expired timestamps - O(1) amortized
     const cutoff = now - windowMs;
@@ -401,11 +368,15 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
       const retryIn = win.ts[win.head] + windowMs - now;
       return _errResult(fail('limited:action', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms. Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, max, windowMs, currentCount: activeCount } }));
     }
-
-    win.ts.push(now);
-    return next();
+    return undefined;
   };
-  return Object.assign(plugin, { id: 'rateLimit', actions, actionFilter: options.actionFilter });
+  return {
+    id: 'rateLimit',
+    actions,
+    actionFilter: options.actionFilter,
+    admit,
+    begin(cmd: Command): undefined { windowOf(cmd.action).ts.push(Date.now()); return undefined; },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +404,10 @@ export type MetricsOptions = {
 /**
  * metrics - lightweight telemetry plugin.
  * Tracks dispatch count, success rate, and avg duration per action.
+ * A `started` and a `settled` part (PluginParts): it times every outcome,
+ * a rule's refusal and a query included, wherever it is installed. A
+ * command that settles with no start (aborted before it started) records
+ * 0 ms. tests/metrics-parts.test.ts.
  *
  * @example
  * const m = metrics({ maxSize: 500 });
@@ -440,7 +415,7 @@ export type MetricsOptions = {
  * console.log(m.summary());        // { cartAdd: { count: 42, avgMs: 1.2, errorRate: 0.02 } }
  * console.log(m.entries());         // raw entries
  */
-export function metrics(options: MetricsOptions = {}): Plugin & {
+export function metrics(options: MetricsOptions = {}): PluginParts & {
   /** Get all raw metric entries. */
   entries(): MetricsEntry[];
   /** Get a summary per action: count, avgMs, errorRate. */
@@ -462,33 +437,40 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     }
   }
 
-  const plugin: Plugin = (cmd, next) => {
+  // The latest command's start in two fields, and the starts it covered in a
+  // Map: a command that settles before the next one starts (every
+  // unnested dispatch) never touches the Map. Set, get and delete keyed by a
+  // fresh command cost a dispatch about 70 ns (log 36.105).
+  let lastCmd: Command | undefined;
+  let lastStart = 0;
+  let starts: Map<Command, number> | null = null;
 
-    const start = performance.now();
-    return onSettled(next(), (result) => {
-    const duration = performance.now() - start;
-
-    const entry: MetricsEntry = {
-      action: cmd.action,
-      ok: result.ok,
-      durationMs: Math.round(duration * 100) / 100,
-      timestamp: Date.now(),
-    };
-
-    data.push(entry);
-    // Evict oldest by advancing head - O(1)
-    while ((data.length - head) > maxSize) head++;
-    compactIfNeeded();
-    if (onEntry) onEntry(entry);
-
-    return result;
-  });
-  };
-
-  return Object.assign(plugin, {
+  return {
     id: 'metrics',
     actions,
     actionFilter: options.actionFilter,
+    started(cmd: Command): void {
+      if (lastCmd !== undefined) (starts ??= new Map()).set(lastCmd, lastStart);
+      lastCmd = cmd;
+      lastStart = performance.now();
+    },
+    settled(cmd: Command, result: CommandResult): void {
+      let start: number | undefined;
+      if (cmd === lastCmd) { start = lastStart; lastCmd = undefined; }
+      else if (starts !== null) { start = starts.get(cmd); if (start !== undefined) starts.delete(cmd); }
+      const duration = start === undefined ? 0 : performance.now() - start;
+      const entry: MetricsEntry = {
+        action: cmd.action,
+        ok: result.ok,
+        durationMs: Math.round(duration * 100) / 100,
+        timestamp: Date.now(),
+      };
+      data.push(entry);
+      // Evict oldest by advancing head - O(1)
+      while ((data.length - head) > maxSize) head++;
+      compactIfNeeded();
+      if (onEntry) onEntry(entry);
+    },
     entries(): MetricsEntry[] { return data.slice(head); },
     summary(): Record<string, { count: number; avgMs: number; errorRate: number }> {
       const map = new Map<string, { total: number; errors: number; sumMs: number }>();
@@ -511,111 +493,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
       return out;
     },
     clear(): void { data = []; head = 0; },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// serialize - per-key sequential processing for async commands
-// ---------------------------------------------------------------------------
-
-export type SerializeOptions = {
-  /**
-   * Derive the serialization key from a command. Commands resolving to the SAME
-   * key run strictly one-at-a-time (FIFO); different keys run concurrently.
-   * Return `null`/`undefined` to skip serialization for that command.
-   * Default: `cmd.action` (each action serialized against itself).
-   */
-  key?: (cmd: Command) => string | number | null | undefined;
-  /** Restrict to specific actions (glob patterns). An {@link ActionScope}. */
-  actions?: ActionScope;
-  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
-  actionFilter?: ActionFilter;
-  /**
-   * Where the serialization lane lives.
-   * - `'instance'` (default): a per-bus in-memory FIFO queue. Same-key commands
-   *   serialize within THIS bus instance only.
-   * - `'cross-tab'`: use the Web Locks API (`navigator.locks`) so same-key
-   *   commands serialize across every tab / window of the same origin - true
-   *   browser-arbitrated mutual exclusion, no custom transport. Automatically
-   *   falls back to the `'instance'` queue when `navigator.locks` is unavailable
-   *   (SSR, older browsers, or workers without the API).
-   */
-  scope?: 'instance' | 'cross-tab';
-  /** Web Locks name prefix used in `'cross-tab'` mode. Default: `'vapor-chamber:serialize'`. */
-  lockPrefix?: string;
-};
-
-/**
- * serialize - guarantee that async commands sharing a key never overlap.
- *
- * **Async bus only.** Sync handlers run to completion synchronously and cannot
- * interleave, so serialization is meaningless there (and would turn a sync
- * dispatch into a Promise). Register on `createAsyncCommandBus`.
- *
- * Prevents read-modify-write races on a shared resource: two `accountWithdraw`
- * for the same account, rapid `cartCheckout` clicks, or any handler where a
- * second dispatch must observe the first one's committed effect. This is
- * distinct from in-flight request dedup (which collapses *identical* requests) -
- * serialize queues *distinct* same-key commands so they apply in order.
- *
- * Failure-safe: a rejected/failed command does NOT stall its lane - the next
- * same-key command proceeds regardless of the previous outcome. Per-key entries
- * are reclaimed once a lane drains, so the map never grows unbounded.
- *
- * `scope: 'cross-tab'` extends serialization across tabs via the Web Locks API:
- * `navigator.locks.request` queues same-name requests FIFO across all same-origin
- * contexts and releases the lock when the handler settles (even on throw), so the
- * failure-safety guarantee holds across tabs too. Degrades to per-instance when
- * the API is absent.
- *
- * @example
- * const bus = createAsyncCommandBus();
- * bus.use(serialize({ key: (cmd) => cmd.target.accountId, actions: ['account*'] }));
- * // withdrawals for the same account now run strictly in order;
- * // different accounts still run concurrently
- *
- * @example
- * // serialize across every tab of the same origin:
- * bus.use(serialize({ scope: 'cross-tab', key: (cmd) => cmd.target.accountId }));
- *
- * A lane has no re-entry: a command that waits for another in its own lane
- * queues it behind itself and waits for ever. So a store's lane holds only
- * the commands that reach the server, and keys the local reducers a read
- * writes through to `null` (docs/store.md, tests/store-serialize-order.test.ts).
- *
- * A command waiting in a lane already reads as loading: `isLoading()` counts
- * it from its dispatch, before this plugin holds it, so a spinner bound to it
- * lights through the wait (tests/store-serialize-order.test.ts).
- *
- * @example
- * // one lane per store, its server commands only, installed before the bridge:
- * const toServer = new Set(['cartLoad', 'cartAdd', 'cartClear']);
- * bus.use(serialize({ key: (cmd) => (toServer.has(cmd.action) ? 'cart' : null) }));
- */
-export function serialize(options: SerializeOptions = {}): AsyncPlugin {
-  const { key, actions, scope = 'instance', lockPrefix = 'vapor-chamber:serialize' } = options;
-  const crossTab = scope === 'cross-tab';
-  // The in-memory lanes (default mode AND the cross-tab fallback): the shared
-  // scheduler's, so serialize, retry and the outbox order runs one way.
-  const lanes = createLanes();
-
-  const plugin: AsyncPlugin = (cmd, next) => {
-    const raw = key ? key(cmd) : cmd.action;
-    if (raw == null) return next();
-    const k = String(raw);
-
-    if (crossTab) {
-      // Web Locks queues same-name requests FIFO across all tabs and releases on
-      // settle (incl. throw). Read lazily so detection isn't bound to plugin
-      // construction order. Falls back to the in-memory lane when unavailable.
-      const locks = (globalThis as any).navigator?.locks;
-      if (locks && typeof locks.request === 'function') {
-        return locks.request(`${lockPrefix}:${k}`, () => next());
-      }
-    }
-    return lanes.run(k, next);
   };
-  return Object.assign(plugin, { id: 'serialize', actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -626,9 +504,13 @@ export type IdempotentOptions = {
   /**
    * Derive a stable idempotency key from a command. Commands with the same key
    * are the same logical operation. Return `null`/`undefined` to skip a command.
-   * Default: `commandKey(action, [target, payload])`, or `commandKey(action,
-   * target)` with no payload, since a key names one request payload
-   * (Idempotency-Key draft-07). tests/idempotency-key-payload.test.ts.
+   * Given, it is also the wire key, sent as given. Default:
+   * `commandKey(action, [target, payload])`, or `commandKey(action, target)`
+   * with no payload, kept local: the wire key is then the dispatch's
+   * `meta.id`. A key of unreserved characters (letters, digits, `-`, `_`,
+   * `.`, `~`) goes out as it is. Any other key is percent-encoded on every
+   * send: about 110 ns a command on an Apple M3, Node 24.21.0 (log 36.48).
+   * tests/idempotency-key.test.ts.
    */
   key?: (cmd: Command) => string | null | undefined;
   /**
@@ -642,8 +524,10 @@ export type IdempotentOptions = {
   /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
   actionFilter?: ActionFilter;
   /**
-   * Also stamp the key onto `cmd.meta.idempotencyKey` so transports forward it
-   * (the HTTP bridge sends it as an `Idempotency-Key` header). Default: true.
+   * Also stamp a wire key onto `cmd.meta.idempotencyKey` so transports forward
+   * it (the HTTP transport sends it as an `Idempotency-Key` header): the `key`
+   * option's value, else the dispatch's `meta.id`. A key already stamped (an
+   * outbox replay's) stays. Default: true.
    */
   stampMeta?: boolean;
   /**
@@ -663,19 +547,19 @@ export type IdempotentOptions = {
  * duplicates within `ttl` get the cached result. Failures are NOT cached, so a
  * genuine retry after an error still runs.
  *
- * Pairs with `serialize` (orders same-key commands locally) and with the HTTP
- * bridge, which forwards the stamped `cmd.meta.idempotencyKey` as an
- * `Idempotency-Key` header so the backend can reject the duplicate write too -
- * the wire half of exactly-once. Register `idempotent` at a HIGHER priority than
- * the transport so the key is stamped before the request is built.
+ * Pairs with `register({ exclusive })` (orders same-key commands locally) and the HTTP
+ * transport, which forwards the stamped `cmd.meta.idempotencyKey` as an
+ * `Idempotency-Key` header so the backend runs a re-sent request once - the
+ * wire half of exactly-once. That key is the dispatch's id, or the `key`
+ * option's value: the content key stays in the browser. The transport is the
+ * work, inside every plugin, so the key is stamped before the request is built.
  *
  * @example
- * const bus = createAsyncCommandBus();
- * bus.use(idempotent({ actions: ['order*'] }), { priority: 100 }); // outermost
- * bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
+ * const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/commands', csrf: true }) });
+ * bus.use(idempotent({ actions: ['order*'] }));
  * // two rapid orderCreate dispatches -> one handler run, one backend write
  */
-export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
+export function idempotent(options: IdempotentOptions = {}): PluginParts {
   const { key, ttl: rawTtl = 60_000, actions, stampMeta = true, maxSize: rawMaxSize = 500 } = options;
   // `now - cached.at < ttl` gates COLLAPSING a repeat, so a NaN window collapses
   // nothing and every duplicate re-executes - the dedupe guarantee silently
@@ -717,88 +601,99 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     });
   }
 
-  // A key names one request payload (Idempotency-Key draft-07: never reused
-  // "with a different request payload"); with none, the released key. A `$`
-  // command takes the default key, as in cache() (log s35.182).
+  // The local key: two commands with the same content are one logical
+  // command, so the payload is in it. A `$` command takes the default key, as
+  // in cache() (log s35.182).
   function getKey(cmd: Command): string | null | undefined {
     return key && !_isLibraryAction(cmd.action) ? key(cmd) : commandKey(cmd.action, cmd.payload === undefined ? cmd.target : [cmd.target, cmd.payload]);
   }
 
-  const plugin: AsyncPlugin = (cmd, next) => {
-    const raw = getKey(cmd);
-    if (raw == null) return next();
-    const k = String(raw);
+  // The key `reuse` computed (null to skip the command), so `begin` on the
+  // same command builds none.
+  let lastCmd: Command | undefined;
+  let lastKey: string | null = null;
 
-    if (stampMeta && cmd.meta) cmd.meta.idempotencyKey = k;
-
-    const pending = inflight.get(k);
-    if (pending) return hold(pending, cmd); // collapse concurrent duplicates
-
-    const cached = done.get(k);
-    const now = Date.now();
-    if (cached) {
-      if (now - cached.at < ttl) return cached.result; // collapse repeats within TTL
-      done.delete(k); // expired - drop so the map doesn't retain stale results
+  /** A success remembered for `ttl`, oldest evicted first. */
+  function remember(k: string, result: CommandResult): void {
+    // Frozen for the same reason the `cache()` plugin freezes: every later
+    // duplicate within `ttl` gets this exact object back, and the concurrent
+    // duplicates sharing `run` already share it. A consumer that sorts the
+    // list it was handed, or deletes a row optimistically, rewrites what every
+    // later dispatch reads. This site was the one the freeze contract did not
+    // cover, so it corrupted silently where the other two throw at the
+    // mutation.
+    done.set(k, { at: Date.now(), result: freezeCached(result) });
+    // Oldest first, down to the bound - `cache()`'s evictIfNeeded rule.
+    // Bounding the ITERATION rather than looping on the size is what makes a
+    // zero or negative bound terminate instead of spinning.
+    for (const oldest of done.keys()) {
+      if (done.size <= maxSize) break;
+      done.delete(oldest);
     }
+  }
 
-    // A $ command (a reset, an undo) is a state change: never recorded, never
-    // joined in flight, so a repeat runs (log s35.150, s35.182). Read once
-    // here, on the miss path.
-    const keep = !_isLibraryAction(cmd.action);
-    // The run gets a signal of its own, aborted only once every holder has
-    // aborted (see `hold`), so one caller cancelling never cancels another's.
-    // Only a caller with a signal needs one: a run started without a signal
-    // is held until it lands and never aborted, so it allocates none.
-    const own = cmd.signal;
-    const ctrl = keep && own ? new AbortController() : null;
-    if (ctrl !== null) cmd.signal = ctrl.signal;
-    const run = Promise.resolve(next()).then(
-      (result) => {
-        inflight.delete(k);
-        // Cache only successes. A failed result (resolved errResult, ok:false)
-        // is NOT cached so a genuine retry runs again.
-        if (result?.ok && keep) {
-          // Frozen for the same reason the `cache()` plugin freezes: every
-          // later duplicate within `ttl` gets this exact object back, and the
-          // concurrent duplicates sharing `run` already share it. A consumer
-          // that sorts the list it was handed, or deletes a row optimistically,
-          // rewrites what every later dispatch reads. This site was the one the
-          // freeze contract did not cover, so it corrupted silently where the
-          // other two throw at the mutation.
-          done.set(k, { at: Date.now(), result: freezeCached(result) });
-          // Oldest first, down to the bound - `cache()`'s evictIfNeeded rule.
-          // Bounding the ITERATION rather than looping on the size is what
-          // makes a zero or negative bound terminate instead of spinning.
-          for (const oldest of done.keys()) {
-            if (done.size <= maxSize) break;
-            done.delete(oldest);
-          }
-        }
-        return result;
-      },
-      (err) => {
-        inflight.delete(k); // thrown/rejected - also not cached
-        throw err;
-      },
-    );
-    if (!keep || !own) {
-      if (keep) inflight.set(k, { run, ctrl, live: 0, held: true });
-      return run;
-    }
-    const share: Share = { run, ctrl, live: 0, held: false };
-    inflight.set(k, share);
-    return hold(share, { ...cmd, signal: own });
-  };
-  return Object.assign(plugin, {
+  // Two steps (PluginParts): `reuse` answers a duplicate (the run in flight,
+  // joined, or a remembered success), so a repeat never reaches a limit or
+  // the work; `begin` opens the run every later duplicate joins.
+  return {
     id: 'idempotent',
     actions,
     actionFilter: options.actionFilter,
+    reuse(cmd: Command): CommandResult | Promise<CommandResult> | undefined {
+      const raw = getKey(cmd);
+      lastCmd = cmd;
+      lastKey = raw == null ? null : String(raw);
+      const k = lastKey;
+      if (k === null) return undefined;
+      // The wire key: an app's own key as given, else the dispatch's id. The
+      // content key stays local (tests/idempotency-key.test.ts).
+      if (stampMeta) _keyed(cmd.meta, key && !_isLibraryAction(cmd.action) ? k : undefined);
+      const pending = inflight.get(k);
+      if (pending) return hold(pending, cmd); // collapse concurrent duplicates
+      const cached = done.get(k);
+      if (cached) {
+        if (Date.now() - cached.at < ttl) return cached.result; // collapse repeats within TTL
+        done.delete(k); // expired - drop so the map doesn't retain stale results
+      }
+      return undefined;
+    },
+    begin(cmd: Command): WorkTicket | undefined {
+      let k: string | null;
+      if (cmd === lastCmd) k = lastKey;
+      else { const raw = getKey(cmd); k = raw == null ? null : String(raw); }
+      lastCmd = undefined;
+      // A $ command (a reset, an undo) is a state change: never recorded,
+      // never joined in flight, so a repeat runs (log s35.150, s35.182).
+      if (k === null || _isLibraryAction(cmd.action)) return undefined;
+      const key_ = k;
+      // The run gets a signal of its own, aborted only once every holder has
+      // aborted (see `hold`), so one caller cancelling never cancels another's.
+      // Only a caller with a signal needs one: a run started without a signal
+      // is held until it lands and never aborted, so it allocates none.
+      const own = cmd.signal;
+      const ctrl = own ? new AbortController() : null;
+      let resolve!: (r: CommandResult) => void;
+      const share: Share = { run: new Promise<CommandResult>((r) => { resolve = r; }), ctrl, live: 0, held: !own };
+      inflight.set(key_, share);
+      return {
+        signal: ctrl?.signal,
+        landed(result: CommandResult): void {
+          inflight.delete(key_);
+          // Cache only successes: a failed result is NOT remembered, so a
+          // genuine retry runs again.
+          if (result.ok) remember(key_, result);
+          resolve(result);
+        },
+        // This caller's own view of the run: its abort settles it at once.
+        answer: own ? hold(share, cmd) : undefined,
+      };
+    },
     // An undone command is no longer done: its redo runs (log s35.181).
     forget(cmd: Command): void {
       const raw = getKey(cmd);
       if (raw != null) done.delete(String(raw));
     },
-  });
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -837,52 +732,61 @@ export type SupersedeOptions = {
  * previous fetch lands. Without it, a slow first response can arrive AFTER a
  * faster second one and clobber it with stale data. With it, the first
  * dispatch's AbortSignal fires the instant a second dispatch for the same key
- * starts - `createHttpBridge` forwards `cmd.signal` to `fetch()`, so the
+ * starts - `httpTransport` forwards `cmd.signal` to `fetch()`, so the
  * stale request is genuinely cancelled, not merely ignored once it resolves.
- * `createBatchingHttpBridge` settles the stale command at once, drops it
+ * With `batch`, it settles the stale command at once, drops it
  * from a batch not yet sent, and cancels a sent batch once every command in
  * it has aborted (tests/batching-abort.test.ts). A handler that passes `cmd.signal` to
  * `createHttpClient().get()` is cancelled the same way, even when its GET
  * joined one already in flight (see the client's `dedupe`).
  *
- * **Async bus only** - mutates `cmd.signal` before the rest of the pipeline
- * runs, which is only meaningful for cancelable async dispatches.
+ * **Async bus only**: its `begin` step hands the bus the signal the work
+ * runs under, which only a cancelable async dispatch carries.
  *
  * @example
- * const bus = createAsyncCommandBus();
+ * const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }) });
  * bus.use(supersede({ actions: ['productSearch'] }));
- * bus.use(createHttpBridge({ endpoint: '/api/vc' }));
  * // three quick productSearch dispatches -> only the last one's response is
  * // ever awaited; the first two are aborted mid-flight, not just discarded
  */
-export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
+export function supersede(options: SupersedeOptions = {}): PluginParts {
   const { key, actions } = options;
   const controllers = new Map<string, AbortController>();
 
-  const plugin: AsyncPlugin = (cmd, next) => {
-    const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
-    if (raw == null) return next();
-    const k = String(raw);
+  // A `begin` step (PluginParts): it runs after every limit admitted the
+  // command, so a refused command never aborts the one in flight.
+  return {
+    id: 'supersede',
+    actions,
+    actionFilter: options.actionFilter,
+    // A sync command lands before the next starts, so nothing is ever in
+    // flight to supersede there: refused, never a silent no-op (tests/supersede.test.ts).
+    attach(bus: BaseBus): void {
+      if (_isSyncBus(bus)) throw _failures('supersede')('invalid:bus', 'supersede() needs an async bus: on a sync bus no command is in flight when the next starts.');
+    },
+    begin(cmd: Command): WorkTicket | undefined {
+      const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
+      if (raw == null) return undefined;
+      const k = String(raw);
 
-    // Cancel this key's previous in-flight dispatch, if any.
-    controllers.get(k)?.abort();
+      // Cancel this key's previous in-flight dispatch, if any.
+      controllers.get(k)?.abort();
 
-    const ctrl = new AbortController();
-    controllers.set(k, ctrl);
+      const ctrl = new AbortController();
+      controllers.set(k, ctrl);
 
-    // With a caller's own signal, either one aborts the dispatch: one helper,
-    // as the bridges combine. Detached when the dispatch settles.
-    const combined = cmd.signal ? _combineSignals(cmd.signal, ctrl.signal) : undefined;
-    cmd.signal = combined?.signal ?? ctrl.signal;
-
-    const result = Promise.resolve(next());
-    result.finally(() => {
-      combined?.detach();
-      // Only clear the map entry if we're still the current controller for
-      // this key - a newer dispatch may already have replaced us.
-      if (controllers.get(k) === ctrl) controllers.delete(k);
-    });
-    return result;
+      // With a caller's own signal, either one aborts the dispatch: one helper,
+      // as the transports combine. Detached when the dispatch settles.
+      const combined = cmd.signal ? _combineSignals(cmd.signal, ctrl.signal) : undefined;
+      return {
+        signal: combined?.signal ?? ctrl.signal,
+        landed(): void {
+          combined?.detach();
+          // Only clear the map entry if we're still the current controller for
+          // this key - a newer dispatch may already have replaced us.
+          if (controllers.get(k) === ctrl) controllers.delete(k);
+        },
+      };
+    },
   };
-  return Object.assign(plugin, { id: 'supersede', actions, actionFilter: options.actionFilter });
 }

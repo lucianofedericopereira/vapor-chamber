@@ -15,8 +15,8 @@
 import { expect } from 'vitest';
 import { setCommandBus, useCommandHistory } from '../src/chamber';
 import type { CommandResult } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { it } from '../src/vitest';
+import { history } from '../src/plugins-core';
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const refused: CommandResult = { ok: false, value: undefined, error: new Error('refused by the server') };
@@ -117,7 +117,6 @@ it('a second press while an undo is pending does nothing', async ({ asyncBus: bu
 // the stacks first and back if the call is refused (settled.ts, moveUnlessRefused).
 it('history() plugin: an undo the server refuses leaves its state as it was', async ({ asyncBus: bus }) => {
   const h = history({ bus });
-  bus.use(h);
   bus.register('rename', async () => 'renamed', { undo: async () => refused });
   await bus.dispatch('rename', { id: 1 }, { to: 'B' });
 
@@ -128,7 +127,6 @@ it('history() plugin: an undo the server refuses leaves its state as it was', as
 
 it('history() plugin: a redo the server refuses stays redoable', async ({ asyncBus: bus }) => {
   const h = history({ bus });
-  bus.use(h);
   let refuseRedo = false;
   bus.register('rename', async () => {
     if (refuseRedo) throw new Error('conflict');

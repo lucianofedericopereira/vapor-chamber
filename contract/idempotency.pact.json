@@ -1,0 +1,286 @@
+{
+  "consumer": {
+    "name": "vapor-chamber"
+  },
+  "provider": {
+    "name": "vapor-chamber-backend"
+  },
+  "interactions": [
+    {
+      "type": "Synchronous/HTTP",
+      "description": "idem-1",
+      "providerStates": [
+        {
+          "name": "key answered",
+          "params": {
+            "command": "vcContractFail",
+            "key": "k1",
+            "target": {},
+            "payload": {
+              "status": 500,
+              "code": "boom"
+            },
+            "answer": {
+              "n": 1
+            }
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ],
+          "Idempotency-Key": [
+            "\"k1\""
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 500,
+              "code": "boom"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "state": {
+              "n": 1
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "idem-2",
+      "providerStates": [
+        {
+          "name": "key in progress",
+          "params": {
+            "command": "vcContractFail",
+            "key": "k2"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ],
+          "Idempotency-Key": [
+            "\"k2\""
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractFail",
+            "target": {},
+            "payload": {
+              "status": 500,
+              "code": "boom"
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Retry-After": [
+            "1"
+          ]
+        },
+        "body": {
+          "content": {
+            "status": 409,
+            "code": "in_progress",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "idem-3",
+      "providerStates": [
+        {
+          "name": "key answered",
+          "params": {
+            "command": "vcContractEcho",
+            "key": "k3",
+            "target": {},
+            "payload": {
+              "n": 1
+            },
+            "answer": {
+              "n": 1
+            }
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ],
+          "Idempotency-Key": [
+            "\"k3\""
+          ]
+        },
+        "body": {
+          "content": {
+            "command": "vcContractEcho",
+            "target": {},
+            "payload": {
+              "n": 2
+            }
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "content": {
+            "status": 422,
+            "code": "key_reused",
+            "detail": "Any text."
+          },
+          "contentType": "application/json",
+          "encoded": false
+        },
+        "matchingRules": {
+          "body": {
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Synchronous/HTTP",
+      "description": "idem-5",
+      "providerStates": [
+        {
+          "name": "key answered",
+          "params": {
+            "command": "vcContractFail",
+            "key": "k5",
+            "target": {},
+            "payload": {
+              "status": 500,
+              "code": "boom"
+            },
+            "answer": {
+              "n": 1
+            }
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/vc/batch",
+        "headers": {
+          "Content-Type": [
+            "application/json"
+          ],
+          "Accept": [
+            "application/json, application/problem+json"
+          ]
+        },
+        "body": {
+          "content": {
+            "commands": [
+              {
+                "id": "1",
+                "command": "vcContractFail",
+                "target": {},
+                "payload": {
+                  "status": 500,
+                  "code": "boom"
+                },
+                "headers": {
+                  "Idempotency-Key": "\"k5\""
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": {
+            "results": [
+              {
+                "id": "1",
+                "status": 200,
+                "headers": {},
+                "state": {
+                  "n": 1
+                }
+              }
+            ]
+          },
+          "contentType": "application/json",
+          "encoded": false
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  }
+}

@@ -37,6 +37,40 @@ it('a successful dispatch under the default retry builds no Error', async ({ asy
   expect(bus).toHaveBeenDispatchedTimes('save', 1);
 });
 
+/** Microtask turns between the call and its promise settling. */
+async function turns(p: Promise<unknown>): Promise<number> {
+  let done = false;
+  p.then(() => { done = true; });
+  let n = 0;
+  while (!done && n < 1_000) {
+    await null;
+    n++;
+  }
+  return n;
+}
+
+it('a success under the default retry settles in the turns of a bus with retry off', async () => {
+  const off = createAsyncCommandBus({ retry: false });
+  const on = createAsyncCommandBus();
+  for (const b of [off, on]) {
+    b.register('save', (cmd) => cmd.target);
+    b.register('load', async (cmd) => cmd.target);
+  }
+  expect(await turns(on.dispatch('save', 1))).toBe(await turns(off.dispatch('save', 1)));
+  expect(await turns(on.dispatch('load', 1))).toBe(await turns(off.dispatch('load', 1)));
+  expect(await turns(on.query('save', 1))).toBe(await turns(off.query('save', 1)));
+});
+
+it('control: the counter sees one more await in the handler', async () => {
+  const bus = createAsyncCommandBus();
+  bus.register('load', async (cmd) => cmd.target);
+  bus.register('slow', async (cmd) => { await null; return cmd.target; });
+  const load = await turns(bus.dispatch('load', 1));
+  const slow = await turns(bus.dispatch('slow', 1));
+  expect(slow).toBeGreaterThan(load);
+  expect(slow).toBeLessThan(1_000);
+});
+
 it('a failure is still reported, after its attempts', async () => {
   const bus = createAsyncCommandBus({ retry: { maxAttempts: 2, baseDelay: 0 } });
   let calls = 0;

@@ -5,7 +5,7 @@
  * When an `router:missing:route` (or other HARD_NAV_CODE) error names a URL that is ALREADY
  * the current one, handing it back to the server would reload forever behind a
  * catch-all - so the router refuses. In dev it explains why and returns; in
- * production it falls through to the generic `console.error(error)`. Both arms
+ * production it falls through to the default report of the error. Both arms
  * refuse the navigation; they differ only in what gets logged, and only the dev
  * one was ever exercised because DEV is true under vitest unless a test
  * re-imports the module with NODE_ENV stubbed.
@@ -49,7 +49,7 @@ describe('hard-navigation refusal', () => {
 
     expect(assign).not.toHaveBeenCalled(); // refused - no reload storm
     const messages = errors.map((e) => String(e[0]));
-    expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(true);
+    expect(messages.some((m) => m.includes('so the router does not hard-navigate'))).toBe(true);
     router.dispose();
   });
 
@@ -63,7 +63,7 @@ describe('hard-navigation refusal', () => {
 
     expect(assign).not.toHaveBeenCalled(); // still refuses - that is the point
     const messages = errors.map((e) => String(e[0]));
-    expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(false);
+    expect(messages.some((m) => m.includes('so the router does not hard-navigate'))).toBe(false);
     expect(errors.length).toBeGreaterThan(0); // but the error is still surfaced
     router.dispose();
   });

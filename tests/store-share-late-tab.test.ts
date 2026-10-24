@@ -1,50 +1,47 @@
 /** A shared store opened later asks for the current state, so its writes build on it (log s35.164). Rationale at the end. */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
-import { createFastLane } from '../src/fast-lane';
-import { createChannel } from '../src/plugins-io';
 import { defineChamberStore } from '../src/store';
+import { shareTabs } from '../src/store-share';
+import { quiet, traffic } from './tabs-quiet';
 
 type Cart = { items: string[] };
 const reducers = { add: (s: Cart, item: string) => ({ items: [...s.items, item] }) };
 
 const closers: Array<() => void> = [];
-afterEach(() => { while (closers.length) closers.pop()!(); });
+// A page: shareTabs opens only where there are tabs.
+beforeEach(() => { vi.stubGlobal('window', {}); });
+afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); });
 
 let n = 0;
-/** One "tab": its own bus, lane, channel and store, on a shared channel name; `syncs` counts the tab's cart$sync. */
+/** One "tab": its own bus and store, sharing over the channel `name`; `writes` counts its state's changes. */
 function tab(name: string) {
-  const lane = createFastLane();
-  const ch = createChannel({ channel: name, lane, events: ['cart$state'] });
-  closers.push(() => ch.dispose());
   const bus = createCommandBus();
-  let syncs = 0;
-  bus.on('cart$sync', () => { syncs++; });
-  const cart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }), reducers, share: lane })(bus);
+  const cart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }), reducers, share: shareTabs(name) })(bus);
+  let writes = 0;
+  cart.$onField('items', () => { writes++; });
   closers.push(() => cart.$dispose());
-  return { cart, syncs: () => syncs };
+  return { cart, writes: () => writes };
 }
 
-/** A 1.26 tab: the released receive rule, on its own channel. Returns the states it applied. */
-function releasedTab(name: string, version: number) {
-  const lane = createFastLane();
-  const ch = createChannel({ channel: name, lane, events: ['cart$state'] });
-  closers.push(() => ch.dispose());
-  const me = 'zzzz-old';
-  const applied: unknown[] = [];
-  lane.on('cart$state', (m: { state: unknown; version: number; tab: string }) => {
-    if (m.tab === me) return;
-    if (m.version > version || (m.version === version && m.tab > me)) { version = m.version; applied.push(m.state); }
-  });
-  return applied;
+/** Every message on the channel `name`, as another tab reads it. */
+function wire(name: string): Array<Record<string, unknown>> {
+  const heard: Array<Record<string, unknown>> = [];
+  const ch = new BroadcastChannel(name);
+  ch.onmessage = (e) => { heard.push(e.data); };
+  closers.push(() => ch.close());
+  return heard;
 }
 
-/** BroadcastChannel delivers on a later task. */
-const settle = () => new Promise((r) => setTimeout(r, 20));
+/** Every message on the channels this file's tabs use: `settle` waits until they carry nothing (tests/tabs-quiet.ts). */
+const net = traffic();
+afterEach(() => net.close());
+const settle = (): Promise<void> => net.settle();
 
 describe('a tab opened later', () => {
   it('catches up when it opens, and its write builds on the current state', async () => {
     const name = `late-${n++}`;
+    net.watch(name);
     const a = tab(name);
     a.cart.add('milk');
     a.cart.add('eggs');
@@ -63,18 +60,20 @@ describe('a tab opened later', () => {
 
   it('peers already in step are not written again when a tab opens', async () => {
     const name = `late-${n++}`;
+    net.watch(name);
     const a = tab(name);
     const c = tab(name);
     a.cart.add('milk');
     await settle();
-    const before = [a.syncs(), c.syncs()];
+    const before = [a.writes(), c.writes()];
     tab(name);
     await settle();
-    expect([a.syncs(), c.syncs()]).toEqual(before);
+    expect([a.writes(), c.writes()]).toEqual(before);
   });
 
-  it('a write within one round trip of opening is a concurrent write: every tab ends on one state', async () => {
+  it('a write made before the answer is kept, and every tab ends on one state', async () => {
     const name = `late-${n++}`;
+    net.watch(name);
     const a = tab(name);
     a.cart.add('milk');
     a.cart.add('eggs');
@@ -88,50 +87,43 @@ describe('a tab opened later', () => {
 });
 
 describe('the ask', () => {
-  it('a tab that never wrote does not answer, and nothing changes', async () => {
+  it('the tab holding the lock answers, written or not, and the asker takes the state', async () => {
     const name = `late-${n++}`;
+    net.watch(name);
+    const heard = wire(name);
     const a = tab(name);
     await settle();
     const b = tab(name);
     await settle();
-    expect([a.syncs(), b.syncs()]).toEqual([0, 0]);
+    expect(a.writes()).toBe(0);
     expect(b.cart.state.value).toEqual({ items: [] });
+    expect(heard.filter((m) => m.kind === 'answer').map((m) => m.value)).toEqual([{ items: [] }]);
   });
 
-  it('a 1.26 tab at version 0 never applies it', async () => {
+  it('is { kind: ask, tab }, answered by the tab holding the lock with its state', async () => {
     const name = `late-${n++}`;
-    const applied = releasedTab(name, 0);
+    net.watch(name);
+    const a = tab(name);
+    a.cart.add('milk');
+    await settle();
+    const heard = wire(name);
     tab(name);
-    await settle();
-    expect(applied).toEqual([]);
-  });
-
-  it('control: a 1.26 tab still applies a newer write', async () => {
-    const name = `late-${n++}`;
-    const applied = releasedTab(name, 0);
-    tab(name).cart.add('milk');
-    await settle();
-    expect(applied).toEqual([{ items: ['milk'] }]);
+    await quiet(heard);
+    const ask = heard.find((m) => m.kind === 'ask') as Record<string, unknown>;
+    expect(ask).toEqual({ kind: 'ask', value: undefined, tab: expect.any(String) });
+    expect(heard.filter((m) => m.kind === 'answer')).toEqual([{ kind: 'answer', value: { items: ['milk'] }, tab: expect.any(String), to: ask.tab }]);
+    // Alone, a held its write until the lock came, then the write was the state: it is not sent.
+    expect(heard.filter((m) => m.kind === 'cmd')).toEqual([]);
+    expect(a.cart.state.value).toEqual({ items: ['milk'] });
   });
 });
 
 /*
- * Each tab numbers its own writes from 0 and applies only a higher number (a
- * tie goes to the higher tab id). A tab opened after another wrote three
- * times started at 0: its first write (version 1) was ignored by the older
- * tab, and the older tab's next write (version 4) replaced it everywhere.
- * The later tab's write was lost (log s35.164).
- *
- * Shape: the tab catches up when it opens. It sends one message on the same
- * `<id>$state` event, `{ ask: true, version: -1, tab }`. A peer that has
- * written answers with its current `{ state, version, tab }` and `to`, the
- * asker's id, and the asker applies it by the released rule. A 1.26 tab
- * compares versions only, and -1 is below every version, so no tab, old or
- * new, applies an ask. An answer applies only when strictly newer and only
- * in the tab that asked, so peers in step are not written again.
- *
- * Ordering by time (a clock in `version`, an RFC 3339 `at`) was rejected:
- * `share` sends the whole state, so reordering only picks which tab's data
- * is lost. A write made within one round trip of opening is a concurrent
- * write, the documented last-writer-wins case. Log s35.164.
+ * A tab opened after another wrote started from its own first state, so its
+ * first write built on the wrong state (log s35.164). It asks when it opens,
+ * `{ kind: 'ask', tab }`, and the tab holding the store's Web Lock answers it
+ * alone (`to`) with its state (log 36.F39). Until then the asker holds its own
+ * writes, and over the answer it runs them again and sends them. A tab alone
+ * holds its writes until the lock comes, and then they are the state. Peers in
+ * step only answer, so they are not written again.
  */

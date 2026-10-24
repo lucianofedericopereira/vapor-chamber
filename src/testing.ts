@@ -24,17 +24,20 @@
  */
 
 import type {
-  AsyncPlugin, Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
-  PluginOptions, BatchCommand, BatchOptions, BatchResult, CommandBus,
-  Listener, RegisterOptions, BusInspection,
+  Command, CommandResult, Handler, Hook, Facts,
+  PluginParts, Rules, Steps, BatchCommand, BatchOptions, BatchResult, CommandBus,
+  Listener, RegisterOptions, BusInspection, AsyncCommandBusOptions,
 } from './command-bus';
 
 // The double stands in for the bus, so its failures are core's: a test must
 // read the same code it will meet in production.
 const testFail = _failures('core');
-import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _inspectPlugins, _okResult, _stampMeta, _syncBatch, _UNSEAL, _tryCatchHandler } from './command-bus';
+import { matchesPattern } from './pattern';
+import { abortedResult, _failures, _errResult, _inspectPlugins, _okResult, _stampMeta, _syncBatch, _UNSEAL, _FACTS, _tryCatchHandler, _declaredTransports, _attachTransports, _send, _assertPlugin, _checkHandler, _composeFacts, _rulesOf, _stepsOf, _stepped, _refusal } from './command-bus';
 import { isThenable } from './settled';
-import { _isLibraryAction, _isLibraryRegister } from './library-names';
+import { _hotUpdate } from './applied-remotely';
+import { _report } from './report';
+import { _isLibraryAction, _isLibraryRegister, _registersLocal } from './library-names';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -50,10 +53,12 @@ export interface TestBus extends CommandBus<any> {
   getDispatched(action: string): RecordedDispatch[];
   /** Clear the recorded list and listeners */
   clear(): void;
-  /** Read-only dispatch - skips beforeHooks, runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - runs the rules, the steps and the handler, fires afterHooks. */
   query(action: string, target: any, payload?: any): CommandResult;
   /** Fire a domain event - notifies on() listeners, no handler required, no result. */
   emit(event: string, data?: any): void;
+  /** As the async bus: `null` declares the options of an action a transport sends. */
+  register<A extends string>(action: A, handler: ((cmd: Command<A, any, any>) => any) | null, options?: RegisterOptions): () => void;
   /** Returns all registered action names. */
   registeredActions(): string[];
   /**
@@ -82,15 +87,21 @@ export interface TestBus extends CommandBus<any> {
  * Creates a test bus that stubs all handlers (returning `{ ok: true }`) unless
  * you register your own via `bus.register()`. All dispatches are recorded.
  */
-export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): TestBus {
+export function createTestBus(opts: { passthroughHandlers?: boolean; transport?: AsyncCommandBusOptions['transport'] } = {}): TestBus {
+  // The bus's own rule and send: an action a transport covers is sent, and its
+  // dispatch answers a Promise, as on the async bus.
+  const { transports, transportFor } = _declaredTransports(opts.transport);
   const handlers = new Map<string, Handler>();
+  // The library's own actions an app names (a form's, history's trigger): local, as on the async bus.
+  const locals = new Map<string, Handler>();
   const undoHandlers = new Map<string, Handler>();
   const undoChecks = new Map<string, (cmd: Command) => boolean>();
+  // Each action's live registration, and the live ones a newer one covers.
+  const owners = new Map<string, Array<{ own(): void; release(): void }>>();
   const responders = new Map<string, (cmd: Command) => any>();
-  const plugins: Array<{ plugin: Plugin; priority: number }> = [];
+  const plugins: PluginParts[] = [];
   // Hooks by the real buses' rule (addHook in command-bus.ts): marked off and
   // replaced on removal, never spliced, so a dispatch walking them keeps its array.
-  let beforeHooks: Array<{ fn: BeforeHook; off: boolean }> = [];
   let afterHooks: Array<{ fn: Hook; off: boolean }> = [];
   const dropHooks = (list: Array<{ off: boolean }>): never[] => { for (const h of list) h.off = true; return []; };
   // Replaced, never spliced, so a fan-out walking it keeps its array (see fanOut).
@@ -99,12 +110,29 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   let sealed = false;
   let dispatchDepth = 0;
   const MAX_DISPATCH_DEPTH = 16;
+  // The facts slot, as a real bus's (_composeFacts): the command state's observer, set
+  // through `[_FACTS]` (`_factsSetter`), with the plugins' started and settled parts.
+  let own: Facts | null = null;
+  let facts: Facts | null = null;
 
-  let runner = buildRunner([]);
+  // Each action's rules and work steps, by the real buses' readers (`_rulesOf`,
+  // `_stepsOf`), null while none is installed.
+  let rules: Rules = null;
+  let steps: Steps = null;
 
-  function rebuildRunner() {
-    const sorted = plugins.slice().sort((a, b) => b.priority - a.priority).map(e => e.plugin);
-    runner = buildRunner(sorted);
+  // The rules' refusal, else the steps and the work: as a real bus, the first refusal answers.
+  function ruled(cmd: Command, run: () => CommandResult): CommandResult {
+    const list = rules === null ? null : rules(cmd.action);
+    const refused = list === null ? undefined : _refusal(list, cmd);
+    if (refused === undefined) return run();
+    if (!isThenable(refused)) return refused;
+    return (refused as Promise<CommandResult | undefined>).then((r) => r ?? run()) as unknown as CommandResult;
+  }
+
+  // The work behind the action's steps, by the real buses' runner (`_stepped`).
+  function stepped(cmd: Command, run: () => CommandResult): CommandResult {
+    const list = steps === null ? null : steps(cmd.action);
+    return list === null ? run() : _stepped(list, cmd, run) as CommandResult;
   }
 
   function runAfterHooksAndListeners(cmd: Command, result: CommandResult): void {
@@ -113,9 +141,10 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
       const h = ah[i];
       if (h.off) continue;
       try { h.fn(cmd, result); } catch (e) {
-        console.error('[vapor-chamber/test] Hook error:', e);
+        _report('error', 'test:failed:hook', `an onAfter hook threw on "${cmd.action}"`, e, { action: cmd.action });
       }
     }
+    if (facts !== null) facts.settled(cmd, result);
     fanOut(cmd, result, cmd.action);
   }
 
@@ -135,7 +164,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
       const entry = pl[i];
       if (!entry.off && matchesPattern(entry.pattern, matchAgainst)) {
         try { entry.listener(cmd, result); } catch (e) {
-          console.error('[vapor-chamber/test] Listener error:', e);
+          _report('error', 'test:failed:listener', `a listener threw on "${cmd.action}"`, e, { action: cmd.action });
         }
       }
     }
@@ -145,10 +174,10 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     // Stamped exactly like the real buses. Without meta, every meta consumer
     // takes its defensive no-op branch under test and NOTHING FAILS - the
     // `idempotent` plugin never stamps a key, the outbox never sets its replay
-    // key, the HTTP bridge never forwards `Idempotency-Key`. A test wiring
+    // key, the HTTP transport never forwards `Idempotency-Key`. A test wiring
     // those plugins to a TestBus exercised the degraded path and passed,
     // verifying nothing about the behaviour it named.
-    return dispatchCommand({ action, target, payload, meta: _stampMeta(payload) });
+    return dispatchCommand({ action, target, payload, meta: _stampMeta(payload), signal: undefined });
   }
 
   // Runs a built Command: a batch keeps the one it dispatched, to undo it.
@@ -162,46 +191,43 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function _dispatchInner(cmd: Command): CommandResult {
-    const action = cmd.action;
+    if (facts !== null) facts.started(cmd);
+    return settle(cmd, ruled(cmd, () => stepped(cmd, () => work(cmd))));
+  }
 
-    // Run beforeHooks - throw cancels dispatch
-    const bh = beforeHooks;
-    for (let i = 0, len = bh.length; i < len; i++) {
-      const h = bh[i];
-      if (h.off) continue;
-      try { h.fn(cmd); }
-      catch (e) {
-        // The same core:refused:hook result a real bus builds.
-        const result: CommandResult = _errResult(_beforeCancel(e, action));
-        recorded.push({ cmd, result });
-        runAfterHooksAndListeners(cmd, result);
-        return result;
-      }
+  // `_tryCatchHandler` is the bus's OWN wrapper, not a copy of it: a copy is
+  // how a double ends up answering differently from the thing it doubles.
+  function local(cmd: Command): CommandResult {
+    const handler = handlers.get(cmd.action);
+    return handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
+  }
+
+  // The action's transport, else its local handler, by the bus's own rule.
+  function work(cmd: Command): CommandResult {
+    const transport = transportFor === null || locals.has(cmd.action) ? undefined : transportFor(cmd.action);
+    if (transport === undefined) return local(cmd);
+    const fallback = (): Promise<CommandResult> => {
+      const r = local(cmd);
+      return r.ok && isThenable(r.value) ? Promise.resolve(r.value).then(_okResult, _errResult) : Promise.resolve(r);
+    };
+    return _send(transport, cmd, fallback) as unknown as CommandResult;
+  }
+
+  // Recorded and heard once settled: a sent command's result is a Promise.
+  function settle(cmd: Command, result: CommandResult): CommandResult {
+    if (!isThenable(result)) {
+      recorded.push({ cmd, result });
+      runAfterHooksAndListeners(cmd, result);
+      return result;
     }
-
-    const handler = handlers.get(action);
-
-    // `_tryCatchHandler` is the bus's OWN wrapper, not a copy of it: a copy is
-    // how a double ends up answering differently from the thing it doubles.
-    const execute = (): CommandResult =>
-      handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
-
-    const result = runner(cmd, execute);
-    recorded.push({ cmd, result });
-    runAfterHooksAndListeners(cmd, result);
-    return result;
+    return (result as unknown as Promise<CommandResult>).then((r) => settle(cmd, r)) as unknown as CommandResult;
   }
 
   function query(action: string, target: any, payload?: any): CommandResult {
-    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
-    // Skip beforeHooks - reads don't trigger mutation gates
-    const handler = handlers.get(action);
-    const execute = (): CommandResult =>
-      handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
-    const result = runner(cmd, execute);
-    recorded.push({ cmd, result });
-    runAfterHooksAndListeners(cmd, result);
-    return result;
+    const cmd: Command = { action, target, payload, meta: _stampMeta(payload), signal: undefined };
+    // A query's start, which the command state does not count. The rules still answer.
+    if (facts !== null) facts.queried(cmd);
+    return settle(cmd, ruled(cmd, () => stepped(cmd, () => work(cmd))));
   }
 
   function emit(event: string, data?: any): void {
@@ -217,48 +243,85 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     return _syncBatch(commands, options, dispatchCommand, (action) => undoHandlers.has(action), dispatch);
   }
 
-  function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
+  function register(action: string, handler: Handler | null, regOpts: RegisterOptions = {}): () => void {
     if (sealed) throw testFail('refused:bus', `Cannot call register() on a sealed bus.`);
     // As the real bus: a `$` name is the library's, and an undo is `<action>$undo`.
     if (_isLibraryAction(action) && !_isLibraryRegister()) throw testFail('invalid:name', `Action "${action}": a name with "$" is the library's.`, { context: { action } });
-    handlers.set(action, handler);
+    // The real bus's one rule for a handler and the action's transport.
+    const local = _registersLocal();
+    _checkHandler(action, handler, regOpts, transportFor === null || local ? undefined : transportFor(action));
+    // As the sync bus: an optimistic action's throw runs its undo, then goes on.
+    const run: Handler | null = regOpts.optimistic
+      ? (cmd: Command) => {
+          try { return (handler as Handler)(cmd); }
+          catch (e) { dispatch(action + '$undo', cmd); throw e; }
+        }
+      : handler;
     const undoKey = action + '$undo';
     const undoH = regOpts.undo && ((c: Command) => (regOpts.undo as Handler)(c.target));
-    if (undoH) {
-      undoHandlers.set(action, regOpts.undo as Handler);
-      handlers.set(undoKey, undoH);
-    }
-    if (regOpts.canUndo) undoChecks.set(action, regOpts.canUndo);
-    // Only what THIS call registered, as the real bus does
-    // (tests/register-ownership.test.ts): a test double must not diverge.
     const { undo, canUndo } = regOpts;
+    const reg = {
+      own(): void {
+        if (run === null) handlers.delete(action);
+        else handlers.set(action, run);
+        if (local) locals.set(action, run as Handler);
+        else locals.delete(action);
+        if (undoH) {
+          undoHandlers.set(action, undo as Handler);
+          handlers.set(undoKey, undoH);
+        }
+        if (canUndo) undoChecks.set(action, canUndo);
+      },
+      release(): void {
+        handlers.delete(action);
+        if (local) locals.delete(action);
+        if (undoH) { undoHandlers.delete(action); handlers.delete(undoKey); }
+        if (canUndo) undoChecks.delete(action);
+      },
+    };
+    // The real bus's rule (tests/register-ownership.test.ts), a double must not
+    // diverge: the newest registration still live, a covered one kept in the list.
+    const list = owners.get(action);
+    if (list === undefined) owners.set(action, [reg]);
+    else {
+      list[list.length - 1].release();
+      if (_hotUpdate() === undefined) list.push(reg);
+      else list[list.length - 1] = reg;
+    }
+    reg.own();
     return () => {
-      if (handlers.get(action) === handler) handlers.delete(action);
-      if (undo && undoHandlers.get(action) === undo) undoHandlers.delete(action);
-      if (undoH && handlers.get(undoKey) === undoH) handlers.delete(undoKey);
-      if (canUndo && undoChecks.get(action) === canUndo) undoChecks.delete(action);
+      const list = owners.get(action) ?? [];
+      const at = list.lastIndexOf(reg);
+      if (at === -1) return;
+      list.splice(at, 1);
+      if (at < list.length) return;
+      reg.release();
+      if (at === 0) owners.delete(action);
+      else list[at - 1].own();
     };
   }
 
-  function use(plugin: Plugin, options: PluginOptions = {}): () => void {
+  function use(plugin: PluginParts): () => void {
     if (sealed) throw testFail('refused:bus', `Cannot call use() on a sealed bus.`);
-    const entry = { plugin, priority: options.priority ?? 0 };
-    plugins.push(entry);
-    rebuildRunner();
-    return () => {
-      const i = plugins.indexOf(entry);
-      if (i !== -1) { plugins.splice(i, 1); rebuildRunner(); }
+    _assertPlugin(plugin, plugins);
+    // As `bus.use()`: attach before the plugin is placed, so a throw refuses the install.
+    const detach = plugin.attach?.(bus as never);
+    plugins.push(plugin);
+    // As `bus.use()` does: `started` and `settled` parts in the facts slot,
+    // rule parts in the rules, step parts in the steps, and the plugin gets
+    // this bus (PluginParts.attach).
+    const observes = plugin.started !== undefined || plugin.settled !== undefined;
+    const ruledBy = plugin.authorize !== undefined || plugin.validate !== undefined;
+    const stepsOf = plugin.reuse !== undefined || plugin.admit !== undefined || plugin.begin !== undefined;
+    const place = (): void => {
+      if (observes) facts = _composeFacts(own, plugins);
+      if (ruledBy) rules = _rulesOf(plugins);
+      if (stepsOf) steps = _stepsOf(plugins);
     };
-  }
-
-  function onBefore(hook: BeforeHook): () => void {
-    if (sealed) throw testFail('refused:bus', `Cannot call onBefore() on a sealed bus.`);
-    const entry = { fn: hook, off: false };
-    beforeHooks.push(entry);
+    place();
     return () => {
-      if (entry.off) return;
-      entry.off = true;
-      beforeHooks = beforeHooks.filter((e) => e !== entry);
+      const i = plugins.indexOf(plugin);
+      if (i !== -1) { plugins.splice(i, 1); place(); detach?.(); }
     };
   }
 
@@ -294,7 +357,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   /**
-   * As on a real bus: a responder answers through the plugin chain and the after-hooks, its value
+   * As on a real bus: a responder answers behind the rules and the steps, then the after-hooks, its value
    * is awaited when it is a thenable, an already-aborted signal settles
    * core:aborted:dispatch before the responder runs, and no responder falls back to
    * dispatch(). Not mirrored: the timeout and dispose() settling a waiting
@@ -304,11 +367,12 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     if (opts.signal?.aborted) return Promise.resolve(abortedResult(action, opts.signal));
     const responder = responders.get(action);
     if (!responder) return Promise.resolve(dispatch(action, target, payload));
-    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
-    const result = runner(cmd, () => {
+    const cmd: Command = { action, target, payload, meta: _stampMeta(payload), signal: undefined };
+    if (facts !== null) facts.queried(cmd);
+    const result = ruled(cmd, () => stepped(cmd, () => {
       try { return _okResult(responder(cmd)); }
       catch (e) { return _errResult(e as Error); }
-    });
+    }));
     recorded.push({ cmd, result });
     runAfterHooksAndListeners(cmd, result);
     const v = result.value;
@@ -348,14 +412,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     return recorded.slice(0, lastIdx + 1).map(r => r.cmd);
   }
 
-  return {
+  const bus = {
     dispatch,
     query,
     emit,
     dispatchBatch,
     register,
     use,
-    onBefore,
     onAfter,
     on,
     once,
@@ -374,50 +437,36 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     // that reset `sealed` would pass a test the real bus fails.
     clear: () => {
       if (sealed) throw testFail('refused:bus', `Cannot call clear() on a sealed bus.`);
-      recorded.splice(0); offAll(); beforeHooks = dropHooks(beforeHooks);
+      recorded.splice(0); offAll();
     },
     dispose: () => {
       // Plugin dispose() first, as a real bus's dispose() does.
-      for (let i = plugins.length - 1; i >= 0; i--) plugins[i].plugin.dispose?.();
-      recorded.splice(0); offAll(); beforeHooks = dropHooks(beforeHooks); afterHooks = dropHooks(afterHooks); handlers.clear(); undoHandlers.clear(); undoChecks.clear(); responders.clear(); plugins.length = 0;
+      for (let i = plugins.length - 1; i >= 0; i--) plugins[i].dispose?.();
+      for (const t of new Set(transports.map((e) => e.transport))) t.dispose?.();
+      recorded.splice(0); offAll(); afterHooks = dropHooks(afterHooks); handlers.clear(); owners.clear(); locals.clear(); undoHandlers.clear(); undoChecks.clear(); responders.clear(); plugins.length = 0; rules = null; steps = null; facts = own;
     },
     seal: () => { sealed = true; },
     isSealed: () => sealed,
     [_UNSEAL]: () => { sealed = false; },
+    [_FACTS]: (f: Facts | null) => { own = f; facts = _composeFacts(own, plugins); },
     inspect: (): BusInspection => ({
       actions: Array.from(handlers.keys()),
       undoActions: Array.from(undoHandlers.keys()),
       // Its own responders, as the real bus's inspect() lists them.
       responderActions: Array.from(responders.keys()),
       pluginCount: plugins.length,
-      pluginPriorities: plugins.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
       plugins: _inspectPlugins(plugins),
-      beforeHookCount: beforeHooks.length,
+      transports: transports.map((e) => ({ pattern: e.pattern, id: e.transport.id ?? 'transport' })),
       afterHookCount: afterHooks.length,
       listenerPatterns: patternListeners.map(e => e.pattern),
       sealed,
       dispatchDepth,
-      activeTimers: 0,
     }),
     snapshot,
     travelTo,
     travelToAction,
   } as unknown as TestBus;
+  _attachTransports(bus, transports);
+  return bus;
 }
 
-/**
- * A plugin called on its own, outside a bus, wired the way `bus.use()` wires
- * it: with its own `fail`, so its refusals carry its declared `id` (or
- * `'plugin'`) as their owner, exactly as they will on a bus. Here beside
- * `createTestBus` rather than in `vapor-chamber/vitest`, whose pure entry
- * imports nothing from the library at runtime.
- *
- * @example
- * const call = wired(rateLimit({ max: 1, window: 1000 }));
- * call(cmd, next);
- * expect(call(cmd, next)).toFailWith('rateLimit:limited:action');
- */
-export function wired<P extends Plugin | AsyncPlugin>(plugin: P): (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => ReturnType<P> {
-  const fail = _failures(plugin.id ?? 'plugin');
-  return (cmd, next) => (plugin as AsyncPlugin)(cmd, next, fail) as ReturnType<P>;
-}

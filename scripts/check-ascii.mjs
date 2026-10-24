@@ -28,7 +28,9 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.github', 'assets'];
+// Checked against git's top-level directories by tests/ascii-guard.test.ts:
+// contract/ and php/ landed without joining this list, and nothing noticed.
+export const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.github', 'assets', 'contract', 'php'];
 /**
  * Root-level files, DERIVED from the directory rather than listed.
  *

@@ -11,7 +11,7 @@ project.
 | `routes-web.php`                    | `routes/web.php` snippet                      | Two CSRF flows: Blade meta tag vs Sanctum SPA cookie |
 | `AddToCart.php`                     | `app/Actions/Cart/`                           | Action class with inline validation                  |
 | `CancelOrder.php`                   | `app/Actions/Order/`                          | Action class with Gate-based authorization           |
-| `ProcessCheckout.php`               | `app/Actions/Order/`                          | Queued-command action returning optimistic state     |
+| `ProcessCheckout.php`               | `app/Actions/Order/`                          | Queued-command action answering 202 with its monitor |
 
 **Read first:** [`docs/integrations/laravel.md`](../../docs/integrations/laravel.md)
 covers the full integration picture (CSRF flows, Inertia coexistence, Filament
@@ -41,14 +41,17 @@ panels, Reverb realtime, queued commands).
   - `ModelNotFoundException` -> 404, `code: 'not_found'`
   - `abort()` (an HTTP exception) -> its status and headers, the code its
     reason phrase snake_cased (`abort(429)` -> `code: 'too_many_requests'`)
-  - An exception with its own `render()` -> its status, `detail`, and `code`
+  - An exception with its own `render()` -> its status, `detail`, `code`,
+    and its own `type` and `title` when it gives them
   - Anything else -> 500, `code: 'internal_error'`, `detail: 'Internal error'`
     (and `report()`s the original)
 
   On the batch endpoint the same problem rides on the command's own result,
-  `{ id, problem }`, inside a 200; a success is `{ id, state }`. Headers the
-  command's own response would have had ride beside it, `headers` (OData JSON
-  batch): `{ id, problem, headers: { "Retry-After": "1" } }`.
+  `{ id, status, headers, problem }`, inside a 200; a success is
+  `{ id, status, headers, state }`. The status and headers are the ones the
+  command's own response would have had (OData JSON batch):
+  `{ id, status: 409, headers: { "Retry-After": "1" }, problem }`. A batched
+  command's `Idempotency-Key` is read from its own `headers` member.
 
 ## Idempotency (double-submit protection)
 
@@ -57,14 +60,30 @@ An action declared idempotent on the JS bus
 `retry: 'idempotent'` on the schema action) carries one `Idempotency-Key` on
 every attempt the bus re-sends; the `idempotent()` plugin stamps one too, and
 the outbox replays with its record's key. The controller honors it with a
-short-lived cache (TTL 60s): a second POST with the same key replays the cached
-response instead of running the action again, so a re-send can't create a
-duplicate order. A re-send that arrives while the first is still running gets
-409 with `Retry-After: 1`, and the bus comes back for the finished answer. A
+cache: a second POST with the same key replays the stored answer, a success or
+a 4xx verdict, instead of running the action again, so a re-send can't create
+a duplicate order. A transient failure or an answer with `Retry-After` is not
+stored, so its re-send runs again. The window is `idempotency_ttl` in
+config/vapor-chamber.php, default 24 hours. A re-send that arrives while the first is still running gets
+409 with `Retry-After: 1`, and the bus comes back for the finished answer. The
+same key with another target or payload is another request and gets 422
+`key_reused`, never the first answer. A
 key belongs to whoever sent it - the user, else the session, else the
 address - so two users
-sending the same key (the plugin's default key is the command itself) each run
-their own. No setup is needed beyond a working Laravel cache store.
+sending the same key (an app's own `key` can be) each run
+their own. It needs a Laravel cache store nobody clears: `cache:clear` or an
+evicting Redis loses keys, and a re-send then runs again.
+
+## An old page
+
+A page sends the build it was served from as the `X-App-Version` header
+(`httpTransport({ headers })`, `onRedirect: (url) => location.assign(url)`). Set
+`app_version` in config/vapor-chamber.php (`env('APP_VERSION')`) and the controller
+answers a command from a page that differs `{ redirect }`, to the page that sent it
+(its `Referer` path on this host, else `reload_url`), so the reload brings the new
+build. The check is the gate every command crosses, single or batched: an old page's
+command takes no idempotency key, no lock and runs no action. The version is yours,
+the library carries none. With `app_version` null nothing is checked.
 
 ## Smoke test
 

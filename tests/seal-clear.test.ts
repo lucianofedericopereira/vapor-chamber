@@ -15,9 +15,9 @@
  */
 import { describe, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, unsealBus, inspectBus, type BusError } from '../src/command-bus';
-import { history } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
 import { it } from '../src/vitest';
+import { history } from '../src/plugins-core';
 
 /** The BusError code `fn` throws, or undefined when it does not throw. */
 const thrownCode = (fn: () => unknown): string | undefined => {
@@ -32,7 +32,7 @@ describe.each([
   it('throws core:refused:bus and keeps handlers, undo handlers and plugins', () => {
     const bus: any = make();
     bus.register('pay', () => 'paid', { undo: () => {} });
-    bus.use((_c: unknown, next: () => unknown) => next());
+    bus.use({ settled: () => {} });
     bus.seal();
 
     expect(thrownCode(() => bus.clear())).toBe('core:refused:bus');
@@ -66,7 +66,6 @@ describe('the ledger case: a stray clear() cannot turn a rollback into a no-op',
     let balance = 0;
     bus.register('pay', () => { balance += 10; }, { undo: () => { balance -= 10; } });
     const h = history({ bus });
-    bus.use(h);
     bus.seal();
 
     bus.dispatch('pay', {});

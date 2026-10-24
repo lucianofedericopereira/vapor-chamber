@@ -9,11 +9,11 @@
  */
 
 import { createCommandBus, createAsyncCommandBus, _errResult, _failures } from './command-bus';
+import { _report } from './report';
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
-import { onSettled } from './settled';
 import { DEV } from './dev';
 import { toolInputSchema, type ToolInputSchema } from './tool-schema';
-import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryPolicy, CommandMap, BusSeverity, Fail } from './command-bus';
+import type { Command, CommandBus, AsyncCommandBus, PluginParts, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryPolicy, CommandMap, Fail } from './command-bus';
 
 /** Failures of this module's functions that are not a plugin (synthesize). */
 const schemaFail = _failures('schema');
@@ -105,11 +105,10 @@ type ToCamel<S extends string> = CamelRest<S> extends `${infer F}${infer R}` ? `
 
 /**
  * The CommandMap a schema types: each key under its camelCase name, the one
- * the bus validates and lists, and under the key as written, so 1.26 code that
- * uses it still compiles. tests/schema-camel-keys.test.ts.
+ * the bus validates and lists. tests/schema-camel-keys.test.ts.
  */
 export type InferMap<S extends BusSchema> = {
-  [K in keyof S as K | (K extends string ? ToCamel<K> : never)]: {
+  [K in keyof S as K extends string ? ToCamel<K> : K]: {
     target:  InferFields<S[K]['target']>;
     payload: InferFields<S[K]['payload']>;
     result:  InferFields<S[K]['result']>;
@@ -204,7 +203,7 @@ function normalizeSchema(schema: BusSchema): BusSchema {
     from.set(normalized, key);
     // The one place the rename happens, so the one place it is reported.
     if (DEV && normalized !== key) {
-      console.warn(`[vapor-chamber] Schema key "${key}" is "${normalized}" on the bus: register and dispatch it as "${normalized}", the name it validates and lists. "${key}" still compiles and runs unvalidated.`);
+      _report('warn', 'schema:invalid:key', `Schema key "${key}" is "${normalized}" on the bus: register and dispatch it as "${normalized}", the name it validates and lists.`);
     }
     out[normalized] = def;
   }
@@ -294,7 +293,7 @@ export function toTools(schema: BusSchema, provider: 'anthropic' | 'openai' = 'a
 // schemaValidator plugin
 // ---------------------------------------------------------------------------
 
-export function schemaValidator(schema: BusSchema): Plugin {
+export function schemaValidator(schema: BusSchema): PluginParts {
   // Precompile per-action checks once. The validator sits on the default-on
   // dispatch path of createSchemaCommandBus and the schema is fixed at creation,
   // so walking Object.entries(fields) per command is pure re-allocation.
@@ -311,9 +310,9 @@ export function schemaValidator(schema: BusSchema): Plugin {
   // not a literal: one hidden class with the bus's results.
   const reject = (fail: Fail, action: string, errs: string[]): CommandResult =>
     _errResult(fail('invalid:payload', `[vapor-chamber] Validation failed for "${action}": ${errs.join(', ')}`, { action }));
-  const plugin: Plugin = (cmd, next, fail) => {
-    const c = compiled.get(cmd.action);
-    if (!c) return next();
+  // A `validate` part: the bus asks it once per action and runs the check
+  // before every plugin and the work (PluginParts).
+  const check = (c: { target: CompiledChecks | null; payload: CompiledChecks | null }) => (cmd: Command, fail: Fail): CommandResult | undefined => {
     // A NON-OBJECT value must fail, not skip: otherwise `target: null` / `42`
     // / `"oops"` bypasses every required field and reaches the handler
     // malformed. This gate's most important caller is an LLM (the MCP layer
@@ -336,9 +335,15 @@ export function schemaValidator(schema: BusSchema): Plugin {
       const errs = runChecks(c.payload, cmd.payload);
       if (errs.length) return reject(fail, cmd.action, errs);
     }
-    return next();
+    return undefined;
   };
-  return Object.assign(plugin, { id: 'schemaValidator' });
+  return {
+    id: 'schemaValidator',
+    validate(action) {
+      const c = compiled.get(action);
+      return c && check(c);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -347,20 +352,12 @@ export function schemaValidator(schema: BusSchema): Plugin {
 
 export type SchemaLoggerOptions = { collapsed?: boolean };
 
-export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {}): Plugin {
+export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {}): PluginParts {
   const collapsed = options.collapsed ?? true;
-  // THROUGH `onSettled`, for the reason src/settled.ts spells out: `next()`
-  // returns a PROMISE on the async bus, so `result.ok` was `undefined` and the
-  // `result:` line printed the ERROR branch for every command, successes
-  // included, with `undefined` as the error. `logger()` had exactly this
-  // defect and was fixed in the sweep that file records; this logger and the
-  // SSR plugin were missed because that sweep was run over `plugins-*.ts` and
-  // neither of them lives there.
-  //
-  // The group is opened INSIDE the callback, so on an async bus the whole
-  // group is written when the result settles rather than split across the
-  // await - otherwise concurrent dispatches interleave their group contents.
-  const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
+  // A `settled` part, as `logger()`: the bus calls it with the settled result,
+  // so a refusal from anywhere is logged, and the whole group is written at
+  // once, never split across an await. tests/plugin-settled-part.test.ts.
+  return { id: 'schemaLogger', settled(cmd, result) {
     const def = schema[cmd.action];
     const desc = def?.description ? ` - ${def.description}` : '';
     const fn = collapsed ? console.groupCollapsed : console.group;
@@ -381,9 +378,7 @@ export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {
     }
     console.log('result:', result.ok ? result.value : result.error);
     console.groupEnd();
-    return result;
-  }) as CommandResult;
-  return Object.assign(plugin, { id: 'schemaLogger' });
+  } };
 }
 
 // ---------------------------------------------------------------------------
@@ -553,7 +548,7 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
     ...options,
     retry: retry === false ? false : { ...retry, actionPolicies: { ...declared, ...retry?.actionPolicies } },
   });
-  if (options?.validate !== false) bus.use(schemaValidator(normalized) as any);
+  if (options?.validate !== false) bus.use(schemaValidator(normalized));
   return Object.assign(bus, {
     toTools:      (provider: 'anthropic' | 'openai' = 'anthropic') => toTools(normalized, provider),
     synthesize:   (text: string, opts?: SynthesizeOptions) => synthesize(normalized, bus as unknown as AsyncCommandBus, text, opts),
@@ -603,174 +598,6 @@ export function createSchemaCommandBus<S extends BusSchema>(
 }
 
 // ---------------------------------------------------------------------------
-// Error code registry - machine-readable table for LLMs, docs, i18n
-// ---------------------------------------------------------------------------
-
-/**
- * Error code definition - every BusError code has a structured entry.
- * Useful for generating documentation, i18n lookups, and LLM error handling.
- */
-export type ErrorCodeEntry = {
-  /** `owner:condition:subject`; the owner is the code's first part. */
-  code: string;
-  /** The level a logger defaults to for this code; the logger decides. */
-  severity: BusSeverity;
-  /**
-   * Whether the code's condition is transient by the retry rule
-   * (`retryClass`): `limited`, `timeout`, except a transport's own timeout,
-   * which got no reply and may have landed. The async bus re-sends such a
-   * failure only when the call it retries (a handler, a transport) produced
-   * it: a plugin's refusal (`rateLimit:limited:action`) and a
-   * `register({ throttle })` refusal sit outside that call and are never
-   * re-sent (tests/retryable-column.test.ts). An uncertain condition reads
-   * false here and is re-sent only for an idempotent action or a keyed
-   * command. An outcome of the rule, not a judgement per row
-   * (tests/schema.test.ts).
-   */
-  retryable: boolean;
-  /** Broad failure category for filtering, telemetry, and LLM error handling. */
-  category: 'general' | 'network' | 'validation' | 'internal' | 'logic';
-  message: string;
-  /** Human-readable fix suggestion for LLMs and developers. */
-  fix: string;
-};
-
-/**
- * Complete registry of all BusError codes with their metadata.
- * This is the single source of truth for error documentation.
- *
- * @example
- * import { ERROR_CODE_REGISTRY } from 'vapor-chamber';
- * // Lookup an error code
- * const entry = ERROR_CODE_REGISTRY.find(e => e.code === 'core:missing:handler');
- * console.log(entry?.fix); // "Register a handler with bus.register(action, handler)"
- *
- * @example
- * // Generate an LLM system prompt with all error codes
- * const prompt = ERROR_CODE_REGISTRY
- *   .map(e => `${e.code} (${e.severity}): ${e.message} -> Fix: ${e.fix}`)
- *   .join('\n');
- */
-// The pure-call annotation just below lets bundlers tree-shake the whole
-// registry out of consumer bundles that never touch it (Object.freeze at
-// module level otherwise reads as a side effect and pins ~1 KB into every
-// barrel-import bundle, v1.8.0).
-export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
-  // Core
-  { code: 'core:missing:handler',       severity: 'error', retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
-  { code: 'core:refused:hook',     severity: 'error', retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
-  { code: 'core:invalid:name',  severity: 'warn',  retryable: false, category: 'validation', message: 'Action name does not match the naming pattern, or carries a "$" (the library\'s names)',     fix: 'Rename the action: match the pattern, or adjust naming config in createCommandBus(); names with $ are the library\'s.' },
-  { code: 'core:invalid:filter', severity: 'error', retryable: false, category: 'validation', message: 'An action filter is not a valid CloudEvents filter expression', fix: 'Use one dialect per expression (exact, prefix, suffix, all, any, not), the action attribute only, a non-empty string, and at least one expression in all or any.' },
-  { code: 'core:timeout:request',   severity: 'error', retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
-  { code: 'core:limited:handler',         severity: 'warn',  retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
-  { code: 'core:aborted:dispatch',           severity: 'warn',  retryable: false, category: 'general',    message: 'Dispatch aborted via its AbortSignal before completion', fix: 'Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature.' },
-  { code: 'validator:invalid:payload',      severity: 'error', retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
-  { code: 'validateSchemas:invalid:payload',    severity: 'error', retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
-  { code: 'schemaValidator:invalid:payload',    severity: 'error', retryable: false, category: 'validation', message: 'The bus schema rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the schema the bus was created with.' },
-  // Plugins
-  { code: 'throttle:limited:handler',    severity: 'warn',  retryable: true,  category: 'general',    message: 'Throttled: this action and target ran within the wait', fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
-  { code: 'circuitBreaker:limited:action',    severity: 'error', retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
-  { code: 'authGuard:unauthenticated:action', severity: 'warn',  retryable: false, category: 'logic',      message: 'The action is protected and the user is not authenticated', fix: 'Sign in first, or remove the action from authGuard({ protected }).' },
-  { code: 'rateLimit:limited:action',    severity: 'error', retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
-  { code: 'pollWith:timeout:job',        severity: 'error', retryable: true,  category: 'network',    message: 'An accepted job was not done within maxWait',       fix: 'The backend answered 202 and its status monitor kept answering 202: raise maxWait in pollWith() or check the job.' },
-  { code: 'plugin:failed:plugin',           severity: 'error', retryable: false, category: 'internal',   message: 'A plugin threw or rejected in its own body',        fix: 'A pipeline bug, not a server failure: error.cause is the original and context.index is the plugin\'s place in the chain (0 = outermost). Make it return next() or an errResult instead of throwing.' },
-  // Transports
-  { code: 'transport:refused:redirect',    severity: 'error', retryable: false,category: 'logic',    message: 'The backend answered with a redirect instead of a result', fix: 'Pass an onRedirect handler to the bridge (e.g. Inertia\'s router.visit), or stop the backend redirecting this command.' },
-  { code: 'transport:lost:result',    severity: 'error', retryable: false, category: 'internal', message: 'A batch answered without this command\'s result: it may have run',     fix: 'The backend must answer every batched command by the id it was sent. The outcome is unknown, so it is re-sent only with an idempotency key.' },
-  { code: 'transport:lost:command',  severity: 'error', retryable: false, category: 'general',  message: 'The offline send queue is full; the oldest command was dropped', fix: 'Raise maxQueueSize, or stop dispatching while the socket is down - context.command is the one dropped.' },
-  { code: 'transport:lost:reply',      severity: 'error', retryable: false, category: 'network',  message: 'The socket closed or was torn down before the reply arrived',  fix: 'Reconnect and dispatch again. The outcome is unknown, so the async bus re-sends it only for an idempotent action or a keyed command.' },
-  { code: 'transport:missing:csrf', severity: 'error', retryable: false, category: 'logic', message: 'No CSRF token was found after refreshing it', fix: 'The csrfCookieUrl endpoint must set the XSRF-TOKEN cookie (Laravel Sanctum: /sanctum/csrf-cookie), or the page must carry the csrf-token meta tag.' },
-  { code: 'transport:aborted:request', severity: 'warn', retryable: false, category: 'general', message: 'The caller aborted the request (its AbortSignal)', fix: 'Intentional cancellation. Send the request again if the abort was premature.' },
-  { code: 'transport:invalid:json', severity: 'error', retryable: false, category: 'validation', message: 'The request holds a value JSON cannot encode: nothing was sent', fix: 'Send only what JSON holds: a BigInt or a cycle cannot be encoded. context.url names the request; the cause is the platform\'s TypeError. It is never re-sent.' },
-  { code: 'remote:unexpected:json', severity: 'error', retryable: false, category: 'network', message: 'The response is not valid JSON, or not the command envelope', fix: 'The backend answered off-protocol: fix the body, its Content-Type, or the envelope shape. Re-sent only for an idempotent request.' },
-  { code: 'transport:timeout:reply',     severity: 'error', retryable: false, category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. It may have landed, so the async bus re-sends it only for an idempotent action or a keyed command. Otherwise context.outcome is unknown: check its status on the server.' },
-  // Functions that are not a plugin (owner: their feature)
-  { code: 'ssr:invalid:bus',          severity: 'error', retryable: false, category: 'logic',    message: 'rehydrate() was given an async bus',         fix: 'Use await rehydrateAsync(bus, commands) on an AsyncCommandBus.' },
-  { code: 'schema:missing:adapter',   severity: 'error', retryable: false, category: 'logic',    message: 'synthesize() was called without an adapter',  fix: 'Pass options.adapter, an LlmAdapter function that calls your LLM provider.' },
-  { code: 'schema:already:action',    severity: 'error', retryable: false, category: 'logic',    message: 'Two schema keys name one action on the bus', fix: 'Rename one key: each must give its own camelCase name (cart.add and cart_add are both cartAdd).' },
-  { code: 'store:already:member',     severity: 'error', retryable: false, category: 'logic',    message: 'A store action is named like a store member', fix: 'Rename the action: $id, state, url, $reset, $dispose and $onField are the store\'s own.' },
-  { code: 'store:invalid:name',      severity: 'error', retryable: false, category: 'validation', message: 'A store id or action key carries a "$", which names the library\'s commands', fix: 'Rename it: names with $ are the library\'s ($reset, $undo).' },
-  { code: 'store:missing:bus',        severity: 'error', retryable: false, category: 'logic',    message: 'useStore() was called without a bus',          fix: 'Pass the bus: useStore(bus). Stores are keyed per bus and never fall back to the shared one.' },
-  { code: 'store:missing:router',     severity: 'error', retryable: false, category: 'logic',    message: 'A store with url fields was given no router',  fix: 'Pass the router: useStore(bus, router).' },
-  { code: 'directive:timeout:dispatch', severity: 'error', retryable: true, category: 'network', message: 'A v-vc-command dispatch did not settle within its timeout', fix: 'Raise the timeout modifier (v-vc-command.60000; default 30000 ms), or check that the handler or backend answers. context.timeout is the limit that passed.' },
-  // Router (owner: its feature, shape rule 3)
-  { code: 'router:missing:route', severity: 'info', retryable: false, category: 'logic', message: 'The URL matches no route', fix: 'Expected for a server-side page: the default onError hard-navigates and the server renders it. Add a row if the client should own this URL.' },
-  { code: 'router:refused:guard', severity: 'info', retryable: false, category: 'logic', message: 'A beforeEach guard returned false', fix: 'Intentional: the navigation is refused and the URL stays. Returned to the caller, not dispatched to onError.' },
-  { code: 'router:aborted:navigation', severity: 'info', retryable: false, category: 'general', message: 'A newer navigation (or dispose) superseded this one', fix: 'Normal flow: the latest navigation wins. Returned to the caller, not dispatched to onError.' },
-  { code: 'router:missing:routes', severity: 'error', retryable: false, category: 'logic', message: 'The route table is not loaded yet', fix: 'Await router.isReady() before resolving or navigating.' },
-  { code: 'router:missing:record', severity: 'error', retryable: false, category: 'logic', message: 'No route record has this name', fix: 'Check the route name against the table (or the loader-bearing records named to revalidateRoutes).' },
-  { code: 'router:exceeded:redirects', severity: 'error', retryable: false, category: 'logic', message: 'Guard redirects did not settle within the hop limit', fix: 'Two guards redirect at each other. Break the cycle; a page reload cannot fix it, so this does not hard-navigate.' },
-  { code: 'router:failed:guard', severity: 'error', retryable: false, category: 'internal', message: 'A beforeEach guard threw', fix: 'A bug in the guard: error.cause is its throw. Return false or a location instead of throwing; this does not hard-navigate.' },
-  { code: 'router:failed:history', severity: 'error', retryable: false, category: 'internal', message: 'The router history threw writing the URL', fix: 'A history the app supplied (createRouter({ history })) threw: error.cause is its throw. The navigation is reverted; this does not hard-navigate.' },
-  { code: 'router:already:route', severity: 'error', retryable: false, category: 'validation', message: 'Two route rows share a name (dev only)', fix: 'Give every row a unique name; the generator should emit them unique.' },
-  { code: 'router:missing:parent', severity: 'error', retryable: false, category: 'validation', message: 'A route row names a parent that does not exist (dev only)', fix: 'Add the parent row or fix the parent name.' },
-  { code: 'router:invalid:parent', severity: 'error', retryable: false, category: 'validation', message: 'A route\'s parent chain loops back on itself (dev only)', fix: 'A route cannot be its own ancestor: fix the parent names in the cycle the message lists.' },
-  { code: 'router:missing:param', severity: 'error', retryable: false, category: 'logic', message: 'A required param was not given to build a route\'s path', fix: 'Pass every required param to the link or push() for that route.' },
-  { code: 'router:invalid:menu', severity: 'error', retryable: false, category: 'validation', message: 'A menu row breaks the menu rules', fix: 'meta.menu must be a number, meta.title an i18n key, and a menu route\'s path must be static.' },
-  { code: 'router:invalid:path', severity: 'error', retryable: false, category: 'validation', message: 'A route path segment starting with \':\' is not a valid param (dev only)', fix: 'Use :name, :name(regex), :name? or a trailing /* splat.' },
-  { code: 'router:unexpected:routes', severity: 'error', retryable: false, category: 'network', message: 'The routes payload is not JSON or has no routes array', fix: 'The server sent the table off-protocol: answer { routes: [...] } from the endpoint or the inline element. error.cause holds a parse error.' },
-  { code: 'router:failed:routes', severity: 'error', retryable: false, category: 'network', message: 'The routes endpoint failed', fix: 'error.cause is the transport\'s failure; check the endpoint. start() rejects and onError receives it.' },
-  { code: 'router:missing:inline', severity: 'error', retryable: false, category: 'logic', message: 'No inline routes element matches the selector (or there is no DOM)', fix: 'Render the element the selector names, or pass rows or { url } instead.' },
-  { code: 'router:missing:url', severity: 'error', retryable: false, category: 'logic', message: 'reload() was called without a { url } routes source', fix: 'reload() refetches the table, so only a { url } source can reload; use setRoutes() for rows.' },
-  { code: 'router:missing:component', severity: 'error', retryable: false, category: 'logic', message: 'No component is registered for a route\'s component key', fix: 'Register the key in options.components; the default onError hard-navigates so the server renders the page.' },
-  { code: 'router:failed:component', severity: 'error', retryable: false, category: 'network', message: 'A lazy component failed to load', fix: 'Usually stale chunk hashes after a deploy: the default onError hard-navigates and the full load recovers. error.cause is the import\'s failure.' },
-  { code: 'router:failed:loader', severity: 'error', retryable: false, category: 'network', message: 'A route loader failed', fix: 'error.cause is the loader\'s or the transport\'s failure. The page keeps its data; useRouteError surfaces it.' },
-  { code: 'router:missing:loader', severity: 'error', retryable: false, category: 'logic', message: 'A route\'s load has no loader handler', fix: 'Register a preset that serves the template (vapor-chamber/router-fetch, or loaders: { prefixes, url }).' },
-  { code: 'router:missing:fetchBlade', severity: 'error', retryable: false, category: 'logic', message: 'A blade route was hit with no fetchBlade available', fix: 'Pass fetchBlade (or an http client) to the router.' },
-  { code: 'router:missing:http', severity: 'error', retryable: false, category: 'logic', message: 'routes: { url } was given no http client', fix: 'Pass http: routerHttp() from vapor-chamber/router/remote, or any HttpClient of your own.' },
-  { code: 'router:failed:blade', severity: 'error', retryable: false, category: 'network', message: 'Fetching a blade route\'s server HTML failed', fix: 'error.cause is the fetch\'s failure; the default onError hard-navigates so the server renders the page.' },
-  { code: 'router:invalid:component', severity: 'error', retryable: false, category: 'logic', message: 'The Vapor outlet was given a non-Vapor component', fix: 'Wrap it in defineVaporComponent (or compile the SFC in vapor mode); blade rows need the vDOM outlet.' },
-  { code: 'router:missing:router', severity: 'error', retryable: false, category: 'logic', message: 'A router composable or outlet ran with no router installed', fix: 'Install the router: app.use(router).' },
-  // The bus itself: a dispatch loop, a sealed bus
-  { code: 'core:exceeded:depth',         severity: 'error', retryable: false, category: 'logic',      message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
-  { code: 'core:refused:bus',           severity: 'error', retryable: false, category: 'logic',      message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
-]);
-
-/**
- * Get the error registry entry for a BusError code.
- *
- * @example
- * if (result.error instanceof BusError) {
- *   const entry = getErrorEntry(result.error.code);
- *   console.log(entry?.fix); // actionable fix suggestion
- * }
- */
-export function getErrorEntry(code: string): ErrorCodeEntry | undefined {
-  // A plugin's throw is `<its id>:failed:plugin` for any id (every built-in
-  // plugin declares one), so it answers with the one `plugin:failed:plugin`
-  // entry. tests/plugin-ids.test.ts.
-  return ERROR_CODE_REGISTRY.find(e => e.code === code)
-    ?? (code.endsWith(':failed:plugin') ? ERROR_CODE_REGISTRY.find(e => e.code === 'plugin:failed:plugin') : undefined);
-}
-
-/**
- * Is this BusError code a transient (retryable) failure? Consults the registry.
- * Returns undefined for codes not in ERROR_CODE_REGISTRY.
- *
- * @example
- * if (result.error instanceof BusError && isRetryableCode(result.error.code) === false) {
- *   // permanent failure - don't re-dispatch
- * }
- */
-export function isRetryableCode(code: string): boolean | undefined {
-  return getErrorEntry(code)?.retryable;
-}
-
-/**
- * Describe all error codes as plain text - useful for LLM system prompts.
- *
- * @example
- * const systemPrompt = `When the bus returns an error, use this table:\n${describeErrorCodes()}`;
- */
-export function describeErrorCodes(): string {
-  const lines = ['Error codes (code | severity | fix):'];
-  for (const e of ERROR_CODE_REGISTRY) {
-    lines.push(`  ${e.code} | ${e.severity} | ${e.fix}`);
-  }
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // busApiSchema - JSON Schema of the bus API for LLM code generation
 // ---------------------------------------------------------------------------
 
@@ -790,12 +617,12 @@ export function busApiSchema(): Record<string, {
 }> {
   return {
     dispatch: {
-      description: 'Execute a command through the handler + plugin pipeline. Runs beforeHooks, handler, plugins, afterHooks, listeners.',
+      description: 'Execute a command: its rules, its steps and its handler, then the afterHooks and listeners.',
       params: { action: 'string - registered action name', target: 'any - primary data (entity, id, etc.)', payload: '(optional) any - secondary data (quantities, flags, etc.)' },
       returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
     },
     query: {
-      description: 'Read-only dispatch - skips beforeHooks (no mutation gating), otherwise same as dispatch. Use for reads/queries.',
+      description: 'Read-only dispatch: the same as dispatch, its start not counted as pending. Use for reads/queries.',
       params: { action: 'string', target: 'any', payload: '(optional) any' },
       returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
     },
@@ -806,18 +633,13 @@ export function busApiSchema(): Record<string, {
     },
     register: {
       description: 'Register a handler for an action. Returns an unregister function.',
-      params: { action: 'string', handler: '(cmd: Command) => any', options: '(optional) { throttle?: number, undo?: Handler }' },
+      params: { action: 'string', handler: '(cmd: Command) => any', options: '(optional) { undo?: Handler, optimistic?: boolean, exclusive?: Exclusive }' },
       returns: '() => void - call to unregister',
     },
     use: {
-      description: 'Install a plugin that wraps every dispatch in a middleware chain.',
-      params: { plugin: '(cmd, next) => CommandResult', options: '(optional) { priority?: number }' },
+      description: 'Install a plugin: the bus places each part it declares (started, settled, authorize, validate, reuse, admit, begin, attach).',
+      params: { plugin: '{ id?, actions?, actionFilter?, ...parts }' },
       returns: '() => void - call to remove plugin',
-    },
-    onBefore: {
-      description: 'Subscribe a hook that fires before every dispatch. Throw to cancel the dispatch.',
-      params: { hook: '(cmd: Command) => void' },
-      returns: '() => void - call to unsubscribe',
     },
     onAfter: {
       description: 'Subscribe a hook that fires after every dispatch (including failed ones).',

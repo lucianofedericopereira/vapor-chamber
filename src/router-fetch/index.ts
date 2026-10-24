@@ -12,8 +12,7 @@
  *   createRouter({ routes, loaders: fetchLoaders() })
  */
 
-import { type HttpClient, createHttpClient } from '../http';
-import { REGEX_METACHARS } from '../http-cache';
+import { type HttpClient, type HttpRequestConfig, _groupsOf, createHttpClient } from '../http';
 import { type LoaderHandlers, interpolateLoad, routerError } from '../router/index';
 
 /** Fresh/stale windows for a cached loader read - the http client's own shape. */
@@ -22,7 +21,11 @@ export type LoaderCache = { ttl?: number; staleTtl?: number; serveStaleOnError?:
 export type FetchLoadersOptions = {
   /** Extra headers on every loader request. */
   headers?: Record<string, string>;
-  /** vapor-chamber http client override (tests, a pre-configured instance). Default: fresh client. */
+  /**
+   * The client loader reads go through. Default: the router's (its `http`
+   * option), so they share the app's one client, else a fresh client when the
+   * router has none.
+   */
   http?: HttpClient;
   /**
    * Cache loader reads through the http client's LRU. Default: **false** -
@@ -55,21 +58,28 @@ function resolveCache(
 }
 
 export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers {
-  const http = options.http ?? createHttpClient({ headers: options.headers });
+  const headers = options.headers;
+  // Built at the first read that has no client from the options or the router.
+  let own: HttpClient | undefined;
   return {
     url: async (template, location, record, signal, ctx) => {
+      const http = options.http ?? ctx?.http ?? (own ??= createHttpClient());
       const url = interpolateLoad(template, location, record.queryDefs);
       const cache = resolveCache(record.meta, options.cache);
-      // A refresh reads past the cache (LoaderContext.refresh). The client's
-      // key ends with this URL after its baseURL, hence the `$` anchor.
-      if (cache && ctx?.refresh) http.invalidateCache(new RegExp(`${url.replace(REGEX_METACHARS, '\\$&')}$`));
       try {
         // Only pass `cache` when it was asked for - an explicit `cache:
         // undefined` is indistinguishable from absent to the client, but
-        // keeping the config minimal keeps the miss path free of the key.
-        const response = cache === undefined
-          ? await http.get(url, { signal })
-          : await http.get(url, { signal, cache });
+        // keeping the config minimal keeps the miss path free of the key. A
+        // refresh asks the server before any stored copy is used, the
+        // client's and the browser's (`cacheMode`): the data is known to be
+        // out of date.
+        const config: HttpRequestConfig = { signal, headers };
+        if (cache !== undefined) config.cache = cache;
+        if (ctx?.refresh) config.cacheMode = 'no-cache';
+        const response = await http.get(url, config);
+        // The read's groups (RFC 9875): a write naming one refreshes this record.
+        const groups = response.headers?.['cache-groups'];
+        if (groups !== undefined) ctx?.cacheGroups(_groupsOf(groups));
         // Stale-while-revalidate: this value is real data from a past-fresh
         // entry, so the navigation commits on it immediately. Hand the
         // background refresh to the engine - otherwise it would land in the

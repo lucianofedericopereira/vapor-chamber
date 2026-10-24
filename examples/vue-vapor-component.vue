@@ -1,22 +1,23 @@
 <!--
-  Vue Vapor Component Example
+  Vue Vapor component example
 
-  Demonstrates: a store with undo (defineChamberStore + useCommandHistory), a
-  validator on its command, and the composables' results read in a template.
+  Todos with undo and redo. The todos are a store, so every change is a command
+  and the history undoes it. A validator refuses an empty add, and the refusal
+  shows in an alert as it happens.
 
-  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike - only
-  the script attribute differs between the two modes.
+  A Vapor component (`<script setup vapor>`, Vue 3.6+). Drop the `vapor`
+  attribute for a VDOM component: the script and the template stay as they are.
 
   Templates unwrap TOP-LEVEL refs, so a composable's result is kept as an
-  object here (`cmd.loading.value`, `hist.canUndo.value`): a nested `.value`
-  is the same at runtime and for vue-tsc.
+  object here (`hist.canUndo.value`): a nested `.value` is the same at
+  runtime and for vue-tsc.
 -->
 
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, onScopeDispose, ref } from 'vue';
 // One entry for a Vue app: `vapor-chamber/vue` carries the bus and its
 // plugins too, and wires Vue at build time.
-import { getCommandBus, validator, useCommand, useCommandHistory } from 'vapor-chamber/vue';
+import { getCommandBus, validator, useCommand, useCommandError, useCommandHistory } from 'vapor-chamber/vue';
 import { defineChamberStore } from 'vapor-chamber/store';
 
 interface Todo {
@@ -51,12 +52,15 @@ onScopeDispose(bus.use(validator({
 
 const todos = useTodos(bus);
 const cmd = useCommand();
-const hist = useCommandHistory({ filter: (c) => c.action.startsWith('todo') });
+const hist = useCommandHistory({ actions: ['todo*'] });
+// The refusal of the last add, live: the validator's message until the next add works.
+const errs = useCommandError({ actions: ['todoAdd'] });
 
 // The filter is the view's own state, not the store's: a store write the
 // history does not record would leave the last step not undoable (canUndo).
 const filter = ref<'all' | 'active' | 'completed'>('all');
 const newTodoText = ref('');
+let lastId = 0;
 
 const visible = computed(() => {
   const items = todos.state.value.items;
@@ -71,9 +75,11 @@ const stats = computed(() => {
 });
 
 function addTodo() {
-  // Dispatched through useCommand, so its loading and lastError track it.
-  const result = cmd.dispatch('todoAdd', newTodoText.value.trim(), { id: Date.now() });
-  if (result.ok) newTodoText.value = '';
+  const result = cmd.dispatch('todoAdd', newTodoText.value.trim(), { id: ++lastId });
+  if (result.ok) {
+    newTodoText.value = '';
+    errs.clearErrors();
+  }
 }
 </script>
 
@@ -87,11 +93,13 @@ function addTodo() {
     <form @submit.prevent="addTodo" class="add-form">
       <label for="new-todo" class="visually-hidden">New todo</label>
       <input id="new-todo" v-model="newTodoText" placeholder="What needs to be done?" />
-      <button type="submit" :aria-disabled="cmd.loading.value || !newTodoText.trim()">Add</button>
+      <button type="submit" :aria-disabled="!newTodoText.trim()">Add</button>
     </form>
 
     <!-- A live region, so the failure is heard -->
-    <p class="error" role="alert">{{ cmd.lastError.value?.message }}</p>
+    <div role="alert">
+      <p v-if="errs.latestError.value" class="error">{{ errs.latestError.value.message }}</p>
+    </div>
 
     <div class="controls">
       <button type="button" @click="hist.canUndo.value && hist.undo()" :aria-disabled="!hist.canUndo.value">Undo</button>

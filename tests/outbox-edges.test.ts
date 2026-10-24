@@ -1,42 +1,29 @@
 /**
  * Outbox - the paths the happy-path suite does not reach.
  *
- * `tests/outbox.test.ts` covers queue -> flush -> drain. What it never exercises
+ * `tests/outbox.test.ts` covers hold -> flush -> drain. What it never exercises
  * are the arms that only fire when something is wrong or unusual: no bus, a
- * re-entrant flush, going offline mid-flush, a handler that throws rather than
- * returning `{ ok: false }`, and the `window`-less (SSR / worker) branch of
- * autoFlush.
+ * re-entrant flush held open, a failure that carries no error, and the
+ * `window`-less (SSR / worker) branch.
  *
  * Each of these is a real operating condition for an offline queue, not a
  * synthetic edge: an outbox exists precisely because the network is unreliable.
  */
-import { describe, expect, vi, afterEach } from 'vitest';
-import { createAsyncCommandBus } from '../src/index';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { createAsyncCommandBus, type CommandResult } from '../src/index';
 import { createOutbox } from '../src/outbox';
-import type { OutboxRecord, OutboxStorage } from '../src/outbox';
-import { it } from '../src/vitest';
+import { defineTransport } from '../src/transports';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-/** In-memory storage so nothing here depends on localStorage or IndexedDB. */
-function memoryStorage(seed: OutboxRecord[] = []): OutboxStorage {
-  let rows = [...seed];
-  return {
-    load: async () => [...rows],
-    save: async (records) => { rows = [...records]; },
-    clear: async () => { rows = []; },
-  };
-}
-
-describe('outbox - flush without a bus', () => {
+describe('outbox - flush off a bus', () => {
   it('rejects with an actionable message instead of throwing something opaque', async () => {
-    const outbox = createOutbox({ storage: memoryStorage(), autoFlush: false });
-    await expect(outbox.flush()).rejects.toThrow(/no bus available/);
-    // The message has to name both fixes, because which one applies depends on
-    // how the caller wired it.
-    await expect(outbox.flush()).rejects.toThrow(/install\(bus\)|flush\(bus\)/);
+    const outbox = createOutbox({ storage: null, autoFlush: false });
+    // The message names the fix.
+    await expect(outbox.flush()).rejects.toThrow(/createAsyncCommandBus\(\{ outbox \}\)/);
   });
 });
 
@@ -44,20 +31,14 @@ describe('outbox - flush re-entrancy', () => {
   it('a second flush joins the in-progress one rather than starting a race', async () => {
     let release: (() => void) | null = null as (() => void) | null;
     const gate = new Promise<void>((r) => { release = r; });
-
-    const bus = createAsyncCommandBus();
-    let dispatches = 0;
-    bus.register('sync', async () => { dispatches++; await gate; return { ok: true } as const; });
+    let sends = 0;
+    const transport = defineTransport(async () => { sends++; await gate; return { ok: true, value: 'ok', error: undefined }; });
 
     let online = false;
-    const outbox = createOutbox({
-      storage: memoryStorage(),
-      autoFlush: false,
-      isOnline: () => online,
-    });
-    outbox.install(bus);
+    const outbox = createOutbox({ storage: null, autoFlush: false, isOnline: () => online });
+    const bus = createAsyncCommandBus({ retry: false, transport, outbox });
 
-    await bus.dispatch('sync', 'row-1'); // queued while offline
+    await bus.dispatch('sync', 'row-1'); // held while offline
     expect(outbox.pending.value).toBe(1);
 
     online = true;
@@ -67,104 +48,50 @@ describe('outbox - flush re-entrancy', () => {
 
     release?.();
     await a;
-    expect(dispatches).toBe(1);
+    expect(sends).toBe(1);
   });
 });
 
-describe('outbox - failure and interruption during flush', () => {
-  it('a handler that THROWS is captured as a failed result, not an unhandled rejection', async ({ asyncBus: bus }) => {
-    bus.register('sync', async () => { throw new Error('backend exploded'); });
-
-    let online = false;
-    const outbox = createOutbox({
-      storage: memoryStorage(),
-      autoFlush: false,
-      isOnline: () => online,
-    });
-    outbox.install(bus); // registers the plugin itself - do NOT bus.use() it again
-
-    const queued = await bus.dispatch('sync', 'row-1');
-    expect((queued.value as { queued?: boolean } | undefined)?.queued).toBe(true);
-
-    online = true;
-    await expect(outbox.flush()).resolves.toBeDefined(); // must not reject
-    // The record stays queued: a throw is a failure, so it is retried later.
-    expect(outbox.pending.value).toBe(1);
-  });
-
-  it('going offline mid-flush leaves the remaining records queued', async ({ asyncBus: bus }) => {
-    let online = false;
-    let handled = 0;
-
-    const outbox = createOutbox({
-      storage: memoryStorage(),
-      autoFlush: false,
-      isOnline: () => online,
-    });
-
-    bus.register('sync', async () => {
-      handled++;
-      online = false; // the connection drops while the first record replays
-      return { ok: true } as const;
-    });
-    outbox.install(bus); // registers the plugin itself - do NOT bus.use() it again
-
-    await bus.dispatch('sync', 'row-1');
-    await bus.dispatch('sync', 'row-2');
-    expect(outbox.pending.value).toBe(2);
-
-    online = true;
-    await outbox.flush();
-
-    // One replayed and drained; the loop then saw isOnline() === false and
-    // stopped rather than burning the rest against a dead connection.
-    expect(handled).toBe(1);
-    expect(outbox.pending.value).toBe(1);
-  });
-});
-
-describe('outbox - autoFlush without a window', () => {
-  it('does not attempt to bind an online listener under SSR / workers', () => {
+describe('outbox - without a window', () => {
+  it('does not attempt to bind a listener under SSR / workers', () => {
     vi.stubGlobal('window', undefined);
-    // The branch under test is the `typeof window !== 'undefined'` guard: with
-    // no window this must construct and dispose cleanly rather than throwing.
-    const outbox = createOutbox({ storage: memoryStorage(), autoFlush: true });
+    // The `typeof window !== 'undefined'` guard: with no window this must
+    // construct and dispose cleanly rather than throwing.
+    const outbox = createOutbox({ storage: null, autoFlush: true });
     expect(() => outbox.dispose()).not.toThrow();
   });
 
-  it('binds and unbinds the online listener when a window exists', () => {
+  it('binds and unbinds both listeners when a window exists', () => {
     const add = vi.fn();
     const remove = vi.fn();
     vi.stubGlobal('window', { addEventListener: add, removeEventListener: remove });
 
-    const outbox = createOutbox({ storage: memoryStorage(), autoFlush: true });
-    expect(add).toHaveBeenCalledWith('online', expect.any(Function));
+    const outbox = createOutbox({ storage: null, autoFlush: true });
+    expect(add.mock.calls.map((c) => c[0])).toEqual(['online', 'offline']);
 
     outbox.dispose();
-    expect(remove).toHaveBeenCalledWith('online', expect.any(Function));
+    outbox.dispose(); // idempotent - no second removal
+    expect(remove.mock.calls.map((c) => c[0])).toEqual(['online', 'offline']);
   });
 });
 
 describe('outbox - a failed replay that carries no error', () => {
   it('is judged with a generic Error, not undefined', async () => {
-    const bus = createAsyncCommandBus();
-    bus.register('sync', async () => 'saved');
     let online = false;
     const seen: unknown[] = [];
     const outbox = createOutbox({
-      storage: memoryStorage(),
+      storage: null,
       autoFlush: false,
       isOnline: () => online,
       isRetryable: (error) => { seen.push(error); return true; },
     });
-    outbox.install(bus);
-    await bus.dispatch('sync', 'row-1'); // queued while offline
+    // The shape a hand-written transport can answer: `ok: false` and no `error`.
+    const transport = defineTransport(async () => ({ ok: false, value: undefined }) as unknown as CommandResult);
+    const bus = createAsyncCommandBus({ retry: false, transport, outbox });
+    await bus.dispatch('sync', 'row-1'); // held while offline
 
-    // A plugin below the outbox that fails the replay with no `error` field -
-    // the shape a hand-written plugin can return.
-    bus.use(() => ({ ok: false, value: undefined }) as never, { priority: -50 });
     online = true;
-    const summary = await outbox.flush(bus);
+    const summary = await outbox.flush();
 
     expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     expect(seen).toHaveLength(1);
