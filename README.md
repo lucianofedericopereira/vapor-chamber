@@ -64,7 +64,7 @@ It needs Node >= 24.5. Vue is an **optional** peer dep: >= 3.5 for composables, 
 for the full Vapor surface. The core bus runs without Vue entirely. Vite >= 5 and `@vitejs/plugin-vue`
 >= 5 are needed only for the `vapor-chamber/vite` plugins (HMR, `vaporChamberWire()`) and Vapor SFC support.
 
-**ESM-only**, no CJS build: Node >= 22 `import`, bundlers and `<script type="module">` all work. For
+**ESM-only**, no CJS build: Node >= 24.5 `import`, bundlers and `<script type="module">` all work. For
 classic `<script>` tags use the [IIFE variants](#iife--cdn-variants).
 
 **Building a library on it?** Mark `vapor-chamber` and every `vapor-chamber/*` subpath external. A
