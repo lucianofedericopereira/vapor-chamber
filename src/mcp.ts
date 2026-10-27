@@ -125,7 +125,7 @@ export type McpHandlerOptions = {
  * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline, so
  * a handshake never advertises a stale version.
  */
-export const MCP_SERVER_VERSION = '1.32.0';
+export const MCP_SERVER_VERSION = '1.33.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
