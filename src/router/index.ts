@@ -159,7 +159,7 @@ export type RouterOptions = {
 /**
  * A routes payload as a read answers it: plain JSON, the table itself. A
  * failure is a non-2xx problem, which the http client throws; an envelope
- * (`{ state }`, a 2xx `{ problem }`) is off-protocol (log s35.115).
+ * (`{ state }`, a 2xx `{ problem }`) is off-protocol.
  */
 export function readRoutesPayload(raw: unknown): RoutesPayload {
   const candidate = raw as RoutesPayload | null;
@@ -233,7 +233,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    * blade row - and the primary documented setup, a generated route module with
    * no blade rows, uses neither. Building it here would put the whole client
    * (CSRF, interceptors, retry, cache) in every consumer's graph: 8.5 KB raw /
-   * 3.4 KB brotli (v1.18.0), about a quarter of this subpath, for code most apps never
+   * 3.4 KB brotli, about a quarter of this subpath, for code most apps never
    * execute - and a dynamic import would still charge a bundler that does not
    * code split, with `createRouter` choosing a dependency for its caller.
    *
@@ -414,8 +414,8 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    * The client invalidated `group`: the records on screen whose read named it
    * refresh, past every cache, as a stale read's refresh does
    * (`trackRevalidation`: `isRevalidating`, dropped if the page moved on, kept
-   * stale if it fails). The router hears it from its client, never the bus
-   * (record revision 23 item 3). tests/router/cache-groups.test.ts.
+   * stale if it fails). The router hears it from its client, never the bus.
+   * tests/router/cache-groups.test.ts.
    */
   function refreshGroup(group: string): void {
     const at = engine.snapshot.value.location;

@@ -1,12 +1,15 @@
 /**
  * Bundle-size budget guard.
  *
- * Fails CI if any IIFE variant exceeds its brotli budget. Locks the perf wins
- * from v1.2.0 (audience-split + signal extraction + listener bucketing) so a
- * future change can't silently regress the headline numbers.
+ * Scope: the three IIFE files in dist/ (BUDGETS lists them), each against a
+ * raw ceiling AND a brotli q=11 ceiling. Exit 1 when either is exceeded or a
+ * file is missing (run `npm run build` first). It does not measure the ESM
+ * entries or the subpaths; `npm run size` (measure-size.mjs) reports those.
+ * Runs in the CI `check` and macOS jobs and in `npm run gate`.
  *
  * Adjust thresholds in BUDGETS when an intentional size change lands - the
- * goal is "intentional only", not "never grow".
+ * goal is "intentional only", not "never grow". The comments inside BUDGETS are
+ * the ledger of each move: what grew, what was measured, what was declined.
  *
  * Run: node scripts/check-size.mjs
  */
@@ -14,11 +17,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { brotliCompressSync, constants } from 'node:zlib';
 
-// Brotli q=11 budgets, in bytes. Values are intentionally a bit above current
-// measurements to absorb minifier output drift between Vite versions.
-// Budgets updated for v1.4.0: AlienSignalWrapper class in alien-signals.ts
-// (class refactor for V8 hidden class stability). alien-signals is a regular dep
-// but NOT auto-bundled - opt in via configureAlienSignals from vapor-chamber/alien-signals.
+// Raw and brotli q=11 ceilings, in bytes. Values are intentionally a bit above
+// current measurements to absorb minifier output drift between Vite versions.
+// alien-signals is an optional peer dependency and is NOT bundled into these
+// files - opt in via configureAlienSignals from vapor-chamber/alien-signals.
 const BUDGETS = {
 // All bumps below are v1.6.0, across all three IIFE variants:
   //  • +~60-120 B for the shared useCommandState core refactor backing the

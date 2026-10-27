@@ -44,7 +44,7 @@ and steps, so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->4866<!-- /vc:tests --> tests** in <!-- vc:testFiles -->466<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->4866<!-- /vc:tests --> tests** in <!-- vc:testFiles -->466<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md))
 
 ## Contents
 
@@ -60,11 +60,11 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-It needs Node >= 24.5. Vue is an **optional** peer dep: >= 3.5 for composables, >= <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->
+It needs Node 24 (24.5 or later; no other major is tested). Vue is an **optional** peer dep: >= 3.5 for composables, >= <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->
 for the full Vapor surface. The core bus runs without Vue entirely. Vite >= 5 and `@vitejs/plugin-vue`
 >= 5 are needed only for the `vapor-chamber/vite` plugins (HMR, `vaporChamberWire()`) and Vapor SFC support.
 
-**ESM-only**, no CJS build: Node >= 24.5 `import`, bundlers and `<script type="module">` all work. For
+**ESM-only**, no CJS build: Node 24 `import`, bundlers and `<script type="module">` all work. For
 classic `<script>` tags use the [IIFE variants](#iife--cdn-variants).
 
 **Building a library on it?** Mark `vapor-chamber` and every `vapor-chamber/*` subpath external. A
@@ -88,9 +88,9 @@ store from one is refused by the other's bus (`tests/library-names.test.ts`).
   deliverables (route, controller, action classes, CSRF flows, Sanctum, Inertia coexistence,
   Filament panels, Reverb realtime, queued commands). Runnable PHP companions in
   [examples/laravel-backend/](examples/laravel-backend).
-- **Astro** - [examples/exo-astro](examples/exo-astro) is a declarative directive set (`v-scope`,
-  `v-command`, `v-bind-text`, `v-show`, `v-each`) for coordinating independent page sections. It
-  passes `buffer: createBuffer()`, so sections can dispatch before their handlers hydrate.
+- **Astro** - [examples/exo-astro](examples/exo-astro) makes static Astro HTML live through the
+  `data-vc-*` attributes (`bindCommands`, `bindDisplay`), with independent page sections on one bus.
+  It passes `buffer: createBuffer()`, so sections can dispatch before their handlers hydrate.
 - **Performance & tuning** - [docs/performance.md](docs/performance.md): what's optimized by
   default, the tuning knobs (`configureUid`, `configureSignal`), a store's saves,
   variant selection, benchmark snapshot.
@@ -717,7 +717,7 @@ import { describeErrorCodes, busApiSchema, getErrorEntry } from 'vapor-chamber';
 
 const errorTable = describeErrorCodes();
 const apiSchema  = busApiSchema();
-getErrorEntry('core:missing:handler')?.fix;   // "Register a handler with bus.register(...)"
+getErrorEntry('core:missing:handler')?.fix;   // "Register a handler with bus.register(action, handler) before dispatching."
 ```
 
 </details>
@@ -907,14 +907,9 @@ local handler. A `$` action is the library's and always runs locally.
 import { createAsyncCommandBus } from 'vapor-chamber';
 import { httpTransport } from 'vapor-chamber/transports';
 
-// The bus re-sends through the transport, read from the answer: a 429, 503 or
-// 408 for any action, after the Retry-After it declares - never a redirect.
+// The bus re-sends through the transport by the rule above (never a redirect).
 // Until a 429 or 503 wait ends, another command for that action waits it too,
 // unsent (transport:limited:held, docs/retry.md).
-// No reply, a 502, 504 or 500, or a verdict with a Retry-After (409 in
-// progress) only for an action declared idempotent or a keyed command. An
-// unkeyed command with no reply fails with context.outcome 'unknown'. The
-// plugins see one dispatch.
 const bus = createAsyncCommandBus({
   onMissing: 'ignore',
   transport: {
@@ -1212,11 +1207,6 @@ carry the bus too.
 | `<script>`-tag page | `VaporChamber.configureVue(Vue)` | None. `untracked()` is not available |
 | ESM page with an import map | `configureVue(Vue)` | None. `untracked()` cannot suspend tracking |
 
-**Import from `vapor-chamber/vue` in a Vue app.** The Gotcha above says why. The root can only
-look for Vue at runtime, and that lookup fails in a production bundle. So `untracked()` silently
-becomes a pass-through there. The static entry resolves Vue at build time, and re-exports the
-composables (`useCommand`, `useCommandHistory`, ...) as the same functions, not copies.
-
 `untracked()` is a plain pass-through when Vue is absent. So the root import stays safe in code
 shared between Vue and non-Vue targets, though it cannot suspend tracking there. In DEV it warns
 once when Vue arrived through that runtime lookup rather than at build time. The warning shows
@@ -1304,10 +1294,6 @@ the lookup is what finds Vue (`tests/root-probe-builds.test.ts`).
 A Vite app that imports from the subpath, with neither `vaporChamberWire()` nor the define, still
 ships the lookup as dead code: +2,589 B raw, +932 B brotli on a vDOM app (measured 2026-10-08, log
 s35.231). Either one removes it.
-
-Both entries also carry the bus itself (`createCommandBus`, `getCommandBus`, plugins, transports),
-so a Vue app imports one entry. An app with no Vue imports the bus from the package root, which
-works with no Vue in the tree.
 
 </details>
 
@@ -1491,7 +1477,7 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 |---|:--:|:--:|:--:|
 | Bus (`createCommandBus`, `createAsyncCommandBus`) | yes | yes | yes |
 | `createApp()`, `connect()` one-liner | yes | yes | yes |
-| HTTP transport (`http`) | yes | yes | yes |
+| HTTP transport (`httpTransport`) | yes | yes | yes |
 | Light plugins (logger, validator, authGuard) and `pace()` | yes | yes | yes |
 | `bindCommands()`: `[data-vc-command]` on plain HTML | yes | yes | yes |
 | `bindDisplay()`: `data-vc-text`, `-show`, `-each`, `-pending` | yes | yes | yes |
@@ -1598,7 +1584,6 @@ vapor-chamber/iife[-core|-elements] -> IIFE bundles
 ## Architecture
 
 The **core** imports no framework and no dependency, and it is the only part an app needs.
-Everything else is optional and tree-shaken when unimported.
 
 ```
 +---------------------------------------------------------+
@@ -1689,8 +1674,8 @@ Two shared helpers sit in `examples/` rather than in each example:
 | App | What it shows |
 |-----|---------------|
 | [`vapor-sfc/`](examples/vapor-sfc) | End-to-end `<script setup vapor>` SFC tree - three panels showing `useCommand`, `defineVaporCommand`, and `useSharedCommandState` side by side. |
-| [`vapor-island-cart/`](examples/vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + `createChannel` + `persist`). |
-| [`exo-astro/`](examples/exo-astro) | Five declarative directives for Astro pages (incl. `v-each`) - **dispatch before hydration** via `onMissing:'buffer'`. Its scanner is covered by [`tests/examples/`](tests/examples/). |
+| [`vapor-island-cart/`](examples/vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + a store's `persist` and `share: shareTabs()`). |
+| [`exo-astro/`](examples/exo-astro) | Static Astro HTML made live by `data-vc-*` attributes alone (`bindCommands`, `bindDisplay`) - **dispatch before hydration** through `buffer: createBuffer()`. |
 | [`laravel-app/`](examples/laravel-app) | Real, verified Laravel app (13.x on a current skeleton): Blade page -> core IIFE -> dispatch -> session-backed actions, with real CSRF (419/401). |
 | [`laravel-backend/`](examples/laravel-backend) | Drop-in PHP controller/action files - the backend half of a dispatch. |
 | [`router-demo/`](examples/router-demo) | The router end to end - outlet, loaders, typed query params, menus. No build step: `node examples/static-server.mjs`. |
@@ -1732,12 +1717,8 @@ Two shared helpers sit in `examples/` rather than in each example:
 | [`form-validation.ts`](examples/form-validation.ts) | Form validation with error handling |
 | [`async-api.ts`](examples/async-api.ts) | Async handlers, an async logger plugin, and an idempotent read the bus re-sends |
 | [`realtime-search.ts`](examples/realtime-search.ts) | Debounced search queries |
-| [`custom-plugins.ts`](examples/custom-plugins.ts) | Writing plugins for either bus: reading the result through `onSettled`, refusing with a coded failure through `fail` (and an `id`), declaring `retryIn` |
+| [`custom-plugins.ts`](examples/custom-plugins.ts) | Writing plugins for either bus: reading the result through the `settled` part, refusing with a coded failure through `fail` (and an `id`), declaring `retryIn` |
 | [`vue-vapor-component.vue`](examples/vue-vapor-component.vue) | Full Vue Vapor todo app |
-
-> The command composable is `useCommand` (`dispatch` + `pending` + `register`/`on`/`emit`,
-> Vapor-safe). For fire-and-forget hot paths use `defineVaporCommand`; for cross-component aggregate
-> state use `useSharedCommandState`.
 
 ## API Reference
 
@@ -1758,8 +1739,9 @@ Two shared helpers sit in `examples/` rather than in each example:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `onMissing` | `'error' \| 'throw' \| 'ignore' \| 'buffer' \| fn` | `'error'` | Behavior when no handler is registered |
-| `naming` | `{ pattern: RegExp, onViolation?: string }` | - | Enforce naming convention on actions (names containing `$` are the library's and not checked) |
+| `onMissing` | `'error' \| 'throw' \| 'ignore' \| fn` | `'error'` | Behavior when no handler is registered |
+| `buffer` | `createBuffer()` | - | Hold a dispatch whose handler registers later, and run it then. A query never waits |
+| `naming` | `{ pattern: RegExp, onViolation?: 'warn' \| 'throw' \| 'ignore' }` | `onViolation: 'warn'` | Enforce naming convention on actions (names containing `$` are the library's and not checked) |
 
 </details>
 
@@ -1772,7 +1754,7 @@ Two shared helpers sit in `examples/` rather than in each example:
 | `query(action, target, payload?)` | Read-only dispatch - its rules, steps, handler and afterHooks; not counted as pending |
 | `emit(event, data?)` | Fire a domain event - notifies `on()` listeners, needs no handler |
 | `dispatchBatch(commands[], options?)` | Execute multiple commands -> `{ successCount, failCount, results }` |
-| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, canUndo?, answer?, optimistic?, exclusive? }` |
+| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, canUndo?, answer?, optimistic?, exclusive?, cacheGroups?, cacheGroupInvalidation? }` |
 | `use(plugin)` | Add a plugin: the bus places each part it declares |
 | `onAfter(hook)` | Run after every command |
 | `on(pattern, listener)` | Subscribe to matching commands (`*`, `prefix*`, exact). Returns unsub |
@@ -1819,7 +1801,7 @@ Every composable above takes `bus` in its options, sync or async. Without it, it
 
 ## Design Goals
 
-1. **Minimal** - <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli core, no runtime dependency. `alien-signals` is an optional peer the library never imports, so nothing bundles it unless you do
+1. **Minimal** - <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli core, no runtime dependency
 2. **Vapor-native** - built for signals, not vDOM
 3. **Composable** - plugins for everything
 4. **Type-safe** - full TypeScript, one schema as the source of truth

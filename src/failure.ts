@@ -42,6 +42,11 @@ export type FailOptions = { action?: string; context?: Record<string, unknown>; 
 /** A failure factory bound to its owner. A party only ever holds its own. */
 export type Fail = (code: FailCode, message: string, opts?: FailOptions) => BusError;
 
+// The owner the next BusError is minted for: a one-shot slot, the pattern of
+// `_nextOrigin`. Only `_failures` writes it, so a constructor call anywhere
+// else mints for 'app'.
+let mintOwner = 'app';
+
 /**
  * BusError - a failure the library, a plugin or a transport raised.
  *
@@ -58,11 +63,6 @@ export type Fail = (code: FailCode, message: string, opts?: FailOptions) => BusE
  *   console.log(result.error.action);         // 'missing'
  * }
  */
-// The owner the next BusError is minted for: a one-shot slot, the pattern of
-// `_nextOrigin`. Only `_failures` writes it, so a constructor call anywhere
-// else mints for 'app'.
-let mintOwner = 'app';
-
 export class BusError extends Error {
   // Private, so no holder can rewrite it: the owner is the wiring's, and the
   // condition (the retry verdict) is the raiser's. A private field is an

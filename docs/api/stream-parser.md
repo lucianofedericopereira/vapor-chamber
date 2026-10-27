@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/stream-parser';
 
 ### createStreamParser
 
-**Function** - [src/stream-parser.ts:546](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L546)
+**Function** - [src/stream-parser.ts:545](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L545)
 
 ```ts
 createStreamParser(callbacks?: StreamParserCallbacks, options?: StreamParserOptions) => StreamParser
@@ -31,7 +31,7 @@ Factory matching the rest of vapor-chamber's `createX()` naming convention.
 
 ### StreamParser
 
-**Class** - [src/stream-parser.ts:207](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L207)
+**Class** - [src/stream-parser.ts:206](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L206)
 
 ```ts
 StreamParser: typeof StreamParser
@@ -41,7 +41,7 @@ StreamParser: typeof StreamParser
 
 ### ParserSnapshot
 
-**Type alias** - [src/stream-parser.ts:201](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L201)
+**Type alias** - [src/stream-parser.ts:200](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L200)
 
 ```ts
 export type ParserSnapshot = { state: number; depth: number; path: StreamParserPath };
@@ -49,7 +49,7 @@ export type ParserSnapshot = { state: number; depth: number; path: StreamParserP
 
 ### StreamParserCallbacks
 
-**Type alias** - [src/stream-parser.ts:185](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L185)
+**Type alias** - [src/stream-parser.ts:184](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L184)
 
 ```ts
 export type StreamParserCallbacks = {
@@ -66,7 +66,7 @@ export type StreamParserCallbacks = {
 
 ### StreamParserError
 
-**Type alias** - [src/stream-parser.ts:183](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L183)
+**Type alias** - [src/stream-parser.ts:182](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L182)
 
 ```ts
 export type StreamParserError = { message: string; state: number; depth: number; path: StreamParserPath };
@@ -74,7 +74,7 @@ export type StreamParserError = { message: string; state: number; depth: number;
 
 ### StreamParserOptions
 
-**Type alias** - [src/stream-parser.ts:196](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L196)
+**Type alias** - [src/stream-parser.ts:195](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L195)
 
 ```ts
 export type StreamParserOptions = {
@@ -85,7 +85,7 @@ export type StreamParserOptions = {
 
 ### StreamParserPath
 
-**Type alias** - [src/stream-parser.ts:181](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L181)
+**Type alias** - [src/stream-parser.ts:180](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L180)
 
 ```ts
 export type StreamParserPath = ReadonlyArray<string | number>;

@@ -42,7 +42,7 @@ const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:245](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L245)
+**Function** - [src/chamber-vapor.ts:242](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L242)
 
 ```ts
 defineVaporCommand<B extends BaseBus = CommandBus<import("./command-bus").CommandMap>, D extends number | undefined = undefined, T extends number | undefined = undefined>(action: string, handler: Handler, options?: VaporCommandOptions<B, D, T>) => { dispatch: (target: any, payload?: any) => PacedOn<B, CommandResult, D, T>; dispose: () => void; }
@@ -72,7 +72,7 @@ dispatch({ name: 'page_view', params: { page: '/landing' } });
 
 ### defineVaporComponent
 
-**Function** - [src/chamber-vapor.ts:181](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L181)
+**Function** - [src/chamber-vapor.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L178)
 
 ```ts
 defineVaporComponent<T = any>(options: object) => T | null
@@ -80,7 +80,7 @@ defineVaporComponent<T = any>(options: object) => T | null
 
 defineVaporComponent - define a Vapor component with proper type inference.
 
-Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.7, #13831). Use this to get full
+Wraps Vue's `defineVaporComponent()`. Use this to get full
 TypeScript inference for props, emits, and slots in Vapor components.
 Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
 compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
@@ -104,7 +104,7 @@ const Comp = defineVaporComponent({
 
 ### defineVaporCustomElement
 
-**Function** - [src/chamber-vapor.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L148)
+**Function** - [src/chamber-vapor.ts:145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L145)
 
 ```ts
 defineVaporCustomElement<T = any>(options: object, extraOptions?: object) => T | null
@@ -112,11 +112,10 @@ defineVaporCustomElement<T = any>(options: object, extraOptions?: object) => T |
 
 defineVaporCustomElement - create a custom element backed by Vapor rendering.
 
-Wraps Vue's `defineVaporCustomElement()` (introduced in 3.6.0-alpha.4, #14017). The generated custom
+Wraps Vue's `defineVaporCustomElement()`. The generated custom
 element uses Vapor's compiler-optimized rendering instead of the VDOM, giving
 zero-overhead DOM updates inside shadow DOM. Safe to call with a reused
-options object, and children re-render on reactive prop changes (beta.14+;
-per-beta detail: CHANGELOG / whitepaper alignment log).
+options object, and children re-render on reactive prop changes (Vue 3.6.0-beta.14+).
 
 Returns null if the Vapor runtime (Vue 3.6+) is not detected - check before calling
 `customElements.define()`.
@@ -138,7 +137,7 @@ if (MyEl) customElements.define('vc-greeting', MyEl);
 
 ### getVaporInteropPlugin
 
-**Function** - [src/chamber-vapor.ts:114](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L114)
+**Function** - [src/chamber-vapor.ts:112](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L112)
 
 ```ts
 getVaporInteropPlugin() => any | null
@@ -159,7 +158,7 @@ if (plugin) createApp(App).use(plugin).mount('#app');
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:325](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L325)
+**Function** - [src/chamber-vapor.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L319)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; pending: (action: string, target?: unknown) => Readonly<Signal<boolean>>; dispose: () => void; }
@@ -168,8 +167,8 @@ useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payloa
 useVaporAsyncCommand - async-aware command dispatch for Vapor components
 used inside Suspense boundaries.
 
-Vue 3.6.0-beta.10 introduced proper async component hydration under VDOM
-Suspense. This composable wraps an AsyncCommandBus dispatch, untracked, and
+Vue 3.6.0-beta.10+ hydrates async components under VDOM Suspense. This
+composable wraps an AsyncCommandBus dispatch, untracked, and
 gives `pending(action, target?)` (the bus's command state for that key,
 `commandState`), making it safe for `<script setup vapor>` components that
 await async operations. Error-boundary rendering and scheduler-flush

@@ -30,9 +30,8 @@
  * instead of vanishing into a gitignored HTML build.
  *
  * THE ENTRY POINTS ARE DERIVED, NOT LISTED. typedoc.json carried a hand-kept
- * array and it had drifted: it named 18 while `exports` published 23, leaving
- * `./vue`, `./vapor`, `./store`, `./router/vapor` and `./router/remote` shipped
- * and undocumented. Reading `package.json` "exports" instead means the
+ * array and it had drifted, leaving `./vue`, `./vapor`, `./store`,
+ * `./router/vapor` and `./router/remote` shipped and undocumented. Reading `package.json` "exports" instead means the
  * reference covers exactly the public surface, by construction. The `iife`
  * entries are skipped on purpose - they install a global rather than export a
  * module, and their surface is the variant contract in docs/, not this.
@@ -44,8 +43,9 @@
  * Run: node scripts/generate-api-docs.mjs         write docs/api/
  *      node scripts/generate-api-docs.mjs --list  entry points, no write
  *
- * CI runs it and then `git diff --exit-code docs/api`, the same freshness
- * pattern as docs/BUNDLE-SIZES.md and docs/COVERAGE.md.
+ * CI runs `npm run docs` and then `git diff --exit-code docs/api`; `npm run gate`
+ * applies the same pattern to docs/BUNDLE-SIZES.md and to the other generators'
+ * output.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

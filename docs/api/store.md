@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/store';
 
 ### fieldRef
 
-**Function** - [src/store.ts:108](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L108)
+**Function** - [src/store.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L98)
 
 ```ts
 fieldRef<S extends object, K extends keyof S & string>(store: { readonly state: { readonly value: S; }; $onField: (key: K, fn: (value: S[K]) => void) => () => void; }, key: K) => { readonly value: S[K]; }
@@ -120,7 +120,7 @@ export type ChamberStoreOptions<S extends object, R extends Record<string, Store
    * dispatches `cartAdd`, and becomes the method `cart.add`), each value
    * returns the next state from the current one and the call's target and
    * payload. `actions` elsewhere in the library is an ActionScope (names),
-   * so the map has its own word. Log s35.147. `null` is an action a
+   * so the map has its own word. `null` is an action a
    * transport sends with no local change: its state comes from `answer` or
    * the server's `stores`. A function for a sent action is refused unless the
    * store is `optimistic` (`core:invalid:handler`).
@@ -305,7 +305,7 @@ The value of a store's `share`, made by `shareTabs`: null where there are no tab
 
 ### defineChamberStore
 
-**Variable** - [src/store.ts:96](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L96)
+**Variable** - [src/store.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L86)
 
 ```ts
 defineChamberStore<S extends object, R extends Record<string, import("./store-base").StoreReducer<S> | null>>(id: string, options: import("./store-base").ChamberStoreOptions<S, R>) => <B extends import("./command-bus").BaseBus>(bus: B, router?: import("./store-base").StoreRouter) => import("./store-base").ChamberStore<S, R, B>

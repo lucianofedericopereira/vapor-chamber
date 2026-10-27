@@ -11,7 +11,9 @@
  * lets the app mount, clicks the `v-vc-command` control, and checks that the
  * directive responded: `vc-loading` on the element and `aria-disabled="true"`
  * (busy, keeping keyboard focus - never `disabled`) are what `buildHandler`
- * does at the start of a dispatch.
+ * does at the start of a dispatch. It then does the same end to end for
+ * `v-vc-payload` and `v-vc-optimistic` (see the section further down). It
+ * checks that one example only, and exits 1 on the first failed assertion.
  *
  * It lives in scripts/ rather than tests/ on purpose: it depends on an
  * example's build output, so it would fail on a fresh clone before anything is
@@ -22,13 +24,12 @@
  *
  * or `npm run check:example`, which does both.
  *
- * `check:example` ALSO BUILDS examples/vapor-island-cart afterwards, which this
- * script has nothing to do with and which is why it is said here rather than
- * nowhere: package.json cannot carry a comment. That example is a workspace
- * with its own `vue-tsc --noEmit && vite build`, and until this was wired in no
- * root script ran it - so the only end-to-end exercise of `sync()` against a
- * real bus and fast lane was checked by nothing. It costs ~1.5s on top of this
- * script's ~2.6s. A build is not a behaviour check, but it does pin the example
+ * `check:example` ALSO BUILDS examples/vapor-island-cart and examples/exo-astro
+ * afterwards, which this script has nothing to do with and which is why it is
+ * said here rather than nowhere: package.json cannot carry a comment.
+ * vapor-island-cart is a workspace with its own `vue-tsc --noEmit && vite
+ * build`, and it is the only end-to-end exercise of `sync()` against a real bus
+ * and fast lane. A build is not a behaviour check, but it does pin the example
  * against the current `sync({ channel, lane, events })` signature, which is the
  * drift that would actually happen.
  */

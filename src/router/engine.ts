@@ -170,9 +170,9 @@ export function createEngine(ctx: EngineContext) {
   // Revalidation is a THIRD lane, and deliberately not folded into
   // `isLoading`: a stale-while-revalidate hit commits real data immediately,
   // so the page is not loading - it is showing something while a refresh runs
-  // behind it. That distinction is the one thing swrv's `isValidating` names
-  // that this router had no word for. A counter rather than a boolean, since
-  // several records in one chain can revalidate at once.
+  // behind it. That is the distinction swrv's `isValidating` names. A counter
+  // rather than a boolean, since several records in one chain can revalidate
+  // at once.
   let revalidateCount = 0;
   function syncRevalidating(): void {
     isRevalidating.value = revalidateCount > 0;
@@ -196,7 +196,7 @@ export function createEngine(ctx: EngineContext) {
         .then((fresh) => {
           const current = snapshot.value;
           if (current.location.fullPath !== to.fullPath) return; // navigated away - drop it
-          // The same object: a 304 kept the copy (decision B). No new
+          // The same object: a 304 kept the copy. No new
           // snapshot, so nothing re-renders. tests/router/cache-groups.test.ts.
           if (current.data.get(recordName) === fresh) return;
           setRouteData(recordName, fresh);
@@ -267,8 +267,8 @@ export function createEngine(ctx: EngineContext) {
   }
 
   function cleanQueryPatch(patch: QueryPatch | undefined): QueryValues {
-    // This path reads only own keys off `patch`, so it never had the lookup bug
-    // - but the object it RETURNS becomes `location.query`, which must be
+    // This path reads only own keys off `patch`, so it has no lookup problem,
+    // but the object it RETURNS becomes `location.query`, which must be
     // uniform with parseQuery's. See `../dict`.
     const query: QueryValues = dict<string | string[]>();
     if (!patch) return query;
@@ -474,8 +474,7 @@ export function createEngine(ctx: EngineContext) {
 
   /**
    * After-hooks are post-commit observers - user surface (`router.afterEach`)
-   * *and* internal (the active-link stamp registers here). Two rules, both
-   * learned elsewhere in this codebase:
+   * *and* internal (the active-link stamp registers here). Two rules:
    *
    * - **Each hook is contained.** One throwing analytics hook must not wrap a
    *   committed navigation as `failed:component`, fire `ctx.onError`, and

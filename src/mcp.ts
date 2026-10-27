@@ -66,7 +66,7 @@ function actionToMcpTool(name: string, def: ActionSchema): McpTool {
  * Convert a BusSchema into MCP tool definitions (the `tools/list` shape).
  *
  * Mirrors `toAnthropicTools` (from the schema module): each action becomes one tool, with
- * `target` and `payload` as nested object properties. Field types map 1:1 to
+ * `target` and `payload` (each when declared) as nested object properties. Field types map 1:1 to
  * JSON Schema types; `'any'` fields get no type constraint and are excluded
  * from `required` (all other fields are required).
  *
@@ -110,7 +110,7 @@ export type McpHandlerOptions = {
    * `createActionFilter([])` selects every action explicitly and silences the
    * warning, which is the point: demo convenience should be a deliberate
    * keystroke, not a default. To expose nothing, do not mount the handler:
-   * CloudEvents rejects an empty `any`. Log s35.180.
+   * CloudEvents rejects an empty `any`.
    */
   actionFilter?: ActionFilter;
   /** Server name reported by `initialize`. Default: `'vapor-chamber'`. */
@@ -122,10 +122,8 @@ export type McpHandlerOptions = {
 /**
  * Version reported by the MCP `initialize` handshake.
  *
- * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline -
- * it sat at a hardcoded '1.7.0' for four releases, so every handshake
- * advertised a version that had not existed for months. A failing test at
- * release time is the cheapest possible checklist.
+ * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline, so
+ * a handshake never advertises a stale version.
  */
 export const MCP_SERVER_VERSION = '1.32.0';
 
@@ -224,11 +222,9 @@ export function createMcpHandler(
       return rpcError(id, -32602, `Unknown tool: ${name}`);
     }
     const target = args?.target ?? {};
-    // `__origin` rides the payload into stampMeta, which is the only
-    // race-free place to put it: it travels with this dispatch instead of
-    // sitting in a module flag that a concurrent local dispatch can read.
-    // Non-object payloads (a bare string an LLM sent where an object belongs)
-    // are passed through untouched - schema validation owns that complaint.
+    // The origin travels with this dispatch (`_withOrigin`, below), the only
+    // race-free place for it: not in a module flag that a concurrent local
+    // dispatch can read.
     const rawPayload = args?.payload;
     // An absent payload is legitimate - `actionToMcpTool` only declares (and
     // requires) `payload` for actions whose schema has one, so an action
@@ -391,14 +387,13 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
   }
   const { maxLineLength: rawMaxLineLength = 1_048_576, maxInFlight: rawMaxInFlight = 32 } = options ?? {};
   // Both clamped to at least 1, because both are reachable from the public API
-  // and both had a value that stopped the server dead - the same "one bad
-  // option" class as `cache({ maxSize: -1 })` in plugins-extra.
+  // and a bad value would stop the server dead - the same "one bad option"
+  // class as `cache({ maxSize: -1 })` in plugins-extra.
   //
-  // `maxInFlight: 0` was the sharp one. The first line raised inFlight to 1,
-  // `1 >= 0` paused stdin, and when the dispatch finished `0 < 0` was false, so
-  // it never resumed: the transport served exactly one message and then hung
-  // with nothing in flight. Verified before this clamp - pause called once,
-  // resume never.
+  // `maxInFlight: 0` is the sharp one. The first line raises inFlight to 1,
+  // `1 >= 0` pauses stdin, and when the dispatch finishes `0 < 0` is false, so
+  // it never resumes: the transport would serve exactly one message and then
+  // hang with nothing in flight.
   //
   // `maxLineLength: 0` is milder but still wrong: every chunk that does not end
   // on a newline is over the cap, so a message split across chunks - which the

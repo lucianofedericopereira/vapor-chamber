@@ -161,7 +161,7 @@ and nothing above affects it. For the mode trade-off, see
 
 > These ratios are **generated**, not typed: `npm run bench:bands` runs the
 > bench several times through `scripts/bench-ratios-reporter.mjs`, and
-> `npm run docs:stamp` publishes them, so none is typed by hand. Ratios rather
+> `npm run docs:stamp` publishes them. Ratios rather
 > than hz on purpose: an absolute hz figure is host state (rows here swing
 > 20-30% run to run) and a same-run ratio is not. Even a ratio moves. A ratio
 > between two libraries is a fact about one host (docs/V8-RULES.md rule 15),

@@ -10,13 +10,12 @@
     "declaration": false,
     "declarationMap": false
   },
-  // `tests/router/typed-names.test-d.ts` was matched by NOTHING before this:
-  // not vitest (`include: tests/**/*.test.ts` does not match `.test-d.ts`),
-  // not this project, not the main one (`rootDir: "src"` excludes tests/),
-  // not examples/tsconfig.patterns.json. It asserts - via `@ts-expect-error`
-  // - that a typo'd route name must not compile, so a regression in
-  // `createRouter<TName>` narrowing would have gone unnoticed: the file was a
-  // compile-time guard that never compiled.
+  // The `*.test-d.ts` files are matched by nothing else: not vitest (`include:
+  // tests/**/*.test.ts` does not match `.test-d.ts`), not the main project
+  // (`rootDir: "src"` excludes tests/), not tsconfig.tests.json (it excludes
+  // them). They assert via `@ts-expect-error` (e.g. that a typo'd route name
+  // must not compile), so a file left out of this list is a compile-time guard
+  // that never compiles.
   "include": [
     "src/**/*",
     "tests/typed-contract.typecheck.ts",

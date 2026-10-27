@@ -67,7 +67,7 @@ export function onSettled<R extends MaybeAsyncResult>(
   // budgeted Blade consumer bundle (it reaches it through `logger`), and
   // `isThenable` is not: no consumer of that bundle calls the predicate
   // directly. Calling it from here would anchor it into the import graph and
-  // it measured +3 brotli there in v1.22.0 - paid by every consumer, to save a line in a
+  // it measured +3 brotli there - paid by every consumer, to save a line in a
   // file that already has the rule at the top of it. Keeping the call site
   // free lets the export tree-shake away for anyone who does not use it.
   return (result != null && typeof (result as PromiseLike<CommandResult>).then === 'function')
@@ -90,7 +90,7 @@ export function onSettled<R extends MaybeAsyncResult>(
  * once for every caller. Answers whether it landed, as a promise when
  * it had to wait, so the caller can refuse a second press meanwhile and take
  * the next step of a press only after this one landed. The ledger's undo and
- * redo share it; useCommandHistory and history() each had the defect.
+ * redo, useCommandHistory and history() share it.
  * tests/history-undo-lands.test.ts.
  */
 export function moveUnlessRefused(

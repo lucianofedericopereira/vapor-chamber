@@ -3,7 +3,7 @@
  *
  * Sibling to `./vdom`, and named the same way: for what it costs. Importing
  * from here opts into Vue's **Vapor** runtime, so it carries a stricter floor
- * than the package's peer range (Vue >= 3.6), exactly like
+ * (Vue >= 3.6) than the package's peer range (Vue >= 3.5), exactly like
  * `vapor-chamber/vapor`. A 3.5 consumer must not import it.
  *
  *   import { createRouter } from 'vapor-chamber/router';        // neither renderer
@@ -51,8 +51,9 @@
  * dependency surface through the bundler entry, so an upstream rename fails in
  * this repo before it fails at a consumer.
  *
- * SIZE. This module is held to 0.5 KB brotli as its own BUNDLE-SIZES row. The
- * shape below is what fits: the whole DEV branch is one inline dead expression
+ * SIZE. This module has its own BUNDLE-SIZES row, and its arm in an app build
+ * is ceilinged by tests/vapor/vapor-outlet-size.test.ts. The shape below keeps
+ * it small: the whole DEV branch is one inline dead expression
  * rather than a helper call, so a consumer's production build drops both
  * message variants in a single step. Do not restructure it into a helper
  * without re-running `npm run size:doc`.
@@ -85,7 +86,7 @@ function vaporComponentOf(entry: RenderEntry): unknown {
   if (component?.__vapor === true) return component;
   // Unconditional: handlers switch on `code`, so the throw cannot be dev-only.
   // Only the cause/fix tail is gated. Two causes, two fixes, so two tails; the
-  // blade one is the documented v1 caveat made loud at the exact moment a
+  // blade one is the documented caveat made loud at the exact moment a
   // consumer hits it.
   throw routerError(
     'invalid:component',

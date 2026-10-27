@@ -30,8 +30,8 @@ What the lib does **not** chase:
 - Property mangling, Closure ADVANCED, asm.js / Wasm. Friction far exceeds gain
   for a library at this size.
 - Premature parallelism. Hooks run sequentially because order matters. Opt-in
-  parallel was considered and not built (see "What we measured but did not
-  ship").
+  parallel was considered and not built (see docs/decisions.md, the 2026-10-13
+  entry "What we measured but did not ship").
 
 ---
 
@@ -227,13 +227,11 @@ more, and it vanishes once listener fan-out dominates.
 `tests/clock-source-ab.test.ts` measures it on the real dispatch path, with
 `emit` as the control, and prints its table.
 
-**The trade.** Every command in one synchronous burst shares a
-`ts`. Ordering is unaffected: `meta.id` is monotonic and unique, and it is what
-you should sequence by. But the wall-clock field goes coarse by up to the
-burst's duration, so a thousand-command burst reads as instantaneous.
-Commands after the first in a turn also stop tracking `vi.setSystemTime`.
+**The trade.** The wall-clock field goes coarse by up to the burst's
+duration, so a thousand-command burst reads as instantaneous. Commands after
+the first in a turn also stop tracking `vi.setSystemTime`.
 
-`meta.ts` was never a duration instrument. `Date.now()` is
+`meta.ts` (the `ts` field of a command's meta, read in `src/command-bus.ts`) was never a duration instrument. `Date.now()` is
 millisecond-resolution and **not monotonic**, so an NTP correction or a clock
 change can move it backwards. For real timing read `performance.now()` in a
 plugin. On a hot loop use `createFastLane()`, which stamps no meta at all.
@@ -620,24 +618,15 @@ removed a *later* peer. Its cost on this row was within run-to-run variance.
 
 ### Dispatch with single handler (10k)
 
-`dispatch` is a different shape than `emit`. It returns a `CommandResult`, reads
-the action's record (its handler, rules and steps), stamps `Command.meta` for
-correlation/causation tracing, and tracks dispatch depth. Minimal event emitters
-(`mitt`) don't compute results, so comparing `bus.dispatch` to `m.emit` is
-apples-to-oranges. Real peers are Pinia's action dispatch, Redux's dispatch, or
-any middleware-chained bus.
-
-mitt's `emit` calls the subscribed functions and returns nothing.
-`bus.dispatch` resolves the handler, runs the action's rules and steps, stamps the meta and
-returns a `CommandResult`. mitt's emit runs
+`dispatch` is a different shape than `emit`. mitt's `emit` calls the
+subscribed functions and returns nothing. `bus.dispatch` reads the action's
+record (its handler, rules and steps), allocates the meta object (`{ ts, id,
+correlationId, causationId, origin, idempotencyKey, response, request }`) and
+the result object (`{ ok, value, error }`), and tracks dispatch depth: the
+bus pattern's semantics, none of it free. Real peers are Pinia's action
+dispatch, Redux's dispatch, or any middleware-chained bus. mitt's emit runs
 **<!-- vc:benchMittEmitVsDispatch -->1.81-2.47<!-- /vc:benchMittEmitVsDispatch -->x**
 the ops/sec of `bus.dispatch` (the range over the latest `npm run bench:bands`).
-
-The gap reflects the work `dispatch` does per call. It allocates the meta object
-(`{ ts, id, correlationId, causationId, origin, idempotencyKey, response,
-request }`) and the result object (`{ ok, value, error }`). It reads the
-action's record and tracks dispatch depth. None of those are free, and all are
-unavoidable for the bus pattern's semantics.
 
 ### What this means
 
@@ -647,8 +636,8 @@ unavoidable for the bus pattern's semantics.
   the fast lane is level with eventemitter3.
 - **For commands with results / plugins / hooks / batch / request/response**:
   that's the bus pattern, and `dispatch` does meaningfully more per call than
-  `emit`. "Measuring your own usage" below gives the rate where that starts to
-  matter.
+  `emit`. "Measuring your own usage" below shows how to time the bus in your own app,
+  which is how to tell whether that cost matters to you.
 
 The comparative benches live in [`tests/perf.bench.ts`](../tests/perf.bench.ts)
 under `describe('emit fast path - no listeners')`,
@@ -802,9 +791,7 @@ If you want to know whether vapor-chamber is a bottleneck in your app:
    with `performance.now()` over a sample window, in a DevTools profile or
    around the call. If the bus's own share is small next to the handlers', look
    at the work the handlers do.
-2. **Persist save frequency.** Count `setItem` calls in DevTools' Storage
-   panel. If you see more than 100/sec, enable `coalesce: true`.
-3. **HTTP envelope cost.** Profile the `JSON.stringify(envelope)` site only if
+2. **HTTP envelope cost.** Profile the `JSON.stringify(envelope)` site only if
    your endpoint is hot. The lib's envelope is already minimal.
 
 For a full bench run against your own dispatch shapes, copy

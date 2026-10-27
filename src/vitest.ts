@@ -16,8 +16,7 @@
  * THE LIBRARY IS IMPORTED LAZILY, inside beforeEach, never at load. The
  * one-shot Vue detection and the warn-once state in chamber.ts assume nothing
  * imported the library before a test set its preconditions. Measured on this
- * repository's suite (v1.21.0):
- * in the full run, importing at load fails 4 tests in 2 files and importing
+ * repository's suite: in the full run, importing at load fails 4 tests in 2 files and importing
  * inside beforeEach fails none; with each file run alone, both fail the same
  * 4, because the async detection then lands before those tests. Those two
  * files assert detection from a clean start, and `vaporChamberTest()`'s

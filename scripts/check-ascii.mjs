@@ -18,9 +18,13 @@
  * Replacements: em/en dash -> comma, colon, parenthetical, or " - ";
  * arrow -> "->"; ellipsis -> "..."; times -> "x"; curly quotes -> straight.
  *
- * dist/ is not scanned: it is generated, and a clean src regenerates it clean.
- * node_modules/ and coverage/ are not ours. Genuine exceptions (verbatim
- * upstream quotes that must stay byte-exact) go in ALLOW below with a reason.
+ * Scope: the ROOTS directories plus the text files in the repository root, by
+ * the EXTENSIONS list. Under src/ every character above U+007F fails (only
+ * src/glyphs.ts is exempt); elsewhere the OFFENDERS alphabet fails. SKIP_DIRS
+ * (node_modules, coverage, dist, .astro, __ref) are generated or not ours and
+ * are not scanned. A file whose extension is not in EXTENSIONS is not read.
+ * Genuine exceptions (verbatim upstream quotes that must stay byte-exact) go
+ * in ALLOW below with a reason.
  *
  * Run: node scripts/check-ascii.mjs
  */
@@ -34,16 +38,10 @@ export const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.gi
 /**
  * Root-level files, DERIVED from the directory rather than listed.
  *
- * A hand-typed list misses whatever is added next (a dotfile has no extension
- * and lands on nobody's list), and `ascii: OK` then prints over characters it
- * never read.
- *
- * The root is read, one level deep, and the only list is what to LEAVE
- * OUT. That inverts the risk: a new root file is scanned by default, and an
- * exemption has to be written down with a reason, which is visible in a way a
- * missing name never is. Inclusion is decided by CONTENT, not by an alphabet -
- * anything that decodes as text is read, so `.DS_Store` is skipped for what it
- * is rather than for what it is called.
+ * The root is read one level deep and the only list is what to LEAVE OUT, so a
+ * new root file is scanned by default and an exemption has to be written down
+ * with a reason. Inclusion is decided by CONTENT, not by extension: anything
+ * that decodes as text is read, so `.DS_Store` is skipped for what it is.
  */
 export const ROOT_EXEMPT = new Map([
   ['package-lock.json', 'npm writes it; a dependency name is not ours to re-spell'],
@@ -82,40 +80,26 @@ export function rootFiles() {
     return isTextFile(name);
   });
 }
-// THE FOURTH TIME THIS LIST WAS WRONG, and the first three are recorded below
-// against the CHARACTER alphabet: the arrows, the console glyphs, the census
-// that found 9,300 more. This one is the FILE alphabet, which nothing had ever
-// questioned, and it failed the same way. `.astro`, `.sh` and `.tsx` were not
-// here, so 28 lines across three files carried em dashes, an ellipsis and a
-// times sign while this script printed "ascii: OK (425 files, no typographic
-// non-ASCII)". A guard that reports a clean sweep over a violation is worse
-// than no guard, because it is the reason nobody looks.
+// The FILE alphabet. A list of extensions is as short as its author's memory:
+// `.astro`, `.sh` and `.tsx` were once missing, and 28 lines across three files
+// carried em dashes, an ellipsis and a times sign while this script printed
+// "ascii: OK (425 files, ...)". A guard that reports a clean sweep over a
+// violation is worse than no guard.
 //
-// `.svg` and `.webmanifest` join them clean, not dirty. Both are text, both sit
-// under `assets/`, and neither had any reason to be exempt except that nobody
-// had listed them - which is exactly the property that made the other three
-// dangerous.
-//
-// The list is now TESTED rather than trusted: tests/ascii-guard.test.ts walks
-// the same roots, decodes every file, and fails if a text extension exists that
-// this array does not name. An alphabet cannot audit itself, so something that
-// reads the tree instead has to.
+// The list is TESTED rather than trusted: tests/ascii-guard.test.ts walks the
+// same roots, decodes every file, and fails if a text extension exists that
+// this array does not name.
 export const EXTENSIONS = [
   '.ts', '.tsx', '.js', '.mjs', '.cjs', '.md', '.json', '.vue', '.yml', '.yaml',
   '.html', '.css', '.php', '.astro', '.sh', '.svg', '.webmanifest',
 ];
-// `.astro` is Astro's generated cache under examples/exo-astro, gitignored and
-// rebuilt by `astro build`. It belongs here for the reason the header gives for
-// `dist/`: it is generated, and a clean source regenerates it clean. It was
-// NOT here until tests/ascii-guard.test.ts walked the tree and tripped over a
-// `preview.log` inside it - and the guard had in fact been scanning three of
-// its files (`content.d.ts`, `preview.json`, `types.d.ts`) all along, which
-// made the "N files" in the OK line depend on whether anyone had run the
-// example's build. Both of this guard's lists turned out to be short; this is
-// the second one.
 /**
  * Generated and vendor trees. Nothing here is written by hand, so there is no
  * character in it for anyone to have chosen.
+ *
+ * `.astro` is Astro's generated cache under examples/exo-astro, gitignored and
+ * rebuilt by `astro build`; scanning it made the file count in the OK line
+ * depend on whether the example had been built.
  *
  * `__ref` is the one that had to be earned. Each `tests/*-ab.test.ts` writes
  * `tests/__ref/<name>/` while it runs and removes it afterwards (.gitignore says
@@ -136,16 +120,11 @@ export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro', 
 /**
  * file-path substring -> reason. Earn every entry.
  *
- * The first one took a while to earn. Four console glyphs were deliberate but
- * uncontrolled: this guard's alphabet did not include them, so it reported a
- * clean sweep while they sat in SHIPPED strings in three modules - one of them
- * `logger()`, which is in all three IIFE variants. Same shape as the arrow
- * family below, which went in after a "completed" sweep left 48 arrows in 15
- * files.
- *
- * Collecting them in one module inverts that: NON_ASCII below fails EVERY other
- * file under `src/`, whatever the character, so the exception is one reviewable
- * path rather than a rule nobody enforced.
+ * The one entry exists because four console glyphs were deliberate but outside
+ * this guard's alphabet, and sat in SHIPPED strings in three modules (one of
+ * them `logger()`, in all three IIFE variants). Collecting them in one module
+ * lets NON_ASCII below fail EVERY other file under `src/`, whatever the
+ * character, so the exception is one reviewable path.
  */
 const ALLOW = new Map([
   ['src/glyphs.ts', 'the project\'s only non-ASCII characters, by design - see that file'],
@@ -155,50 +134,35 @@ const ALLOW = new Map([
 // the forbidden set) stays ASCII itself.
 //
 // The second group is INVISIBLE characters: a zero-width space can escape a
-// block-comment terminator inside a docblock, and the trick works - which is
-// the problem: the character is undetectable by eye and survives copy-paste
-// into a consumer's code. Rephrasing so the terminator is never written costs
-// nothing and leaves the source honest. NBSP and the BOM ride along for the
-// same reason - all three break things while looking like nothing.
+// block-comment terminator inside a docblock, is undetectable by eye and
+// survives copy-paste into a consumer's code. NBSP and the BOM ride along for
+// the same reason.
 //
 // The zero-width JOINERS (U+200C/U+200D) are deliberately NOT in the set.
-// Biome's noMisleadingCharacterClass rejects them in a character class - a
-// joiner is half of a grapheme, so matching one alone is not a well-defined
-// thing to do - and unlike the others they carry real meaning in scripts that
-// need them. The rule caught that in the first draft of this addition, which
-// is the lint doing exactly its job.
+// Biome's noMisleadingCharacterClass rejects them in a character class (a
+// joiner is half of a grapheme), and unlike the others they carry real meaning
+// in scripts that need them.
 //
-// The ARROW family is the third group, and it went in after this guard reported
-// a completed sweep while 48 arrows sat in 15 files, three of them in shipped
-// `src`. The set held the RIGHTWARDS arrow alone, so a rule stated as "no
-// arrows" was enforced as "no rightwards arrow" and every other direction
-// walked through: 29 leftwards, 9 left-right, 6 double-rightwards, plus up,
-// down and the hooked pair. Same shape as check-line-citations being blind to
-// 73 of 2524 test titles - a guard is worth exactly its alphabet, and a narrow
-// one reads as a clean sweep. Each replacement is an ASCII digraph saying the
-// same thing (`<-`, `->`, `<->`, `=>`), which is why the omission stayed
-// invisible: nothing was lost by not having them.
+// The ARROW family is the third group. The set once held the RIGHTWARDS arrow
+// alone, so "no arrows" was enforced as "no rightwards arrow" and 48 arrows in
+// 15 files (three in shipped `src`) walked through. A guard is worth exactly its
+// alphabet. Each replacement is an ASCII digraph (`<-`, `->`, `<->`, `=>`).
 const OFFENDERS =
   /[\u2013\u2014\u2018\u2019\u201c\u201d\u2026\u00d7\u200b\u2060\ufeff\u00a0\u2190\u2191\u2192\u2193\u2194\u21a9\u21aa\u21d2]/;
 
 /**
  * `src/` IS HELD TO PLAIN ASCII, not to a list.
  *
- * Everywhere else this guard bans an alphabet, and an alphabet is a list of the
- * characters somebody thought of. That list has now been wrong three times: the
- * arrows (48 of them, in 15 files, after a "completed" sweep), the console
- * glyphs (four, in shipped strings), and then a census that found 9,300 more
- * characters it had no opinion about at all - box drawing, bullets, section
- * signs, math symbols, emoji.
- *
- * The third time is enough. Inside `src/` the rule inverts: everything above
- * U+007F fails, and `src/glyphs.ts` is the one file allowed to hold a character
- * - every other module imports the const from it rather than typing the glyph.
- * There is nothing left to enumerate and nothing left to forget.
+ * Everywhere else this guard bans an alphabet, which is a list of the
+ * characters somebody thought of; a census once found 9,300 characters it had
+ * no opinion about (box drawing, bullets, section signs, math symbols, emoji).
+ * Inside `src/` the rule inverts: everything above U+007F fails, and
+ * `src/glyphs.ts` is the one file allowed to hold a character; every other
+ * module imports the const from it.
  *
  * The wider tree keeps the alphabet. Box-drawing rules in test files and status
- * markers in a README are not a cost - `src` is what ships in dist, and it is
- * the only place a stray character can reach a consumer's bundle.
+ * markers in a README are not a cost: `src` is what ships in dist, and the only
+ * place a stray character can reach a consumer's bundle.
  */
 // Written as the complement range rather than `[^\x00-\x7f]` because a negated
 // class of control characters is exactly what noControlCharactersInRegex

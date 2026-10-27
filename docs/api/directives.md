@@ -81,8 +81,8 @@ THE ARGUMENT IS NOT READ. Vue's argument is a PARAMETER slot, and #15490
 made it a getter so a DYNAMIC argument can be reactive (Vue's own test
 compiles `v-custom:[data.arg]` and expects the attribute to follow
 `data.arg`). A selector must not move, so it lives in the NAME, where a name
-cannot be dynamic; a selector in the argument was a dead control in every
-compiled Vapor template on rc.9, with the whole suite green.
+cannot be dynamic; a selector in the argument is a dead control in every
+compiled Vapor template, with no error.
 
 (Teardown does not follow the binding either - see the `beforeUnmount` note
 in the plugin below.)

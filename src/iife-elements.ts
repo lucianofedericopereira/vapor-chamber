@@ -17,7 +17,7 @@
  *   - Vapor sync/async composables - these target SFC-based apps, not
  *     custom-element widgets
  *
- * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
+ * Variant contents may change between major versions; see ROADMAP.md.
  */
 
 import { createCommandBus, createAsyncCommandBus } from './command-bus';
@@ -75,10 +75,9 @@ const VaporChamber = {
    * resolve in a browser. A widget page therefore loads Vue as a module and
    * passes it here.
    *
-   * It was missing, which made `vueDetectionHint()`'s advice - printed on the
-   * wrapper's own null path, deliberately un-gated so a production IIFE shows
-   * it - impossible to follow: `VaporChamber.configureVue is not a function`.
-   * Pinned by `tests/iife-bundle.test.ts`.
+   * `vueDetectionHint()`'s advice - printed on the wrapper's own null path,
+   * deliberately un-gated so a production IIFE shows it - names this call, so
+   * it must exist on the global. Pinned by `tests/iife-bundle.test.ts`.
    *
    *   <script type="module">
    *     const Vue = await import('https://.../vue.runtime-with-vapor.esm-browser.prod.js');

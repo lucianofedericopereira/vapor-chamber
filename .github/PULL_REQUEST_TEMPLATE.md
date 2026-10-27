@@ -1,6 +1,9 @@
 <!--
-Thanks for the PR. The checklist below mirrors what CI runs - if all boxes
-pass locally, CI will too.
+Thanks for the PR. The checklist below is what CI's `check` job runs, and
+`npm run gate` (CONTRIBUTING.md) runs those steps in its own order on a
+committed tree, and adds the `docs/BUNDLE-SIZES.md` diff and a clean-tree check
+that CI does not run. CI also runs the browser suite, the example builds and the perf A/B
+against the base, each as its own job.
 -->
 
 ## Summary
@@ -13,9 +16,12 @@ pass locally, CI will too.
 
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint:check` passes
-- [ ] `npm run test:run` passes
 - [ ] `npm run build` succeeds
+- [ ] `npm run test:coverage` and `npm run test:vapor` pass (the coverage floors gate CI)
 - [ ] `npm run size:check` passes (or BUDGETS bumped + reasoned in summary)
+- [ ] `npm run docs` leaves `docs/api`, `docs/errors.md`, `contract/` and the PHP fixture unchanged (commit the regenerated files)
+- [ ] `npm run test:browser` passes, if the change touches focus, keyboard
+      activation, live regions or the accessibility tree
 
 ## Performance impact (delete if not applicable)
 

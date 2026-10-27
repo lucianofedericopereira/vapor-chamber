@@ -70,7 +70,7 @@ export function createBuffer(options: BufferOptions = {}): CommandBuffer {
   const limit = countOption(options.maxSize, 256);
   const ttl = options.ttl !== undefined && options.ttl > 0 ? options.ttl : 0;
   const pending = signal(0);
-  // The queue is state (plan 1.32 3, the store owns the buffer queue): a
+  // The queue is state, owned by the store: a
   // state half of its own, no persist or share (a held command carries its
   // caller's settle), no registration, nothing on the bus. Built once.
   const half: StateHalf<Queue> = _stateHalf<Queue>(_plainRuntime, { id: 'buffer', state: () => ({ queues: new Map(), count: 0 }) }, null);

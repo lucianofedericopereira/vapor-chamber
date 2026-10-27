@@ -97,7 +97,7 @@ metadata, its idempotency key, travels once: as the `Idempotency-Key` header
 when the request is that command, and as that name in its `headers` member
 when the command is multiplexed (OData JSON 4.01 19.1). The value is a
 Structured Field String, the key percent-encoded and quoted (cases idem-1 to
-idem-5). A batch is `{ commands: [envelope, ...] }`. A command asks for its
+idem-3 and idem-5). A batch is `{ commands: [envelope, ...] }`. A command asks for its
 answer with `Accept: application/json, application/problem+json`.
 
 | Answer | Shape |
@@ -140,7 +140,7 @@ dispatched, so it runs no plugin and goes back to no server
 `errors` is `[{ pointer, detail }]`, the pointer into the envelope the client
 sent: `/payload/<field>`, or `/target/<field>` for a field of the target
 (RFC 6901, `~0` and `~1` escaped). FormBus maps a `/payload/` pointer to its
-field and leaves any other one, by design (src/form.ts:204-214).
+field and leaves any other one, by design (`fieldOf` in src/form.ts).
 The reference controller sends no `type` or `title` of its own: `code` is the
 identity, and `title` repeated the status's reason phrase. A backend's own
 `type` and `title`, such as an exception's rendered problem, are kept (case
@@ -277,7 +277,7 @@ Not on the object:
   ([retry.md](./retry.md)).
 
 **Stack:** decided by the constructor from the condition. Only `failed` (a
-bug) captures one (tests/before-cancel.test.ts:43, router-codes.test.ts).
+bug) captures one (tests/router/router-codes.test.ts).
 
 ## 6. The router
 

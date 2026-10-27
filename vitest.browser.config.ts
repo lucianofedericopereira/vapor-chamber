@@ -6,7 +6,8 @@ import { defineConfig } from 'vitest/config';
 import { browserChannel } from './scripts/browser-channel.mjs';
 
 /**
- * Real-browser project, opt-in: `npm run test:browser`.
+ * Real-browser project: `npm run test:browser`. Not part of `npm test`; CI runs
+ * it (production and `VC_MODE=development`).
  *
  * WHY A THIRD CONFIG. Some questions have no answer outside a browser engine:
  * focus behaviour (HTML's focus fixup rule), the HTTP cache (RFC 9111

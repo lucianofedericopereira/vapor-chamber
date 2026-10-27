@@ -32,7 +32,7 @@
  *   npm run ab:vue -- 3.6.0-rc.6
  *
  * The extracted baseline lands in tests/__ref/ (never published - package.json
- * `files` ships only dist/src/scripts) and is removed on exit.
+ * `files` does not list tests/) and is removed on exit.
  */
 
 import { execFileSync } from 'node:child_process';

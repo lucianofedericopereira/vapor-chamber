@@ -207,30 +207,17 @@ integration with it was inert.
 
 [vapor-roadmap]: https://github.com/vuejs/core/issues/13687
 
-## What is stable, regardless of Vue's beta cycle
+## What is stable before Vue 3.6 stable
 
-These layers are framework-agnostic and will not change shape across
-Vue 3.6 stable:
-
-- **Command bus**: `createCommandBus`, `createAsyncCommandBus` (with its own
-  retry, the `retry` option), plugins, hooks, before-hooks, wildcard listeners,
-  request/response, batch, query, emit, meta, BusError, introspection.
-- **Transports**: HTTP, WebSocket, SSE bridges, and `createChannel`, a fact
-  bridge over BroadcastChannel. It is not a bus plugin: it takes a fast lane,
-  not the bus. Independent of Vue.
-- **Plugins**: logger, validator, history, debounce, throttle, authGuard,
-  optimistic, optimisticUndo, persist, cache, circuitBreaker, rateLimit,
-  metrics, serialize (per-key sequential processing, async), idempotent
-  (collapse duplicate commands + stamp Idempotency-Key), supersede (abort the
-  previous in-flight dispatch for the same key).
-- **Schema / LLM layer**: bus -> tool-call adapters for Anthropic / OpenAI.
-- **Form bus**: reactive form state with async validation.
-- **HTTP client**: fetch wrapper with CSRF, interceptors, dedup.
-- **Testing utilities**: createTestBus, snapshot, time-travel.
-- **`defineVaporCommand`**: the zero-overhead command dispatch primitive has no
-  Vue equivalent and stays.
-- **IIFE distribution**: three sized variants (core / elements / full) matching
-  Vue's tree-shake axes. Stable shape.
+No shape is promised until Vue 3.6 ships stable. The project started in a beta
+expecting a near release, and Vue has been in release candidates since
+2026-07-18 (dates above). Until stable the shape stays free to change, and a
+breaking change ships as a minor with the CHANGELOG naming it: see "Version
+policy before 3.6 stable" under [Version targets](#version-targets). The bus,
+plugins, transports and the other layers that do not import Vue never wait on
+Vue's API, but they are not frozen either. What a release exports is in its
+CHANGELOG entry and [docs/api/](./docs/api/README.md), not in a list here: a
+list of stable names went stale with each RC.
 
 ## What is transitional and will realign post-3.6-stable
 
@@ -246,8 +233,10 @@ in Vapor components. `useCommand` now uses `onScopeDispose`-only cleanup and
 no `getCurrentInstance()`, so it is Vapor-safe on its own.
 
 **Done:** `useVaporCommand` was folded into `useCommand`. There is now a single
-command composable: `register`/`on`/`emit`/`dispose` plus reactive
-`loading`/`lastError`, Vapor-safe in `<script setup vapor>` and VDOM alike.
+command composable: `dispatch`/`register`/`on`/`emit`/`dispose` plus
+`pending(action, target?)`, the bus's command state for that key (it replaced
+`loading`/`lastError` in v1.32.0), Vapor-safe in `<script setup vapor>` and
+VDOM alike.
 `useVaporCommand` was **removed entirely**, not left as a deprecated alias.
 
 **Removed:** about 60 lines of duplicated logic, plus the "which one do I use?"
@@ -494,8 +483,8 @@ The lib ships **two dispatch paths** under the same package, with deliberately
 different shapes:
 
 - **`createCommandBus()`: general purpose.** Command envelope, CommandResult,
-  plugin chain, before/after hooks, listeners (exact + wildcard), schema, batch
-  with rollback, request/response, AbortController, persist, cross-tab channel,
+  plugins (`PluginParts`), after-hooks, listeners (exact + wildcard), schema, batch
+  with rollback, request/response, AbortController, cross-tab channel,
   the async bus's retry, HTTP/WS/SSE transports, Vapor wrappers.
   Ergonomics-first. Use for app-level commands.
 - **`createFastLane()` (`vapor-chamber/fast-lane`): the real hot path.**
@@ -538,12 +527,14 @@ posture above governs when any of them is built.
   compresses (WebSocket frames, storage). Open: an existing encoder's size
   against a subset of our own.
 - **`fails` in `BusSchema`**: code, status, and the field it can point at.
-- **Server push of store states.** A frame with no `id`, `{ stores: { cart:
-  ... } }`, over WebSocket, SSE and Echo, applied by each store's receiver.
-  The server already declares store states in a command's answer. Needed
-  first: what a pushed state with no command means for undo, history and a
-  persist scoped by action names. Today a client drops a frame with no
-  pending `id`, so adding the frame later breaks no client.
+- ~~**Server push of store states.**~~ Built: a push is a name and data on
+  every wire (an SSE event, an Echo broadcast, a WebSocket frame
+  `{ event, data }` with no `id`). Each store state under `data.stores` is
+  written to that store, then the event is emitted on the bus, never
+  dispatched, so no plugin runs and nothing is sent back. The write is a step
+  of `<event>$push`, a `$` name no reducer has, so a store's rollback keeps
+  the state it set (`_pushed`, src/applied-remotely.ts;
+  [docs/contract.md](docs/contract.md#4-the-wire)).
 - **One type vocabulary** for the schema's `FieldType` and the router's
   `ParamType`, which name the same primitives differently, with a codec per
   boundary. Open: the names and the split.
@@ -576,8 +567,9 @@ posture above governs when any of them is built.
 **Components**
 - **`KeepAlive` listeners**: pause like `useCommandHistory`, or stay live.
   Position: pause, since a cached page is refreshed by the router's re-read.
-- **`persist` applies what it loads**: today a deliberate auto-save with no
-  setter.
+- ~~**`persist` applies what it loads**~~: settled by removing the plugin. A
+  store's `persist: saveTo({ key })` reads its saved state when the store is
+  created and saves after any of its writes (src/store-persist.ts).
 
 **Accessibility** (the guarantees are [docs/accessibility.md](docs/accessibility.md))
 - A reaction plugin that announces by `meta.origin` (what the user did:
@@ -727,7 +719,7 @@ them. Items that die are struck with the reason, not deleted:
       touches the Vue-less main barrel. Until then the wrappers keep the opt-in
       `<T = any>` generic added in v1.6.0 (no Vue-type dependency).
 - [x] **plugin-vue 6.x**: in use (devDependency). `>=5.0.0` already admits it.
-- [ ] **Re-measure** IIFE sizes (Rolldown/Vite 8 may shift them) and update README.
+- [ ] **Re-measure** IIFE sizes and their budgets (`scripts/check-size.mjs`); the docs' figures are stamped.
 - [ ] **Variant contents** become semver-stable (the beta-era reshuffle freedom ends).
 
 None of these changes behavior for consumers who use the documented API. Each
@@ -803,13 +795,14 @@ points, alias resolution, signatures, doc comments and JSDoc tags.
 
 If you're a consumer choosing between APIs in this lib:
 
-- **Stable today, stable in v2:** the "stable, regardless of Vue's beta cycle"
-  list above. Use freely.
+- **Every export, until Vue 3.6 stable:** free to change shape, as "What is
+  stable before Vue 3.6 stable" above says. A change ships as a minor, named
+  in the CHANGELOG.
 - **Working today, will be reshaped in v2:** the "transitional" list. Use it,
   and expect a rename or removal to land in one release, with the CHANGELOG
   naming it. There is no deprecation window.
-- **Avoid:** anything not listed above is internal. The `_*` prefixed and
-  `getXxxFn()` exports in `chamber.ts` are explicitly internal.
+- **Avoid:** the `_*` prefixed and `getXxxFn()` exports in `chamber.ts`, which
+  are internal.
 
 If you're contributing: there is no "biggest pending change" here any more. The
 build-flag wrapper-elimination work was **withdrawn at rc.3**, not deferred, and
@@ -833,7 +826,7 @@ of truth for feature status.
 |---------|--------|--------|-------|
 | Dispatch / register / unregister | `command-bus` | v0.1.0 | 100% (line/branch/func) |
 | Plugin pipeline (sync + async) | `command-bus` | v0.1.0 | 100% (line/branch/func) |
-| Plugin priority ordering | `command-bus` | v0.2.0 | covered |
+| ~~Plugin priority ordering~~: removed in v1.32.0, no part has a position and plugins run in install order | `command-bus` | v0.2.0 | - |
 | `onAfter` hooks | `command-bus` | v0.2.0 | covered |
 | Dead letter handling (`onMissing`) | `command-bus` | v0.2.0 | covered |
 | Command batching + `continueOnError` + `successCount`/`failCount` | `command-bus` | v0.6.0 | covered |
@@ -841,13 +834,13 @@ of truth for feature status.
 | Wildcard listeners (`on`, `prefix*`) | `command-bus` | v0.3.0 | covered |
 | `once()` - one-shot listener | `command-bus` | v0.6.0 | covered |
 | `offAll(pattern?)` - mass unsubscribe | `command-bus` | v0.6.0 | covered |
-| `onBefore(hook)` - pre-dispatch hook, cancelable | `command-bus` | v0.6.0 | covered |
+| ~~`onBefore(hook)` - pre-dispatch hook, cancelable~~: removed in v1.32.0, a gate is a plugin's `authorize` or `validate` rule and an observer its `started` part | `command-bus` | v0.6.0 | - |
 | Request / response pattern + timeout | `command-bus` | v0.3.0 | covered |
-| Per-command throttle + undo at register | `command-bus` | v0.3.0 | covered |
+| Per-command undo at register (its `throttle` removed in v1.32.0, pacing is the sender's: `pace()`) | `command-bus` | v0.3.0 | covered |
 | `bus.hasHandler()` introspection | `command-bus` | v0.3.0 | covered |
 | `bus.clear()` | `command-bus` | v0.5.0 | covered |
 | `BaseBus` structural interface | `command-bus` | v0.6.0 | covered |
-| `query()` - CQRS read-only dispatch (skips beforeHooks) | `command-bus` | v1.0 | covered |
+| `query()` - CQRS read-only dispatch (the rules, the steps and the handler, then afterHooks) | `command-bus` | v1.0 | covered |
 | `emit()` - domain events (no handler, no result) | `command-bus` | v1.0 | covered |
 | `Command.meta` - auto-stamped id, ts, correlationId, causationId | `command-bus` | v1.0 | covered |
 | `registeredActions()` - introspection | `command-bus` | v1.0 | covered |
@@ -873,19 +866,19 @@ of truth for feature status.
 | `logger` | `plugins-core` | v0.1.0 | 100% lines |
 | `validator` | `plugins-core` | v0.1.0 | covered |
 | `history` + bus-backed undo/redo | `plugins-core` | v0.3.0 | covered |
-| `debounce` (stale-closure fix) | `plugins-core` | v0.3.0 | covered |
-| `throttle` | `plugins-core` | v0.3.0 | covered |
+| ~~`debounce` (stale-closure fix)~~: removed in v1.32.0, pacing is the sender's (`pace(bus.dispatch, { debounce })`) | `plugins-core` | v0.3.0 | - |
+| ~~`throttle`~~: removed in v1.32.0, pacing is the sender's (`pace(bus.dispatch, { throttle })`) | `plugins-core` | v0.3.0 | - |
 | `authGuard` | `plugins-core` | v0.3.0 | covered |
-| `optimistic` | `plugins-core` | v0.3.0 | covered |
-| `optimisticUndo` - auto-rollback through registered undo handlers | `plugins-core` | v1.0 | covered |
+| ~~`optimistic`~~: removed in v1.32.0, the handler makes the change (`register(action, handler, { undo, optimistic: true })`) | `plugins-core` | v0.3.0 | - |
+| ~~`optimisticUndo` - auto-rollback through registered undo handlers~~: removed in v1.32.0, the same register option | `plugins-core` | v1.0 | - |
 | ~~`retry` with configurable backoff + glob filter~~: removed in v1.25.0, the async bus retries on its own (its `retry` option) | `plugins-io` | v0.4.2 | - |
-| `persist` (localStorage / custom storage) | `plugins-io` | v0.4.2 | covered |
+| ~~`persist` (localStorage / custom storage)~~: removed in v1.32.0, a store saves its own state (`persist: saveTo({ key })`, `store-persist`) | `plugins-io` | v0.4.2 | - |
 | `createChannel` (BroadcastChannel, same-origin contexts) | `plugins-io` | v0.4.2 | covered |
 | `cache` - LRU query result caching with TTL + glob filter | `plugins-extra` | v1.0 | covered |
 | `circuitBreaker` - per-action closed/open/half-open resilience | `plugins-extra` | v1.0 | covered |
 | `rateLimit` - per-action sliding window limiter | `plugins-extra` | v1.0 | covered |
 | `metrics` - lightweight telemetry (count, duration, errorRate) | `plugins-extra` | v1.0 | covered |
-| `serialize` - per-key sequential processing (async, prevents same-key races, `scope:'cross-tab'` through Web Locks) | `plugins-extra` | v1.5 | covered |
+| ~~`serialize` - per-key sequential processing (async, prevents same-key races, `scope:'cross-tab'` through Web Locks)~~: removed in v1.32.0, an action takes `register(action, handler, { exclusive })` and a store `exclusive: true` | `plugins-extra` | v1.5 | - |
 | `idempotent` - collapse duplicate commands (double-submit/retry), stamps `Idempotency-Key` for the HTTP bridge | `plugins-extra` | v1.5 | covered |
 | `supersede` - aborts the previous in-flight dispatch for the same key (async bus, the stale request is cancelled, not ignored) | `plugins-extra` | v1.9.0 | covered |
 
@@ -905,11 +898,11 @@ of truth for feature status.
 | `readCsrfToken` - meta / cookie / hidden input | `http` | v0.5.0 | covered |
 | ~~`HttpError.code`~~: removed in v1.26.0, every client failure is the core's `BusError` and a backend's code reads `remote:<condition>:<code>` | `http` | v0.6.0 | - |
 | 419 vs 401 fix: CSRF expiry is not session expiry | `http` | v0.6.0 | covered |
-| `createHttpBridge` - fetch plugin | `transports` | v0.4.2 | 100% lines |
+| `httpTransport` (`createHttpBridge` until v1.32.0) - the fetch transport, declared at `createAsyncCommandBus({ transport })` | `transports` | v0.4.2 | 100% lines |
 | ~~`HttpBridgeOptions.noRetry`~~: removed in v1.25.0, the bridges declare `transport` and the async bus's class rule decides | `transports` | v0.6.0 | - |
-| `HttpBridgeOptions.scopeController` - Vapor lifecycle abort | `transports` | v0.6.0 | covered |
-| `createWsBridge` - WebSocket plugin + reconnect + bounded queue | `transports` | v0.6.0 | covered |
-| `WsBridge.connected` - reactive signal for connection state | `transports` | v0.6.0 | covered |
+| `HttpTransportOptions.scopeController` - Vapor lifecycle abort | `transports` | v0.6.0 | covered |
+| `wsTransport` (`createWsBridge` until v1.32.0) - WebSocket transport + reconnect + bounded queue | `transports` | v0.6.0 | covered |
+| `wsTransport().connected` - reactive signal for connection state | `transports` | v0.6.0 | covered |
 | `createSseBridge` - server-push EventSource, accepts `BaseBus` | `transports` | v0.6.0 | covered |
 | `createEchoBridge` - Laravel Echo/Reverb realtime (public/private/presence -> bus) | `transports` | v1.5.0 | covered |
 
@@ -917,12 +910,12 @@ of truth for feature status.
 
 | Feature | Module | Status | Tests |
 |---------|--------|--------|-------|
-| `useCommand` - Vapor-safe reactive composable (register/on/emit/dispose, loading/error) | `chamber` | v0.6.0 | covered |
-| `useCommandState` | `chamber` | v0.2.0 | covered |
+| `useCommand` - Vapor-safe composable (dispatch/register/on/emit/dispose, `pending(action, target?)`) | `chamber` | v0.6.0 | covered |
+| ~~`useCommandState`~~: removed in v1.32.0, state reduced by commands is a store (`defineChamberStore`, `vapor-chamber/store`) | `chamber` | v0.2.0 | - |
 | `useCommandHistory` - reactive undo/redo | `chamber` | v0.2.0 | covered |
 | `useCommandGroup` - namespace isolation | `chamber` | v0.4.1 | covered |
 | `useCommandError` - error boundary | `chamber` | v0.4.1 | covered |
-| `useSharedCommandState().isLoading(action, target?)` - per-key, bus-wide loading | `chamber` | v1.20.0 | covered |
+| `useSharedCommandState().pending(action, target?)` (`isLoading`, renamed in v1.32.0) - per-key, bus-wide in flight | `chamber` | v1.20.0 | covered |
 | `getCommandBus` / `setCommandBus` / `resetCommandBus` | `chamber` | v0.1.0 | covered |
 | Signal shim + `configureSignal` | `chamber` | v0.3.0 | covered |
 | `onScopeDispose` lifecycle alignment | `chamber` | v0.4.0 | covered |
@@ -957,9 +950,9 @@ of truth for feature status.
 | Schema layer - `createSchemaCommandBus`, `toTools`, `synthesize` | `schema` | v0.5.0 | 100% lines |
 | Schema auto-validation (`schemaValidator` auto-installed) | `schema` | v1.0 | covered |
 | `SynthesizeOptions.adapter` - custom LLM adapter | `schema` | v0.6.0 | covered |
-| `ERROR_CODE_REGISTRY` - structured error lookup table | `schema` | v1.0 | covered |
+| `ERROR_CODE_REGISTRY` - structured error lookup table | `error-registry` | v1.0 | covered |
 | `busApiSchema()` - JSON schema of bus API for LLM prompts | `schema` | v1.0 | covered |
-| `describeErrorCodes()` - plain-text error table for LLM system prompts | `schema` | v1.0 | covered |
+| `describeErrorCodes()` - plain-text error table for LLM system prompts | `error-registry` | v1.0 | covered |
 | `setupDevtools` - Vue DevTools panel | `devtools` | v0.4.0 | covered |
 | `createDirectivePlugin` - `v-vc-command` directive (vDOM) | `directives` | v0.6.0 | covered |
 | `vcCommandVapor` - `v-vc-command` for Vapor components | `directives` | v1.20.0 | covered |

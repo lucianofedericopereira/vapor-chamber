@@ -76,7 +76,7 @@ type ChannelMessage = { __vc: true; event: string; data: any };
  *
  * IT ALSO LEAVES THE DISPATCH CHAIN. As a plugin this cost more than half the
  * bus's dispatch throughput, on every dispatch of every action, whether or not
- * it synced. Measured for v1.22.0 over 11 shuffled rounds of 200,000 dispatches with
+ * it synced. Measured over 11 shuffled rounds of 200,000 dispatches with
  * `gc()` per round, against a byte-identical self-control arm: bare bus 1.000,
  * as a plugin 0.459 (control 0.454), as an `onAfter` listener 0.538, and on the
  * fast lane 0.867. The correctness fix and the performance fix are the same

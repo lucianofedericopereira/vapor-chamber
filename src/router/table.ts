@@ -203,12 +203,8 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   for (const record of records) {
     const chain: TableRecord[] = [];
     // A cyclic parent chain (`a.parent = b`, `b.parent = a`) would spin a
-    // `for (; r; r = r.parent)` walk FOREVER, synchronously, on the main
-    // thread: no error, no stack, the tab locks.
-    //
-    // Every other malformed-table case in this file is loud in dev and lenient
-    // in prod, and a hang is the one failure where that split matters most:
-    // dev gets the diagnosis, and production still has to survive rows it did
+    // `for (; r; r = r.parent)` walk forever on the main thread: no error, the
+    // tab locks. Dev throws below; production still has to survive rows it did
     // not validate, because a frozen tab cannot even hard-navigate away.
     // Stopping at the repeat leaves a truncated chain - a wrong page beats no
     // page at all.
@@ -239,7 +235,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   // matching row in server-priority order, so a static row is admitted only
   // when no EARLIER parameterised row also matches its path. `/products/new`
   // sitting behind `/products/:id` therefore stays on the scan and keeps
-  // matching `:id`, exactly as before.
+  // matching `:id`.
   //
   // Groups never match a URL, so they neither enter the map nor block anyone.
   const staticByPath = new Map<string, TableRecord>();

@@ -329,7 +329,6 @@ php artisan install:api   # Laravel 11+: creates routes/api.php (absent on a fre
 
 ```php
 // routes/api.php - auto-prefixed with `api`, so '/vc' -> /api/vc
-// (writing '/api/vc' here would resolve to /api/api/vc and 404)
 Route::post('/vc', VaporChamberController::class)
     ->middleware(['auth:sanctum']);
 ```
@@ -745,15 +744,11 @@ The same `emitDOMEvent` works without Alpine/Livewire:
 
 ### Why this matters for Laravel specifically
 
-Laravel projects typically have **multiple coexisting reactive layers**. Blade
-renders the page, Alpine handles small interactions, Livewire owns big
-component state, and Filament renders admin panels on Livewire.
-
-vapor-chamber's widget surface is **none** of those: it is Vue Vapor. The
-`emitDOMEvent` bridge is the **interop primitive** that lets a Vapor widget
-take part in any of those layers without coupling to them. The same pattern
-works for anything that reads DOM events: Stimulus (Rails), HTMX (event
-listeners), Solid islands, vanilla.
+A Laravel page often runs Blade, Alpine, Livewire and Filament at once.
+vapor-chamber's widget surface is none of those: it is Vue Vapor, and
+`emitDOMEvent` is the one primitive that lets a widget take part in any of
+them without coupling to it. The same holds for anything that reads DOM
+events: Stimulus, HTMX, Solid islands, vanilla.
 
 ---
 
@@ -923,15 +918,15 @@ maxWait } })` sets the wait when the monitor declares none (1 s) and when
 signal, or `bus.dispose()`, stops the polls, and `done` settles aborted.
 
 ```php
-// routes/api.php - the status monitor
+// routes/web.php - the status monitor, served at /jobs/{order} to match the Location above
 Route::get('/jobs/{order}', fn (Order $order) => $order->status === 'queued'
     ? response()->json((object) [], 202, ['Retry-After' => '2'])
     : response()->json(['state' => $order->only(['id', 'status'])]));
 ```
 
 Cross-origin, list `Location` and `Retry-After` in `exposed_headers`
-(CORS, above). Cross-origin, JS reads only the CORS-safelisted response
-headers (`Content-Type` and a few more) and the ones listed there.
+(CORS, above): JS reads only the CORS-safelisted response headers and the
+ones listed there.
 
 ---
 
@@ -1137,8 +1132,7 @@ Two limits remain, as in every cache-and-lock design. If PHP dies after the
 action and before its answer is stored, no answer is stored: once the lock's
 30 s pass, the next re-send runs the action again. For a write that must
 never run twice, add a unique constraint to the row it writes, or write the
-row and its key in one database transaction. Each stored answer holds the
-fingerprint of the request it answered, which a re-send must match.
+row and its key in one database transaction.
 
 A cache alone cannot guarantee the second part. It stores the answer only after
 the action finishes. A retry can arrive while the first attempt is still
@@ -1278,7 +1272,8 @@ check over plain HTTP. If your command routes need a signed-in user, run
 
 - **No middleware specific to vapor-chamber.** It rides on Laravel's own
   CSRF middleware (`PreventRequestForgery`) and `Authenticate`.
-- **No PHP package / Composer dependency.** vapor-chamber is JS-only.
+- **No Composer dependency required.** The Composer package under "Check
+  your backend" is optional: the contract check and the input middleware.
 - **No Echo / Reverb** unless you want push-based realtime. HTTP is enough
   for command dispatch.
 - **No Livewire dependency or replacement target.** They coexist on

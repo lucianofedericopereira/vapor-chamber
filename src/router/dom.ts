@@ -51,21 +51,17 @@ export type RoutableTarget = { path: string; fullPath: string; pathname: string;
  *
  * `stampActiveLinks` walks EVERY in-base anchor after EVERY navigation, and the
  * per-anchor work is dominated by `new URL()` plus `stripBase` - both of which
- * depend only on the href, which almost never changes. Re-deriving them on each
- * commit is the same shape Vue 3.6.0-rc.6 removed from template adoption in
- * `29ed4b0`: hoist the invariant parse out of the hot loop and compare something
- * cheap instead.
+ * depend only on the href, which almost never changes. So the invariant parse
+ * is hoisted out of the hot loop and something cheap is compared instead.
  *
  * The memo is **validated against the raw href it was derived from**, not merely
  * against the element's identity - a Blade menu can rewrite an anchor's `href`
  * in place, and a memo keyed only by element would then answer for the old URL.
- * That is rc.6's other prop-fix lesson (`84833e2`): compare against the input
- * you were given, not against something downstream of it.
  *
  * A `WeakMap` rather than an expando on the node: entries die with the anchor,
  * and this module never mutates DOM it does not own except through the
  * documented `data-active` attributes. That choice is measured, not assumed -
- * head-to-head against an expando (`a.__vcR`, v1.18.0) the two are **0.98-1.02x**, i.e.
+ * head-to-head against an expando (`a.__vcR`) the two are **0.98-1.02x**, i.e.
  * inside noise at every size tested, so the non-invasive one wins on no
  * measurable cost.
  *
@@ -73,7 +69,7 @@ export type RoutableTarget = { path: string; fullPath: string; pathname: string;
  * base) are re-tested on every commit otherwise, and on a typical menu they are
  * a large share of the anchors.
  *
- * **Measured 1.77-1.86x per commit** in v1.18.0 (42 us saved at 50 anchors, 172 us at 200,
+ * **Measured 1.77-1.86x per commit** (42 us saved at 50 anchors, 172 us at 200,
  * 828 us at 1000), `tests/router-stamp-ab.test.ts`, with the baseline arm
  * DERIVED from the shipped source: a variant written inside a test file is
  * optimised differently by V8 and inflates the ratio. Prefer the harness's

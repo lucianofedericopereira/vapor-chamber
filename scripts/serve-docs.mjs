@@ -9,7 +9,8 @@
  * the first, and the two would drift.
  *
  * It exists because `fetch()` cannot read a `file://` URL, which is the only
- * reason opening index.html directly does not work.
+ * reason opening index.html directly does not work. It binds 127.0.0.1 and
+ * exits 1 when docs/api/README.md is missing (`npm run docs` generates it).
  *
  * Run: node scripts/serve-docs.mjs [--port 8910]
  *      npm run docs:serve

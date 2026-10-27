@@ -129,8 +129,8 @@ export function setupDevtools(bus: Observable, app: unknown, options?: DevtoolsO
   // Using a variable prevents TypeScript from attempting module resolution
   // on an optional peer dependency that may not be installed.
   //
-  // A plain literal here is correct BECAUSE this module is only reachable
-  // through the `vapor-chamber/devtools` subpath. A bundler must be able to
+  // A bundler folding the variable back into a literal is correct BECAUSE this
+  // module is only reachable through the `vapor-chamber/devtools` subpath. A bundler must be able to
   // resolve the specifier for devtools to work at all (a browser cannot
   // resolve a bare "@vue/devtools-api" at runtime), and the only way to reach
   // this file is to import the subpath - which means you opted in and
@@ -223,7 +223,7 @@ export function setupDevtools(bus: Observable, app: unknown, options?: DevtoolsO
       );
     })
     .catch(() => {
-      // @vue/devtools-api not installed - silently no-op in production
+      // @vue/devtools-api not installed - silently no-op
     });
 
   return () => { for (const off of offs) off(); };

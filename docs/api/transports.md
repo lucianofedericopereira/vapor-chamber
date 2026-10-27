@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:1229](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1229)
+**Function** - [src/transports.ts:1223](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1223)
 
 ```ts
 createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; }
@@ -32,7 +32,7 @@ presence channels and routes each broadcast to `bus.emit()`, after writing
 the store states its payload declares under `stores` (or a command via
 `onBroadcast`). Presence membership (`here` / `joining` / `leaving`) is emitted
 too. Receive-only by design - outbound commands still go through the HTTP
-bridge. Pass your own Echo instance; the bridge never imports laravel-echo, so
+transport. Pass your own Echo instance; the bridge never imports laravel-echo, so
 non-Laravel consumers don't pay for it.
 
 ```ts
@@ -52,7 +52,7 @@ realtime.dispose();
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:1111](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1111)
+**Function** - [src/transports.ts:1107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1107)
 
 ```ts
 createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; isConnected(): boolean; }
@@ -97,7 +97,7 @@ const bus = createAsyncCommandBus({ transport: offlineFirst })
 
 ### httpTransport
 
-**Function** - [src/transports.ts:532](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L532)
+**Function** - [src/transports.ts:530](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L530)
 
 ```ts
 httpTransport(options: HttpTransportOptions) => Transport
@@ -144,7 +144,7 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### wsTransport
 
-**Function** - [src/transports.ts:799](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L799)
+**Function** - [src/transports.ts:795](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L795)
 
 ```ts
 wsTransport(options: WsTransportOptions) => Transport & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; outbox: Outbox; }
@@ -229,7 +229,7 @@ Log s35.138, 36.47.
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:1180](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1180)
+**Type alias** - [src/transports.ts:1174](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1174)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -259,7 +259,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:1169](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1169)
+**Type alias** - [src/transports.ts:1163](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1163)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -267,7 +267,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:1171](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1171)
+**Type alias** - [src/transports.ts:1165](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1165)
 
 ```ts
 export type EchoSubscription = {
@@ -292,7 +292,7 @@ The part of a command's meta that crosses the wire as the command's own data.
 
 ### HttpBatchOptions
 
-**Type alias** - [src/transports.ts:479](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L479)
+**Type alias** - [src/transports.ts:477](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L477)
 
 ```ts
 export type HttpBatchOptions = {
@@ -312,7 +312,7 @@ export type HttpBatchOptions = {
 
 ### HttpTransportOptions
 
-**Type alias** - [src/transports.ts:388](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L388)
+**Type alias** - [src/transports.ts:386](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L386)
 
 ```ts
 export type HttpTransportOptions = {
@@ -409,7 +409,7 @@ export type HttpTransportOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:1064](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1064)
+**Type alias** - [src/transports.ts:1060](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1060)
 
 ```ts
 export type SseBridgeOptions = {
@@ -445,7 +445,7 @@ export type SseBridgeOptions = {
 
 ### WsTransportOptions
 
-**Type alias** - [src/transports.ts:744](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L744)
+**Type alias** - [src/transports.ts:740](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L740)
 
 ```ts
 export type WsTransportOptions = {

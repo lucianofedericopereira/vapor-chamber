@@ -22,37 +22,27 @@
  *   cart.add(42);            // dispatches `cartAdd` - a command, not a setter
  *   cart.state.value.items;  // [42]
  *
- * WHY THAT MATTERS, and it is the whole design. Because `cart.add(42)` is a
- * command, everything the bus already does applies with no store-specific code:
- * `history` records it (and undoes it for a store defined
- * with `undo: true`), `share` keeps the same state in every tab,
- * its `optimistic` option rolls a failed write back, `idempotent` collapses a
- * double-submit, its `exclusive` option orders its sent writes, and the
- * devtools timeline shows it. Its
- * saved state is its own option (`persist`, src/store-persist.ts). Pinia
- * grew a bus of about 60 lines inside itself (4.0.3: `action()` / `$onAction`)
- * to reach a fraction of that, because no bus existed underneath. Here the bus is the
- * foundation and the store is the thin part.
+ * Because `cart.add(42)` is a command, everything the bus already does applies
+ * with no store-specific code: `history` records it (and undoes it for a store
+ * defined with `undo: true`), `share` keeps the same state in every tab, the
+ * `optimistic` option rolls a failed write back, `idempotent` collapses a
+ * double-submit, the `exclusive` option orders its sent writes, and the
+ * devtools timeline shows it. Saved state is its own option (`persist`,
+ * src/store-persist.ts). The bus is the foundation and the store is the thin
+ * part.
  *
  * VUE IS IMPORTED STATICALLY, not resolved through `chamber.ts`'s registry.
- * That probe cannot resolve in a production bundle and is behind both of this
- * package's shipped prod-only bugs, which is why `vapor-chamber/vue` and
- * `vapor-chamber/vapor` exist. A static import turns an upstream rename into a
+ * That probe cannot resolve in a production bundle, which is why
+ * `vapor-chamber/vue` and `vapor-chamber/vapor` exist. A static import turns an upstream rename into a
  * consumer BUILD error rather than a runtime null. It also settles why this is
  * a subpath: a module that imports `vue` cannot live in the root barrel, which
  * is Vue-less by construction, so the subpath isolates a real cost.
  *
- * THE BUS IS A REQUIRED ARGUMENT, and the first draft of this file got that
- * wrong in a way only measurement caught. It defaulted to `getCommandBus()`,
- * which reads well and cost two things the paragraph above claims this module
- * does not pay. Importing that accessor pulls `chamber.ts`, whose top-level
- * `probeVue()` then runs on any `vapor-chamber/store` import - so the module
- * that exists to avoid the probe was executing it at load. And the registry
- * below is keyed per bus precisely because a module global cannot isolate an
- * SSR request; defaulting to that global handed every request the same stores
- * unless the caller opted out. One default, contradicting both neighbouring
- * docblocks. Required is also simply honest: a store IS its bus, and every
- * call site in the suite already passed one.
+ * THE BUS IS A REQUIRED ARGUMENT. Defaulting to `getCommandBus()` would pull
+ * in `chamber.ts`, whose top-level `probeVue()` would then run on any
+ * `vapor-chamber/store` import, and the registry (src/store-base.ts) is keyed
+ * per bus so that an SSR request gets its own stores, which a module-global
+ * default would defeat. A store is its bus.
  *
  * SHALLOW, REPLACED WHOLESALE. State is a `shallowRef` and every action returns
  * a NEW state object. Measured on the real dispatch path, wholesale replacement

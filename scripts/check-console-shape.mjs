@@ -34,11 +34,9 @@
  * OK line prints them.)
  *
  * TYPES, NOT AN ALPHABET. The obvious implementation is a list of names that
- * look inspectable (`el`, `cmd`, `plugin`, `result`, `opts`). This repo has
- * measured what that costs three separate times - `check-ascii.mjs` reported a
- * clean sweep while 48 arrows sat in 15 files, because its alphabet held one
- * arrow; `check-line-citations.mjs` was blind to 73 of 2,524 test titles. A
- * guard is worth exactly its alphabet. So the rule inverts, the way check-ascii
+ * look inspectable (`el`, `cmd`, `plugin`, `result`, `opts`). A guard is worth
+ * exactly its alphabet (check-ascii.mjs reported a clean sweep over 48 arrows
+ * because its alphabet held one). So the rule inverts, the way check-ascii
  * inverted for `src/`: a value may be interpolated only if the TYPE CHECKER
  * says it is a string, number, boolean or bigint (or a union of those, which is
  * what a string enum and `typeof x` are). Everything else fails, including
@@ -56,14 +54,16 @@
  *
  * NO ALLOWLIST FOR THE SHAPE. `validateNaming` builds one string and either
  * throws it or reports it: `_report('warn', 'core:invalid:name', msg, ...)`
- * passes on type, `msg` being a `string`. `--self-test` mutates it into the
- * violating shape, and seeds a stray `console.warn` both in a module and in
+ * passes because a bare identifier is neither a template nor a concatenation,
+ * so there is nothing to examine. `--self-test` mutates it into the violating
+ * shape, and seeds a stray `console.warn` both in a module and in
  * plugins-core.ts outside the logger, because an exemption that quietly matches
  * too much is indistinguishable from a working check.
  *
  * SCOPE, stated so it is not over-trusted. This reads the code and message of
- * each `_report` call and the arguments of each console call, nothing else. A message assembled into a local first, then
- * logged (`validateNaming`'s `msg` is the one such site), passes unexamined -
+ * each `_report` call and the arguments of each console call (any method),
+ * nothing else. A message assembled into a local first, then logged
+ * (`validateNaming`'s `msg` is the one such site), passes unexamined -
  * following an initializer would mean deciding which declaration a name refers
  * to, and being wrong about that is worse than a stated blind spot. It also
  * says nothing about whether the sentence is worth printing, or whether the
@@ -80,10 +80,9 @@
  * clean - a `finally` does not run on SIGKILL, and a mutation left behind by an
  * interrupted run would land in somebody's next diff (see assertTargetsClean).
  * It is not in `lint:check`: it rebuilds the program once per mutation and it
- * writes to `src/`. It is here rather than in the suite because
- * no test in this repo drives a `scripts/check-*.mjs`, and a second-long
- * `ts.createProgram` does not belong in a vitest run. A guard that has never
- * been watched to fail is a guard nobody has tested.
+ * writes to `src/`. It is not in the vitest suite either, since a second-long
+ * `ts.createProgram` per mutation does not belong in a vitest run. A guard that
+ * has never been watched to fail is a guard nobody has tested.
  */
 import ts from 'typescript';
 import { execFileSync } from 'node:child_process';
@@ -91,8 +90,7 @@ import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// `fileURLToPath`, not `.pathname` - the latter yields `/C:/...` on Windows,
-// as check-env-guards.mjs next door already notes.
+// `fileURLToPath`, not `.pathname`, which yields `/C:/...` on Windows.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Trailing separator: a bare prefix would also match a sibling directory whose
 // name merely starts with "src".
@@ -157,9 +155,7 @@ function createProgram() {
   }
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, ROOT);
   // `noEmit`: this program exists to answer type questions, not to build. Type
-  // ERRORS are not reported here either - `npm run typecheck` owns those, over
-  // four projects, and a second opinion on them from a style guard would only
-  // ever disagree confusingly.
+  // ERRORS are not reported here either - `npm run typecheck` owns those.
   return ts.createProgram(parsed.fileNames, { ...parsed.options, noEmit: true });
 }
 
@@ -292,11 +288,12 @@ const GUIDANCE =
 /**
  * The violations this guard exists to catch, each injected into a real module.
  *
- * Three of them are the rule itself, at the buffer-overflow warning in
- * the buffer's `hold` - a DEV-gated `console.warn` with the command object in scope,
- * which is exactly the inspectable value the convention is about. The other two
- * are the sites that pass on shape rather than on an allowlist: mutating them
- * proves the scan REACHES them, which a passing run alone never shows.
+ * Three are the shape rule itself, at the buffer-overflow report in src/buffer.ts
+ * (the command object is in scope there, which is exactly the inspectable value
+ * the convention is about). The fourth rewrites `validateNaming`'s report. The
+ * last two seed a `console.warn` beside the reporter in a module and in
+ * plugins-core.ts outside the logger. Mutating these proves the scan REACHES
+ * them, which a passing run alone never shows.
  */
 // Every literal below is a TEMPLATE literal with escaped `\${`, for the reason
 // GUIDANCE gives: this script has to quote source that contains real

@@ -59,7 +59,7 @@ export type TransitionBridgeOptions = {
    *
    * Vue waits for `done()` indefinitely, so a handler that never settles
    * leaves the element stuck mid-transition for the life of the page - see the
-   * note in `dispatchWithDone`. Clamped to at least 1ms.
+   * note in `dispatchWithDone`. Clamped to between 1ms and `MAX_TIMEOUT_MS`.
    */
   timeout?: number;
 };
@@ -128,7 +128,7 @@ function buildHooks(
   // inputs are fixed here: `namespace` is captured at construction and every
   // `hook` below is a string literal, so the concatenation could never produce a
   // different answer on a later call - it was pure repeated work on the hot
-  // path. Isolating that segment (120k hook calls, interleaved A/B, v1.15.0): building
+  // path. Isolating that segment (120k hook calls, interleaved A/B): building
   // per dispatch 3.668ms vs precomputed 0.237ms, i.e. the string work is gone
   // (~15x on the segment; far less end-to-end, where bus.dispatch dominates -
   // see the transition-bridge rows in tests/perf.bench.ts).
@@ -161,15 +161,10 @@ function buildHooks(
    *
    * Raced against a timeout, because Vue waits for `done()` INDEFINITELY. A
    * handler that never settles - an await on a request that never returns, a
-   * promise nobody resolves - left the element stuck in its transitioning
-   * state for the life of the page, with no error anywhere. Measured before
-   * this guard: `done()` was never called and the phase never left
-   * 'entering'/'leaving'.
-   *
-   * `directives.ts` already caps its own dispatches for the same reason and
-   * with the same default; this module simply did not, which made a hung
-   * handler a stuck animation in one place and a recovered button in the
-   * other.
+   * promise nobody resolves - would leave the element stuck in its
+   * transitioning state for the life of the page, with no error anywhere.
+   * `directives.ts` caps its own dispatches for the same reason and with the
+   * same default.
    *
    * The timer is cleared when the dispatch wins, and `settled` makes `done()`
    * exactly-once: calling it twice would let Vue finish a transition it had

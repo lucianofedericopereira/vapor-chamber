@@ -6,6 +6,8 @@ labels: bug
 assignees: ''
 ---
 
+<!-- A security issue: see SECURITY.md, do not open a public issue. -->
+
 ## What happened
 
 <!-- One-paragraph summary. What did you expect, what did you get? -->

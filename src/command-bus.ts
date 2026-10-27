@@ -1,9 +1,8 @@
 /**
  * vapor-chamber - Command Bus for Vue Vapor
  *
- * Sizes are not quoted here. This header carried "~3.6 KB brotli core" while
- * the generated table measured 4.2 - a hand-typed number in a source file that
- * no generator can reach and no gate can check. `docs/BUNDLE-SIZES.md` is
+ * Sizes are not quoted here: a hand-typed number in a source file is reached
+ * by no generator and checked by no gate. `docs/BUNDLE-SIZES.md` is
  * regenerated every run and is the only place a size should be read from.
  * DevTools is loaded dynamically.
  */
@@ -12,12 +11,6 @@
 // Structured error codes - machine-readable, LLM-friendly, i18n-ready
 // ---------------------------------------------------------------------------
 
-/**
- * Severity level for bus diagnostics.
- * - `'error'`: dispatch failed, result.ok === false
- * - `'warn'`: recoverable issue, dispatch may succeed (e.g. naming violation)
- * - `'info'`: informational (e.g. handler overwrite, circuit breaker state change)
- */
 import { DEV } from './dev';
 import { _report } from './report';
 import { Accepted } from './accepted';
@@ -32,6 +25,12 @@ import type { ActionFilter } from './action-filter';
 import { BusError, _RETRY_ATTEMPTS, _RETRY_BASE_MS, _RETRY_MAX_MS, _backoff, _failures, _heldBack, _isBug, _isCancel, conditionOf, conditionOfStatus, ownerOf, retryClass, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions } from './failure';
 import { _patternPrefix, matchesPattern } from './pattern';
 export { BusError, _failures, _isBug, conditionOf, conditionOfStatus, ownerOf, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions };
+/**
+ * Severity level for bus diagnostics.
+ * - `'error'`: dispatch failed, result.ok === false
+ * - `'warn'`: recoverable issue, dispatch may succeed (e.g. naming violation)
+ * - `'info'`: informational (e.g. handler overwrite, circuit breaker state change)
+ */
 export type BusSeverity = 'error' | 'warn' | 'info';
 
 
@@ -127,18 +126,19 @@ export type CommandMeta = {
   /**
    * The 2xx response a transport's reply arrived in, Fetch's members (a 202
    * says accepted, not finished: RFC 9110 15.3.3). Always present, `undefined`
-   * for a local handler; a non-2xx answer is the error's. Log s35.136.
+   * for a local handler; a non-2xx answer is the error's.
    */
   response?: MetaResponse;
   /**
    * Request-level headers a plugin adds to the request a transport sends
    * (a W3C `traceparent`, a locale), names lowercase. Always present,
-   * `undefined` until a plugin sets it. Log s35.139.
+   * `undefined` until a plugin sets it.
    */
   request?: MetaRequest;
   /**
    * Where the command originated. `undefined` (the default) means local user
-   * code called dispatch directly. The core never sets this field - dispatchers
+   * code called dispatch directly. Apart from `'undo'` and `'redo'` (below) the
+   * core never sets this field - dispatchers
    * that proxy external traffic (bridges, sync layers, replay tooling, agent
    * endpoints) stamp it post-hoc via plugins so downstream plugins, hooks, and
    * listeners can distinguish local intent from mirrored or machine-driven
@@ -189,7 +189,7 @@ export type Command<A extends string = string, T = any, P = any> = {
   signal?: AbortSignal;
 };
 
-/** Optional per-dispatch options. Currently: `{ signal }` for cancellation. */
+/** Optional per-dispatch options: `{ signal }` for cancellation. */
 export type DispatchOptions = {
   /** Abort the dispatch before it starts (if already aborted) or signal async
    *  handlers and transports to cancel mid-flight. Async bus only. */
@@ -951,24 +951,18 @@ let _uidCounter = 0;
 const DEFAULT_UID = (): string => _uidPrefix + '-' + (++_uidCounter).toString(36);
 let _uidFn: () => string = DEFAULT_UID;
 
-// Held as a binding, not called literally, so `configureClock` can swap it.
+// Held as a binding, not called literally, so `_configureClock` can swap it.
 //
 // Whatever occupies this slot READS THE GLOBAL on every call rather than being
 // `Date.now` itself - true of the cached default below, and the rule any
 // replacement must follow. Assigning the function reference captures
 // the intrinsic at module load, so test doubles that replace the global
 // (`vi.useFakeTimers`, `vi.setSystemTime`) never reach it, and `meta.ts` silently
-// keeps reporting real time. That was the first version of this code and
-// `tests/clock-source-contained.test.ts` caught it: the indirection added to
-// make the clock swappable had itself broken the fake-timer behaviour the
-// default exists to preserve. The wrapper costs one call; correctness of the
-// default is not negotiable against that.
+// keeps reporting real time (tests/clock-source-contained.test.ts). The wrapper
+// costs one call.
 //
-// It is a named constant, and `configureClock()` restores it, because the
-// obvious way to "put it back" - `configureClock(Date.now)` - is the same trap
-// wearing a different hat. That footgun was hit twice while writing this, once
-// in the implementation and once in the test's own teardown, which is two more
-// times than a comment would have prevented.
+// It is a named constant, and `_configureClock()` restores it, because the
+// obvious way to "put it back" - `_configureClock(Date.now)` - is the same trap.
 // The DEFAULT: one real clock read per microtask turn, reused by every command
 // dispatched inside that turn.
 //
@@ -986,8 +980,7 @@ let _uidFn: () => string = DEFAULT_UID;
 // What `ts` is and is not - a wall clock, not an ordering key, not a duration
 // source - and what the cache gives up, are on `CommandMeta.ts`, with the
 // measurement. If an exact wall clock is ever genuinely needed, the cheap door
-// is a `clock?: () => number` bus option - one branch, no build step, and
-// addable later without breaking anyone.
+// is a `clock?: () => number` bus option - one branch, no build step.
 
 // A boolean rather than a `0` sentinel. `_clockNow === 0` meaning "re-read me"
 // reads as safe - `Date.now()` cannot return 0, that is 1970 - but it is only
@@ -1212,7 +1205,7 @@ export function _withCausation<T>(causationId: string | undefined, fn: () => T):
  * per-dispatch meta without a signature change: they travel **with** the
  * dispatch rather than beside it.
  *
- * `__origin` was added for a family of four bugs that all shared one shape -
+ * `__origin` exists because of a family of four bugs that all shared one shape -
  * a module-level flag set before a dispatch and cleared in `finally`
  * (`_mcpDispatching` in mcp.ts, `receiving` in createChannel(), `paused` in redo(),
  * and the reaction guard). On a sync bus the dispatch completes inside the
@@ -1349,10 +1342,9 @@ type HookEntry<H> = { fn: H; off: boolean };
  * not run, one added during it runs from the next dispatch. Unsubscribing
  * marks the entry `off` and REPLACES the array (see on()); it never splices
  * the one a loop is walking, and the loop's bound is the length it started
- * with. So nothing a listener does can move the cursor. The length-based
- * cursor correction this replaced skipped the next listener when one removed
- * an earlier peer and added one in the same call, and re-ran the previous one
- * when one removed itself and a later peer (log s35.67).
+ * with. So nothing a listener does can move the cursor: a length-based cursor
+ * correction would skip the next listener when one removed an earlier peer and
+ * added one in the same call (log s35.67).
  */
 function fanOutListeners(
   exact: Map<string, ListenerEntry[]>,
@@ -1441,8 +1433,8 @@ function warnColonAction(action: string): void {
  * A target keys by its value: a primitive by its String() (so `1` and `'1'`
  * share a key, by design - tests/isloading-keys.test.ts), an object by its
  * JSON with keys sorted (keyTextFor, ./canonical), a Number, String, Boolean
- * or BigInt object as its value. A target JSON cannot serialize no longer
- * shares one fallback string with every other: a BigInt, a NaN or an Infinity
+ * or BigInt object as its value. A target JSON cannot serialize does not
+ * share one fallback string with every other: a BigInt, a NaN or an Infinity
  * inside it is tagged, and a circular, function or symbol target keys by its
  * identity (tests/commandkey-collisions.test.ts).
  *
@@ -1467,12 +1459,12 @@ export function commandKey(action: string, target: any): string {
   try {
     tkey = targetKeyText(target);
   } catch {
-    // A cycle: JSON.stringify throws on it. String(target) was
-    // '[object Object]' for every such target, so two different ones shared a
-    // key; each now keys by its own identity, below.
+    // A cycle: JSON.stringify throws on it. String(target) would be
+    // '[object Object]' for every such target, so each keys by its own
+    // identity, below.
   }
-  // No text: a function, a symbol, or an object whose toJSON gave none. Each
-  // keyed `act:undefined`, with undefined and with one another (log 36.41).
+  // No text: a function, a symbol, or an object whose toJSON gave none. Keyed
+  // by identity, not `act:undefined`, which they would share (log 36.41).
   if (tkey === undefined) tkey = identityKey(target);
   return `${action}:${tkey}`;
 }
@@ -1658,8 +1650,8 @@ function each(list: readonly Observing[], part: 'started' | 'settled', cmd: Comm
  * @internal The bus's facts slot, from the command state's observer (`own`)
  * and every installed plugin's `started` and `settled` parts. Nothing
  * observes: null, so a bare bus stays bare. The command state alone: its own
- * observer, unwrapped, so a tracked dispatch runs the code it ran before parts
- * existed. Anything more: one observer calling the command state first, then
+ * observer, unwrapped, so a tracked dispatch pays nothing for parts.
+ * Anything more: one observer calling the command state first, then
  * each part in install order, inside its scope and its own try. Built at
  * `use()` and when a command state attaches, never per dispatch. The test
  * bus's too. tests/plugin-started-part.test.ts.
@@ -2232,9 +2224,9 @@ function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
  * The runner, for dispatch: a throw that escapes it is SETTLED first - the
  * after-hooks and listeners see it as an errResult - and then re-thrown. A
  * caller that chose `onMissing: 'throw'` still gets its throw, and every
- * observer that saw the start (the `started` fact) also sees the end;
- * before, that key stayed true. Only onMissing's NO_HANDLER can escape the
- * runner now (a plugin's throw is already a result, see pluginThrew). A
+ * observer that saw the start (the `started` fact) also sees the end. Only
+ * onMissing's NO_HANDLER can escape the runner (a plugin's throw is already a
+ * result, see ruleThrew). A
  * function of its own, like tryCatchHandler, so `_syncDispatchInner` stays
  * free of try - see syncQuery's note on why dispatch splits.
  * Pinned by tests/command-loading-fixture.test.ts and tests/plugin-throw-fixture.test.ts.
@@ -2311,7 +2303,7 @@ function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandRes
   // (plugins/hooks/listeners fire on replay, not now). The bare path in
   // _syncDispatchInner holds through handleMissing (nothing fires there).
   // Skipped for the request/respond path (executeOverride). The gate is one
-  // read of the options, as `onMissing` was: a gate on the queue's own state
+  // read of the options: a gate on the queue's own state
   // read faster only when monomorphic (CHANGELOG 1.x, "lazily allocated").
   if (executeOverride === undefined && s.opts.buffer !== undefined && rec.handler === undefined) {
     return handleMissing(s, cmd, true);
@@ -2401,8 +2393,8 @@ function syncQuery(s: SyncState, action: string, target: any, payload?: any): Co
 
 function _syncQueryInner(s: SyncState, cmd: Command): CommandResult {
   const action = cmd.action;
-  // Bare-bus fast path - mirrors the one in _syncDispatchInner. Queries skip
-  // no `started` fact, so the condition omits nothing more.
+  // Bare-bus fast path - mirrors the one in _syncDispatchInner, minus
+  // executeOverride (a query has none).
   if (
     s.plugins.length === 0 &&
     s.afterHooks.length === 0 &&
@@ -2456,10 +2448,8 @@ function syncEmit(s: SyncState, event: string, data?: any): void {
 
 /**
  * `BatchOptions` documents `transactional` as "mutually exclusive with
- * `continueOnError`", but nothing enforced it: code order silently let
- * transactional win, so a caller who set both got all-or-nothing semantics
- * while reading their own options as best-effort. Loud in dev, per the
- * house convention.
+ * `continueOnError`"; when both are set `transactional` wins, so a caller
+ * reading their options as best-effort would get all-or-nothing. Loud in dev.
  */
 function warnBatchOptionConflict(opts: BatchOptions): void {
   if (DEV && opts.transactional && opts.continueOnError) {
@@ -3016,7 +3006,7 @@ function createRetrier(options: RetryOptions): Retrier {
         if (!eligible && open && attempt < bound) _heldBack(error, retryIn, cmd.action);
         return result;
       }
-      // A NaN wait is no wait: it re-sent at once instead of backing off. A
+      // A NaN `retryIn` is not a declared wait: the backoff applies. A
       // declared one is at most maxDelay here (`open` above).
       const wait = isDelay(retryIn) ? retryIn : _backoff(attempt - 1, baseDelay, maxDelay);
       if (!(await waits.sleep(delayOption(wait, 0), cmd.signal))) return abortedResult(cmd.action, cmd.signal);
@@ -3462,11 +3452,9 @@ function optimisticRun(s: AsyncState, depth: number, cmd: Command, lane: Exclusi
  * Async read-only query - runs the rules, the steps and the handler, fires
  * afterHooks.
  *
- * One function, not a wrapper. This one was not merely free indirection: the
- * wrapper was itself `async` and its whole body was `return await inner(...)`,
- * so every query allocated a second promise and resumed a second async frame -
- * one extra microtask turn per query, on top of the awaits it actually needs.
- * It nests like `dispatch` (see asyncDispatch), with the guard inside: the
+ * One function, not an `async` wrapper around an inner one: that would
+ * allocate a second promise and resume a second async frame, one extra
+ * microtask turn per query. It nests like `dispatch` (see asyncDispatch), with the guard inside: the
  * first stretch of an async function runs synchronously in the caller, so
  * the depth it reads there is its parent's.
  */

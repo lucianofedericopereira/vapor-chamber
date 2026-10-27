@@ -59,7 +59,8 @@ const idle = (fn: () => void): void => {
  * `idle` in `requestIdleCallback` (a 1 ms timer where it is missing). A
  * component given as a loader is imported at that moment. The other options
  * go to `defineVaporCustomElement`. Returns `false`, and defines nothing,
- * when Vue 3.6 Vapor is not detected; `true` once the tag is defined or
+ * when there is no `customElements` registry or Vue 3.6 Vapor is not
+ * detected; `true` once the tag is defined or
  * will be.
  *
  * ## Naming convention - use the `vc-` prefix

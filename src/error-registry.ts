@@ -60,7 +60,7 @@ export type ErrorCodeEntry = {
 // The pure-call annotation just below lets bundlers tree-shake the whole
 // registry out of consumer bundles that never touch it (Object.freeze at
 // module level otherwise reads as a side effect and pins ~1 KB into every
-// barrel-import bundle, v1.8.0).
+// barrel-import bundle).
 export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
   // Core
   { code: 'core:missing:handler',       severity: 'error', retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },

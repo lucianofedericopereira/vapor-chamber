@@ -1,10 +1,14 @@
 /**
  * check-line-citations - reject source-line numbers in test titles.
  *
+ * Scope: the titles of `it`/`describe` calls in .ts files under tests/ that end
+ * in a parenthesised number of 2 to 4 digits (or a list or range of them). It
+ * does not read comments, test bodies or any other directory.
+ *
  * A title like `it('drops the oldest queued message on maxQueueSize overflow
  * (308-313)')` is a pointer to a line that moves the moment anything above it
  * shifts, and nothing checks it. Measured before this guard existed: 391 such
- * citations across tests and comments, and a spot check found `(308-313)`
+ * citations across tests and comments (only titles are guarded now), and a spot check found `(308-313)`
  * pointing at unrelated code in a different function - while a neighbouring
  * one was still correct. That mix is worse than none, because you cannot tell
  * which to trust without verifying every one.

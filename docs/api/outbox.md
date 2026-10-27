@@ -154,7 +154,7 @@ export type OutboxOptions = {
   key?: (cmd: Command) => string;
   /**
    * Max queued records - bounded memory. When exceeded, the OLDEST record is
-   * dropped with a console warning, and its caller's `done` settles with
+   * dropped with a warning report, and its caller's `done` settles with
    * `outbox:exceeded:queue`. Default: 200.
    */
   maxSize?: number;

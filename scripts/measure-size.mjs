@@ -14,8 +14,9 @@
  *      node scripts/measure-size.mjs --json      machine-readable
  *      node scripts/measure-size.mjs --md         full generated doc (docs/BUNDLE-SIZES.md)
  *
- * `npm run size:doc` writes --md to docs/BUNDLE-SIZES.md; CI regenerates and
- * `git diff --exit-code`s it, so the published numbers can never drift from reality.
+ * `npm run size:doc` writes --md to docs/BUNDLE-SIZES.md; `npm run gate`
+ * regenerates it and `git diff --exit-code`s the result, and CI's push-only
+ * documentation step regenerates and commits it.
  * Needs `npm run build` first: every row reads `dist/`.
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -32,16 +33,13 @@ const dist = (f) => resolve(process.cwd(), 'dist', f);
 /**
  * ESM subpath exports, DERIVED FROM `package.json` "exports" - not listed.
  *
- * This was a hand-kept list of 24, and by the time anyone diffed it the exports
- * map had 26: `./devtools` and `./stream-parser` were published subpaths that a
- * consumer could import and that `build.mjs` built, with NO size row anywhere.
- * Never measured, never in docs/BUNDLE-SIZES.md, never tracked when they grew -
- * and nothing could notice, because the list looked complete.
+ * A hand-kept list drifted two behind the exports map: `./devtools` and
+ * `./stream-parser` were published subpaths with NO size row anywhere, and
+ * nothing could notice, because the list looked complete.
  *
  * Deriving it makes the table exactly as complete as the package's own
  * promises. A subpath added to `exports` gets a row on the next run; a subpath
- * removed loses one. `generate-api-docs.mjs` already reads the same source for
- * the same reason (its predecessor's hand-kept list had drifted by five).
+ * removed loses one.
  *
  * Each row is the built file `exports` points at, so a stale exports entry
  * degrades to a missing row rather than a crash.
@@ -214,7 +212,7 @@ async function vaporWiringRows() {
 
 
 /**
- * The example snippets, one row each, found by GLOB: every top-level
+ * The example snippets, one row each, found by directory listing: every top-level
  * `examples/*.ts` and `*.tsx`, so a batch that adds a snippet adds a row with no
  * edit here. Each is bundled as the ESM rows are (production build, DEV folded,
  * minified, Vue external) with the file itself as the entry, so the row is the
@@ -280,14 +278,11 @@ const iifeRows = iife.filter(([, f]) => existsSync(f)).map((name_f) => {
 /**
  * Which exports actually defer something, READ OFF THE ROWS.
  *
- * The first version of this note hard-coded "true of every export but
- * `./router`" and was false the moment it was generated, because
- * `./router-fetch` reaches `./blade` through the router and defers it too. A
- * sentence in generated prose that describes the table has to be derived from
- * the table, or it is one more hand-typed number waiting to drift - which is
- * the entire failure this script exists to prevent, reintroduced inside the
- * script itself. `--check` cannot catch it: it verifies marker bodies, and
- * this is free text.
+ * A hard-coded "true of every export but `./router`" was false the moment it
+ * was generated, because `./router-fetch` reaches `./blade` through the router
+ * and defers it too. A sentence in generated prose that describes the table has
+ * to be derived from the table. `stamp-docs --check` cannot catch the drift: it
+ * verifies marker bodies, and this is free text.
  */
 function deferredNote(rs) {
   const names = rs.filter((r) => r.lazy > 0).map((r) => `\`${r.name}\``);

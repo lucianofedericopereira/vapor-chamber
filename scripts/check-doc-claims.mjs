@@ -4,19 +4,16 @@
  * This repo tests its behaviour exhaustively and does not test its sentences.
  * A review pass over ~5,000 lines found fourteen defects and every one of them
  * was in prose - stale stamps, inverted defaults, comments attached to nothing.
- * None could fail a test, because none of them run.
+ * None could fail a test, because none of them run. A regex found in a second
+ * what an attentive read had just walked past (two stacked comments read as one).
  *
- * The case for automating it is not that reading is unreliable in general; it
- * is one specific measurement. Check 1 below was found by reading `schema.ts`,
- * then swept for - and the sweep returned two more, one of which sat in
- * `command-bus.ts` in a passage that had been read attentively enough that same
- * hour to quote its neighbours. Two stacked comments read as one comment. A
- * regex found in a second what an attentive read had just walked past.
- *
- * Scope, stated so it is not over-trusted: these three catch three shapes.
- * They say nothing about whether a sentence is TRUE - only that it is attached
- * to something, that a documented literal exists in the file, and that release
- * status is not being tracked in a comment. Everything else still needs eyes.
+ * Scope, stated so it is not over-trusted: it walks src/, tests/ and scripts/
+ * (.ts and .mjs files only; not bin/, not the root configs, not docs). The
+ * three checks catch three shapes. They say nothing about whether a sentence is
+ * TRUE - only that a docblock is not directly followed by another docblock,
+ * that the literal in a documented default appears elsewhere in the same file, and that
+ * a comment line does not carry a release-status phrase. Everything else still
+ * needs eyes. Exit 1 on any problem.
  *
  * Run: node scripts/check-doc-claims.mjs
  */
@@ -41,17 +38,13 @@ const DEFAULT_ALLOW = new Map([
 
 /**
  * CHECK 3: words that track where a thing is in its release cycle. They belong
- * in CHANGELOG.md, which is regenerated per release and reviewed at the cut - a
- * comment carrying them goes stale the moment the release ships and nothing
- * looks at it again. `src/transports.ts` banner-ed a shipped API with a
- * parenthesised unreleased marker beside its version for eight minor versions.
- * A bare version number is fine and is what these banners should carry.
+ * in CHANGELOG.md, which is reviewed at the cut - a comment carrying them goes
+ * stale the moment the release ships and nothing looks at it again. A bare
+ * version number is fine.
  *
- * The marker is described rather than quoted, deliberately: the first draft of
- * this comment used the literal form and the check flagged its own docblock.
- * `check-ascii.mjs` writes its forbidden characters as \u escapes for the same
- * reason, and `check-env-guards.mjs` records the lesson in one line - a guard
- * that fires on its own explanation is not a guard.
+ * The marker is described rather than quoted, deliberately: a comment that
+ * wrote the literal form was flagged by the check itself. `check-ascii.mjs`
+ * writes its forbidden characters as \u escapes for the same reason.
  */
 const STATUS_WORDS = /\((?:unreleased|not yet released|upcoming|pending release)\)|\bnot yet shipped\b|\bcoming in v\d/i;
 
@@ -77,12 +70,11 @@ const problems = [];
 /**
  * CHECK 1 - a docblock attached to nothing.
  *
- * A block-comment terminator on one line and `/**` on the next, with no
- * declaration between: an
- * editor attaches only the LOWER block to whatever follows, so the upper one
- * documents nothing and the declaration it was written for shows no tooltip at
- * all. Found three times in this repo, each hiding the docblock of a PUBLIC
- * export behind the one below it.
+ * A line that is only a block-comment terminator, directly followed by a line
+ * that opens a docblock: an editor attaches only the LOWER block to whatever
+ * follows, so the upper one documents nothing and its declaration shows no
+ * tooltip. Found three times, each hiding the docblock of a PUBLIC export. A
+ * blank line or a declaration between the two is not matched.
  */
 function checkStackedDocblocks(file, lines) {
   for (let i = 0; i < lines.length - 1; i++) {
@@ -115,8 +107,7 @@ const DEFAULT_CLAIM = /Default:\s*`?((?:-?\d[\d_]*(?:\.\d+)?)|'[^']*'|"[^"]*"|tr
  * numeric literals the check was close to vacuous: `Default: 3` passed while
  * the real default was 7. Measured across all 68 `Default:` claims in the
  * repo, the two tests agree on every one, so this closes a latent hole rather
- * than fixing a live miss. That is the same trade this file's own CHECK 1
- * docblock describes, and the reason check-line-citations widened its anchor.
+ * than fixing a live miss.
  */
 function appearsAsToken(haystack, literal) {
   const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

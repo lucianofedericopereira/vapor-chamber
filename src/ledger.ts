@@ -37,8 +37,7 @@ import { _stateHalf, type StateHalf } from './store-base';
 import { _plainRuntime } from './store/core';
 
 // The `$undo` dispatch's result, read as the inverse's own answer: its value
-// (a refusal it returned stays a refusal), or its error thrown, as a throw of
-// the inverse was before.
+// (a refusal it returned stays a refusal), or its error thrown.
 const answer = (r: CommandResult): unknown => {
   if (!r.ok) throw r.error;
   return r.value;
@@ -93,10 +92,10 @@ export function createLedger(options: ScopeOptions & {
   const { skip, bus, onChange } = options;
   // The scope, asked once per action; null while there is none.
   const inside = _scoped(options);
-  // `past.length > maxSize` gates EVICTION, so a NaN cap evicted nothing and the
-  // stack grew without bound - measured at 500 entries against a cap of 50.
+  // `past.length > maxSize` gates EVICTION, so a NaN cap would evict nothing and
+  // the stack would grow without bound; countOption falls back to 50.
   const maxSize = countOption(options.maxSize ?? 50, 50);
-  // History's steps are state (plan 1.32 4.2): a state half of their own, no
+  // History's steps are state: a state half of their own, no
   // registration, nothing on the bus, no persist or share (Commands are not
   // data). A reader gets the stacks with no copy, `readonly` in the type (a
   // build-time check: a freeze would run per recorded dispatch). A stack is

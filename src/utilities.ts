@@ -300,8 +300,7 @@ export function createReaction(
 
       const target = map ? map(cmd, result) : cmd.target;
       const mapped = mapPayload ? mapPayload(cmd, result) : undefined;
-      // Also propagate causation, which reactions never did - a reaction chain
-      // was untraceable in devtools even when it terminated.
+      // Propagate causation too, so a reaction chain is traceable in devtools.
       const marker = { __reactionHops: hops, __causationId: cmd.meta?.id };
       const payload =
         mapped === null || mapped === undefined

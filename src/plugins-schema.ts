@@ -85,7 +85,7 @@ export type SchemaValidatorOptions = {
    * What to do on validation failure:
    * - `'reject'` (default) - return `{ ok: false, error }`, a `validateSchemas:invalid:payload` BusError,
    *   without invoking the handler
-   * - `'warn'` - `console.warn` and continue to the handler
+   * - `'warn'` - report a `validateSchemas:invalid:payload` warning and continue to the handler
    *
    * In both modes the handler gets the command as dispatched: the schema's
    * output (a coerced or defaulted value) is never written back
@@ -117,12 +117,11 @@ function pickValue(cmd: Command, field: SchemaValidatorOptions['field']): unknow
 /**
  * Own entries into a Map, once at plugin creation.
  *
- * `schemas[cmd.action]` looked up an action name - a string from outside - on
- * an object inheriting from Object.prototype (see ../dict). For an action named
- * `toString` the lookup returned the inherited FUNCTION, which is not
- * `undefined`, so the plugin went on to read `fn['~standard'].validate` and
- * threw a TypeError straight out of `bus.dispatch()` - breaking the contract
- * that dispatch always returns a CommandResult. A Map has no chain to walk.
+ * An action name is a string from outside, so looking it up on a plain object
+ * (see ../dict) would find inherited members: for `toString` the inherited
+ * FUNCTION is not `undefined`, and reading `fn['~standard'].validate` would
+ * throw a TypeError out of `bus.dispatch()`, breaking the contract that
+ * dispatch always returns a CommandResult. A Map has no chain to walk.
  */
 function compileSchemas(
   schemas: Record<string, StandardSchemaV1>,

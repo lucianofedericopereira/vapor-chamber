@@ -514,11 +514,8 @@ What it costs, and what it needs:
   same record at a depth keeps its instance across param and query changes.
   Nested depth uses the same `Symbol.for` key, so the two outlets share one
   depth contract and can coexist. Neither has `<Transition>`/`<KeepAlive>`
-  integration or SSR/hydration.
-
-Both outlets reuse on **resolved-component identity**. "Record identity implies
-reuse" is shorthand, not the mechanism. Two different records resolving to the
-same component reuse the instance, by design, in both.
+  integration or SSR/hydration. Both reuse on resolved-component identity:
+  two records resolving to the same component reuse the instance.
 
 Two constraints worth knowing before writing your own Vapor test or app:
 
@@ -633,8 +630,11 @@ bus.on('routerNavigated', (cmd) => track(cmd.target.to.fullPath));
 `routerNavigated` (`{ to, from }`) follows each committed path navigation, as
 `afterEach` does. `routerFailed` (`{ error, to }`) follows each failure the
 router reports to `onError`. A refusal or a superseded navigation emits
-nothing. No plugin runs, so the router's guards stay the only gate. DevTools
-shows them with `setupDevtools(bus, app, { facts: ['router*'] })`.
+nothing. `routerLoading` and `routerRevalidating` (`{ value }`) follow
+`router.isLoading` and `router.isRevalidating` as they change, which is what
+`bindDisplay`'s `data-vc-router` reads on a page outside the island. No plugin
+runs, so the router's guards stay the only gate. DevTools shows them with
+`setupDevtools(bus, app, { facts: ['router*'] })`.
 
 ## Status
 

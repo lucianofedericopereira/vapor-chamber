@@ -4,7 +4,7 @@
  * What `tryAutoCleanup()` relies on from Vue: the PUBLIC `getCurrentScope()` /
  * `onScopeDispose()` pair, and Vue stopping a scope it owns - a component
  * created but never mounted (a sibling's render threw) has its scope stopped
- * on unmount since rc.8 (efa2eae), so a `useCommand().on()` listener does not
+ * on unmount, so a `useCommand().on()` listener does not
  * outlive `app.unmount()` (tests/never-mounted-disposal-fixture.test.ts).
  * `warnUnwired()` is the one production warning, for a Vue app whose
  * composables came from the root with nothing wired. The history is in
@@ -359,7 +359,7 @@ export function untracked<T>(fn: () => T): T {
  * Where it shows: where DEV is on and Vue arrived at runtime - a Vite dev
  * page with vaporChamberHMR(), whose shim fills the library's slot, a test
  * runner with a DOM, or a page whose import map names `vue`. A Vite dev page
- * without that plugin no longer gets here: the probe's specifier is a runtime
+ * without that plugin does not get here: the probe's specifier is a runtime
  * name, so it fails and warnUnwired() speaks instead (log 36.F26, both
  * measured in a real browser, Vite 8.3.5). Not on a server (no
  * `window`): Node resolves the bare `import()` in production too - measured
@@ -407,7 +407,7 @@ let _unwiredWarned = false;
  * {@link VUE_GLOBAL_KEY}). Nothing wires `configureSignal()`, `onScopeDispose`
  * or `hasInjectionContext`, so every composable hands back a plain `{ value }`,
  * arms no cleanup and skips the KeepAlive guard - measured by
- * tests/root-only-prod-fixture.test.ts. Before this it did so in silence.
+ * tests/root-only-prod-fixture.test.ts.
  *
  * NOT dev-gated, on the vueDetectionHint() precedent: production is the only
  * place this state exists, so a DEV-only warning would never fire. `__VUE__ ===
@@ -730,20 +730,17 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * It must NOT be `getCurrentInstance()`. That accessor reads VDOM's
  * `currentInstance`, and a Vapor component is not stored there: measured on
  * 3.6.0-rc.4, it returns null inside `defineVaporComponent({ setup() })` while
- * `onDeactivated()` registered at that same point works and fires. So the
- * former guard silently disabled KeepAlive pause/resume for every VAPOR
- * component - the platform this library is named for - while working in VDOM,
- * which is why no existing test saw it. `hasInjectionContext()` (Vue 3.3+) is
+ * `onDeactivated()` registered at that same point works and fires. So a
+ * `getCurrentInstance()` guard silently disables KeepAlive pause/resume for
+ * every VAPOR component - the platform this library is named for - while
+ * working in VDOM. `hasInjectionContext()` (Vue 3.3+) is
  * the one probe that is true in both modes and false in a bare `effectScope()`,
  * measured alongside. `getCurrentInstance()` remains the fallback for a
  * partially-supplied Vue namespace that predates it.
  * Pinned by `tests/keepalive-input-scope-fixture.test.ts`.
  *
- * rc.5 cycle - this is now known to be PERMANENT, not a gap awaiting a fix.
- * The rc.4 change was made from measurement alone, which left open whether a
- * later Vue release would make `getCurrentInstance()` answer in Vapor and turn
- * this gate back into dead weight. It will not: on the Vapor roadmap
- * (vuejs/core#13687, Jul 20) a Vue core maintainer confirmed the null is
+ * The null is PERMANENT, not a gap awaiting a fix: on the Vapor roadmap
+ * (vuejs/core#13687, Jul 20) a Vue core maintainer confirmed it is
  * INTENTIONAL, with an internal `useInstanceOption` API kept deliberately
  * non-public, and reaffirmed in August that Vapor exposes no general-purpose
  * component instance tree to userland by design. So do not "restore"
@@ -920,9 +917,6 @@ export function runDispatch(
  * `getCurrentInstance()` dependency. A dispatch's own failure is its result.
  * The bus's recent failures are `useSharedCommandState().errors`.
  *
- * (Absorbed the former `useVaporCommand` - the Vapor-safety distinction was obsolete;
- * this is now the single command composable.)
- *
  * @example
  * const { dispatch, register, pending } = useCommand();
  * register('cartAdd', (cmd) => addToCart(cmd.target));
@@ -1003,8 +997,8 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
 
   // A page cached by KeepAlive releases its handlers while it is off screen and
   // takes them back when it returns, so the page on screen is the one that
-  // answers. useCommandHistory and useCommandError already followed KeepAlive
-  // this way; this composable, the one that registers handlers, did not.
+  // answers. useCommandHistory and useCommandError pause on KeepAlive the same
+  // way.
   // register()'s cleanup removes only its own entry, so releasing never takes
   // the visible page's handler. tests/usecommand-keepalive.test.ts.
   tryKeepAliveHooks(
@@ -1195,13 +1189,11 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
   // instead of two allocations plus a concat.
   //
   // Measured for v1.15.0, interleaved A/B, 200k calls: 3 distinct names 4.669ms -> 1.244ms
-  // (**-73%**), 8 names 5.171ms -> 1.426ms (-72%). This replaces the old
-  // "inlined, DO NOT consolidate, a shared call costs ~1%" note: the 1% was
-  // real but it was the wrong thing to optimise - the join itself was the cost,
-  // not the call, and removing the repeated work beats avoiding the indirection
-  // by ~70x.
+  // (**-73%**), 8 names 5.171ms -> 1.426ms (-72%). The join itself was the
+  // cost, not the call: removing the repeated work beats avoiding the
+  // indirection by ~70x.
   //
-  // Capped like `_prefixCache` in command-bus.ts and for the same reason: a
+  // Capped like `_prefixCache` in pattern.ts and for the same reason: a
   // long-lived group dispatching generated names would otherwise grow the Map
   // without bound. Same 256-entry FIFO eviction, so a pathological caller
   // degrades to the uncached concat cost rather than leaking.

@@ -6,7 +6,7 @@ Security fixes are backported to:
 
 | Version | Supported          |
 |---------|--------------------|
-| <!-- vc:version -->1.32.0<!-- /vc:version --> (latest minor) | yes, active |
+| <!-- vc:version -->1.33.0<!-- /vc:version --> (latest minor) | yes, active |
 | earlier 1.x minors, from 1.1 | critical fixes only |
 | < 1.1   | no longer maintained |
 
@@ -52,9 +52,9 @@ these areas get extra review:
   bridges). An Inertia app on Laravel passes `true`: with no meta tag, the
   bridge reads the `XSRF-TOKEN` cookie Laravel sets.
 - **Auth guard plugin** (`plugins-core.ts#authGuard`) - gates dispatches.
-- **Persistence plugin** (`plugins-io.ts#persist`) - writes to localStorage
-  and similar stores. Its `validate` option exists to reject deserialized
-  state after a schema-changing deploy.
+- **Saved store state** (`store-persist.ts#saveTo`, a store's `persist`
+  option) - writes to localStorage and similar stores. Its `validate` option
+  exists to reject deserialized state after a schema-changing deploy.
 - **Schema / LLM layer** (`schema.ts`) - exposes bus actions as tool calls.
   Restrict which actions are exposed.
 - **MCP server** (`mcp.ts`) - turns every schema action into an MCP tool, and a
@@ -65,10 +65,11 @@ these areas get extra review:
   checks the name against `actionFilter` and the schema's own keys
   (`Object.hasOwn`). A tool that is not listed is not callable. The
   test-run server (`vitest-mcp.ts`) has the same shape and is dev-only.
-- **Offline outbox** (`outbox.ts#localStorageOutbox`) - persists the QUEUE of
-  pending commands, as one JSON value in localStorage. Same storage caveat as
-  `persist` above, over more sensitive contents: these are mutations waiting to
-  be replayed, not rendered state.
+- **Offline outbox** (`outbox.ts#createOutbox`) - persists the QUEUE of
+  pending commands, as one JSON value under its `name` in its `storage`
+  (localStorage by default). Same storage caveat as `saveTo` above, over more
+  sensitive contents: these are mutations waiting to be replayed, not rendered
+  state.
 - **HMR plugin** (`vite-hmr.ts`) - preserves the bus across reloads on a
   `globalThis` STRING key (`__VAPOR_CHAMBER_BUS__`), so anything running on the
   page can reach it by name. Not a production-runtime concern, because the

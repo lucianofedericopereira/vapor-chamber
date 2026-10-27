@@ -2,22 +2,19 @@
  * DEV - is this a development build?
  *
  * Dev-only diagnostics (the `console.warn`s that explain a misuse) are worth
- * their bytes in development and worth none in production. The guard this
- * replaces was:
+ * their bytes in development and worth none in production. A runtime guard
+ * such as
  *
  *     typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'
  *
- * which reads correctly but does not *disappear* correctly: rolldown does not
+ * reads correctly but does not *disappear* correctly: rolldown does not
  * const-fold `typeof process < "u" && !1`, so in the production IIFE bundles
- * the branch was unreachable while every warning string still shipped -
- * ~1,140 bytes of message text in `full`, ~509 in `core`, measured. The loss
- * was documented in `scripts/check-size.mjs` and left standing because there
- * was no better lever.
+ * the branch would be unreachable while every warning string still shipped -
+ * ~1,140 bytes of message text in `full`, ~509 in `core`, measured.
  *
- * There is one now, and it is the same one `__VC_IIFE__` uses: whether a build
- * is for development is settled when the build runs, so it should be answered
- * by the build rather than at runtime. `scripts/build.mjs` answers it per
- * artifact:
+ * So this is answered by the build, as `__VC_IIFE__` is: whether a build is
+ * for development is settled when the build runs. `scripts/build.mjs` answers
+ * it per artifact:
  *
  *   - IIFE bundles      -> `__VC_DEV__` defined `false`, so `if (DEV)` folds
  *                         away and the strings go with it.

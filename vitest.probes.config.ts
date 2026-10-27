@@ -8,16 +8,10 @@
  *
  *     npx vitest run --config vitest.probes.config.ts
  *
- * THEY LIVE AT THE ROOT, in `.probes/`, and that is the second arrangement.
- * The first put them in `tests/probes/` so that vitest.config.ts's `include`
- * would reach them - and then every tool that walks `tests/` found them and
- * needed its own exclude: vitest (a probe is often written to fail, so it
- * failed the suite), biome (it linted a probe's unused import and failed
- * lint:check), check-ascii (it walked them), with the typecheck include next
- * in line. Three excludes to hide a directory from tools that had no business
- * seeing it. This config is standalone and can include any path, so the reason
- * they were under `tests/` had already evaporated. At the root they are simply
- * out of everyone's way, and all three excludes are gone.
+ * THEY LIVE AT THE ROOT, in `.probes/`, not under `tests/`: every tool that
+ * walks `tests/` (vitest, biome, check-ascii, the typecheck include) would
+ * otherwise find them and need its own exclude. This config is standalone and
+ * can include any path, so nothing needs them under `tests/`.
  *
  * Standalone rather than a `mergeConfig` of vitest.config.ts: mergeConfig
  * CONCATENATES arrays, so merging keeps the base `include` and runs the whole
@@ -26,10 +20,8 @@
  *
  * PARK THIS DIRECTORY BEFORE GATING HISTORICAL COMMITS. Probes are untracked,
  * and untracked files survive a checkout - so a probe written to fail will run
- * and fail at any commit whose config does not know about it. A
- * `git rebase --exec` pass over this series stopped on its first commit for
- * exactly that reason, back when the answer was an exclude rather than a
- * location.
+ * and fail at any commit whose config does not know about it (a
+ * `git rebase --exec` pass stops on it).
  *
  * This file is committed and the probes are not, so a clean checkout has the
  * entry point and an empty room behind it.

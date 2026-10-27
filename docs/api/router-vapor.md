@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/router/vapor';
 
 ### RouterOutlet
 
-**Variable** - [src/router/vapor.ts:105](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/vapor.ts#L105)
+**Variable** - [src/router/vapor.ts:106](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/vapor.ts#L106)
 
 ```ts
 RouterOutlet: import("vue").DefineVaporComponent<import("vue").ComponentObjectPropsOptions<{ [x: string]: unknown; }>, string, {}, {}, string, { [x: string]: import("vue").VaporSlot; }, Record<string, any>, Node | import("vue").VaporFragment<import("vue").Block> | import("vue").DynamicFragment | import("vue").VaporComponentInstance<{}, {}, { [x: string]: import("vue").VaporSlot; }, Record<string, any>, import("vue").Block, Record<string, any>>, {}, true, import("vue").VaporPublicProps, {}, {}>

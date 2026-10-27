@@ -101,8 +101,8 @@ export { _timedOut } from './command-binding';
  * made it a getter so a DYNAMIC argument can be reactive (Vue's own test
  * compiles `v-custom:[data.arg]` and expects the attribute to follow
  * `data.arg`). A selector must not move, so it lives in the NAME, where a name
- * cannot be dynamic; a selector in the argument was a dead control in every
- * compiled Vapor template on rc.9, with the whole suite green.
+ * cannot be dynamic; a selector in the argument is a dead control in every
+ * compiled Vapor template, with no error.
  *
  * (Teardown does not follow the binding either - see the `beforeUnmount` note
  * in the plugin below.)
@@ -339,9 +339,8 @@ export function createDirectivePlugin(): { install(app: any): void } {
        */
       app.directive('vc-payload', {
         // `put`, not a direct write, so a payload authored BEFORE the command
-        // on the same element is held and claimed rather than dropped. It used
-        // to be `if (state) state.payload = ...`, which is a silent no-op in
-        // exactly that order - see `pending` for the measurement.
+        // on the same element is held and claimed rather than dropped (a plain
+        // write is a silent no-op in that order - see `pending` for the measurement).
         mounted(el: Element, binding: { value: any }) {
           put(el, 'payload', binding.value);
         },
@@ -376,8 +375,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
 /*
  * ORDERING AND GUARDS, measured. The long-form rationale for
  * {@link vcCommandVapor}, kept at the end of the file per the house rule for
- * a docblock past roughly fifteen lines. Moved here verbatim; nothing below
- * this line was reworded.
+ * a docblock past roughly fifteen lines.
  *
  * WHO RUNS FIRST, when the element also carries a template `@click`. Vue
  * 3.6.0-rc.9 registers the template's listener BEFORE this directive's;
@@ -427,10 +425,10 @@ export function createDirectivePlugin(): { install(app: any): void } {
  * they registered in, which is also why it is the one mode plain
  * `stopPropagation()` vetoes.
  *
- * ADDED AT rc.10. A bound `:onClick="fn"` on the same element now behaves as
- * the `@click` of that table does in the `direct` column: it runs first, and
- * `el.disabled = true` or `stopImmediatePropagation()` skips the dispatch. Vue
- * 3.6.0-rc.10 (`86d44991`) compiles it on Vapor to a listener; rc.9 compiled
- * it to a property write that never ran, so it could veto nothing. Pinned by
+ * A BOUND `:onClick="fn"` on the same element behaves as the `@click` of that
+ * table does in the `direct` column: it runs first, and `el.disabled = true`
+ * or `stopImmediatePropagation()` skips the dispatch. Vue 3.6.0-rc.10
+ * (`86d44991`) compiles it on Vapor to a listener; rc.9 compiled it to a
+ * property write that never ran, so it could veto nothing. Pinned by
  * tests/directives-vapor-fixture.test.ts.
  */

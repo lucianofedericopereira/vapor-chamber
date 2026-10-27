@@ -126,13 +126,3 @@ libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
 15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
 them. Nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)
 for the removal-mode trade-off.
-
-## When NOT to migrate
-
-- You're using mitt as a tiny global event bus and have no plans to grow it.
-- Bundle size is the dominant constraint.
-- You don't need results, plugins, hooks, transports, or any of the
-  bus-shaped features.
-
-mitt is excellent at what it does. vapor-chamber is for when you need more
-than that.

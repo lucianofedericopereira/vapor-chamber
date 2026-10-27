@@ -4,7 +4,7 @@
  * Hold commands durably while offline, replay them in order on reconnect,
  * and deduplicate server-side via the Idempotency-Key header.
  *
- * The outbox composes existing primitives into one headline feature:
+ * The outbox composes existing primitives:
  *   - a key per record (the record's id), stamped onto
  *     `cmd.meta.idempotencyKey` on every replay,
  *   - the HTTP transport, which forwards `meta.idempotencyKey` as an
@@ -125,7 +125,7 @@ export type OutboxOptions = {
   key?: (cmd: Command) => string;
   /**
    * Max queued records - bounded memory. When exceeded, the OLDEST record is
-   * dropped with a console warning, and its caller's `done` settles with
+   * dropped with a warning report, and its caller's `done` settles with
    * `outbox:exceeded:queue`. Default: 200.
    */
   maxSize?: number;
@@ -281,9 +281,9 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     isRetryable = outboxIsRetryable,
   } = options;
 
-  // `records.length > maxSize` gates EVICTION, so a NaN bound never fired and
-  // the cap silently vanished - measured at 300 records queued. ../bounds owns
-  // that rule, and it falls back to the documented 200 rather than to 0:
+  // `records.length > maxSize` gates EVICTION, so a NaN bound would never fire
+  // and the cap would silently vanish. ../bounds owns that rule, and it falls
+  // back to the documented 200 rather than to 0:
   // an outbox that holds nothing while offline LOSES the commands it exists to
   // hold. A negative bound clamps to 0.
   const maxSize = countOption(rawMaxSize, 200);
@@ -594,8 +594,8 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       // Retryable: keep this record and everything behind it, in order. When
       // the answer declared when to come back (a Retry-After), the scheduler
       // flushes again then; otherwise the next 'online' or flush() does.
-      // Never sooner than a second later: a `Retry-After: 0` re-flushed at
-      // once, got the same answer and re-flushed again, with no time passing
+      // Never sooner than a second later: a `Retry-After: 0` would re-flush at
+      // once, get the same answer and re-flush again, with no time passing
       // between requests. While the answer repeats the wait doubles, capped at
       // 30 s: a backend busy for ten minutes is asked 24 times, not 601, and
       // the record still drains within 30 s of it recovering. A declared wait

@@ -14,9 +14,7 @@
  *
  * Ported rather than depended on, deliberately: Perl is an odd dependency to
  * add to a TS library's toolchain, and reading package.json needs to happen
- * in-process anyway. (An earlier version of this note also cited the repo not
- * being a git checkout; that stopped being true when git became the workflow
- * substrate - see docs/decisions.md - and the port stands on the other legs.)
+ * in-process anyway.
  *
  * MARKERS. A begin/end pair; this script owns everything between them.
  *
@@ -34,19 +32,25 @@
  *
  * USAGE
  *   node scripts/stamp-docs.mjs            # rewrite stale markers in place
- *   node scripts/stamp-docs.mjs --check    # exit 1 if any marker is stale
+ *   node scripts/stamp-docs.mjs --check    # write nothing; exit 1 if any marker is stale
  *
- * `--check` is the CI shape used by check-size.mjs / check-env-guards.mjs, and
- * mirrors the `--check` mode the original tools expose.
+ * `--check` is the mode `lint:check` runs. A bad pin (see PINS) exits 1 in both
+ * modes.
+ *
+ * Scope: markers in README.md, CONTRIBUTING.md, ROADMAP.md, SECURITY.md and in
+ * the .md, .html and .php files under docs/ and examples/. CHANGELOG.md is not
+ * scanned. It also keeps each examples/*\/package.json `vue` range equal to the
+ * root devDependency.
  *
  * Adding a value: put it in VALUES below. Anything derivable from a file the
  * repo already produces belongs here; anything a human must decide does not.
  *
- * Two sources feed it: package.json (always present) and the test run's own
- * artifacts - `docs/metrics.json` and `coverage/coverage-summary.json`, both
- * gitignored (the reporter's header records why committing the counts was
- * measured and rejected). Markers whose source is missing are left untouched,
- * so `--check` still passes on a fresh checkout.
+ * Three sources feed it: package.json (always present), the generated
+ * `docs/BUNDLE-SIZES.md` (committed), and the test run's own artifacts -
+ * `docs/metrics.json` and `coverage/coverage-summary.json`, both gitignored
+ * (the reporter's header records why committing the counts was measured and
+ * rejected). Markers whose source is missing are left untouched, so `--check`
+ * still passes on a fresh checkout.
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -61,8 +65,8 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
  * Marker name -> value, each derived from a source of truth.
  *
  * `vueAligned` reads the devDependency rather than being typed by hand: it is
- * the version the suite actually ran against this cycle, which is the only
- * honest thing for a doc to claim.
+ * the version the suite actually runs against, which is the only honest thing
+ * for a doc to claim.
  */
 const VALUES = {
   version: pkg.version,
@@ -72,7 +76,7 @@ const VALUES = {
 /**
  * Values derived from artifacts the TEST RUN produces, added separately because
  * they can be absent. BOTH sources are gitignored - `coverage/`, and
- * `docs/metrics.json` at .gitignore:23, which records why: the counts depend on
+ * `docs/metrics.json` (see .gitignore), which records why: the counts depend on
  * what else has run, so a committed copy would churn. A fresh checkout
  * therefore has NEITHER, and `lint:check` runs `--check` before any test has
  * run in CI. A missing source SKIPS its markers - leaving whatever the doc
@@ -83,8 +87,8 @@ const VALUES = {
  * `docs/metrics.json` is NOT committed (.gitignore), which is the one cost
  * worth knowing: a marker whose source is absent renders exactly like a
  * current one, and `--check` calls it current having had nothing to compare
- * it against. The `vc:bench*`
- * markers are that set. Run `npm run bench:bands` before trusting one.
+ * it against. The `vc:bench*` markers are that set. Run `npm run bench:bands`
+ * before trusting one.
  */
 function readJson(path) {
   try {
@@ -94,13 +98,12 @@ function readJson(path) {
   }
 }
 
-// Only a COMPLETE run is comparable to what the docs claim: without `dist/` the
-// files that read it fail (they skipped before log s35.64), and the docs carry the coverage run's counts, beside its
-// percentages (the measure-only timing tests skip there and in every run
-// without VC_TIMING, tests/under-coverage.ts). The reporter records both facts, so
-// data from an ordinary `npm run test:run` is ignored here instead of marking
-// every doc stale - otherwise running the suite the normal way would break the
-// next `lint:check`, which is a gate nobody would keep.
+// Only a COMPLETE run is comparable to what the docs claim: the docs carry the
+// counts of a run that had `dist/` and was instrumented for coverage (the
+// measure-only timing tests skip under coverage and in every run without
+// VC_TIMING, tests/under-coverage.ts). The reporter records both facts, so data
+// from an ordinary `npm run test:run` is ignored here instead of marking every
+// doc stale, which would break the next `lint:check`.
 const metrics = readJson('docs/metrics.json');
 
 /**
@@ -120,13 +123,10 @@ const metrics = readJson('docs/metrics.json');
 if (metrics?.outlet) {
   VALUES.outletSaving = metrics.outlet.savedBr;
   VALUES.outletSavingRaw = metrics.outlet.savedRaw;
-  // The LIMITS themselves, not just the results. The single bar they replace
-  // was hard-coded in the test and hand-copied into five documents - the exact
-  // shape this script exists to remove - and it is now two limits, declared
-  // once each at OWN_ARM_CEILING_KB and SAVING_FLOOR_KB in
-  // tests/vapor/vapor-outlet-size.test.ts and published from there. The old
-  // `outletBar` / `outletMargin` pair went with the difference metric they
-  // described (rc.8 cycle: it fired twice on improvements).
+  // The LIMITS themselves, not just the results: two limits, declared once each
+  // at OWN_ARM_CEILING_KB and SAVING_FLOOR_KB in
+  // tests/vapor/vapor-outlet-size.test.ts and published from there, so no
+  // document carries a hand-copied bar.
   VALUES.outletOwnArm = metrics.outlet.ownArm;
   VALUES.outletOwnArmCeiling = metrics.outlet.ownArmCeiling;
   VALUES.outletFloor = metrics.outlet.floor;

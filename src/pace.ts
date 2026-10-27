@@ -3,7 +3,7 @@
  *
  * `pace(send, { debounce })` or `pace(send, { throttle })` wraps a dispatch so
  * a burst of calls reaches the bus at the sender's rhythm. The bus never paces:
- * the input or the button knows its own rhythm (plan 1.32, the sender row).
+ * the input or the button knows its own rhythm.
  */
 
 import { type Delay, delayOption } from './bounds';

@@ -125,7 +125,7 @@ export const _stateMap = new WeakMap<Element, DirectiveState>();
  * unclaimed slot with it when it is collected.
  */
 export type PendingSlot = Partial<Pick<DirectiveState, 'payloadOf' | 'optimisticOf' | 'payload' | 'optimisticFn'>>;
-/**  */
+/** Payload / optimistic bindings held for an element until its command mounts. */
 export const _pending = new WeakMap<Element, PendingSlot>();
 
 // ---------------------------------------------------------------------------
@@ -176,8 +176,8 @@ function delegatedClickHandler(event: Event): void {
   // shadow root, and at document level `event.target` has been retargeted to
   // the shadow HOST - so the _stateMap lookup never found the real element and
   // a delegated control inside a shadow root simply never dispatched.
-  // `router/dom.ts` link interception documents this same fix; the delegated
-  // handler predates that lesson. Every build target has composedPath.
+  // `router/dom.ts` link interception documents this same fix. Every build
+  // target has composedPath.
   for (const node of event.composedPath()) {
     const state = _stateMap.get(node as Element);
     if (state?.delegate) {
@@ -398,7 +398,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     try {
       // Apply optimistic update if provided. Inside the `try`: one that throws
       // is this press's failure, and the `finally` below still releases the
-      // control. Thrown before it, the control stayed busy for good
+      // control. Thrown before it, the control would stay busy for good
       // (`vc-loading`, `aria-disabled`, every later press swallowed).
       if (state.optimisticFn) {
         const cmd: Command = { action: state.action, target, payload };

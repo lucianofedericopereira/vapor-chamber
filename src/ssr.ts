@@ -7,7 +7,7 @@
  * later starts from it. Nothing replays: a reducer that mints an id or reads a
  * clock ends on the server's state in the browser too. It works above Vue's DOM
  * hydration: no DOM references, anchors or interop state. Route data stays the
- * router's. The history is in CHANGELOG.md and the whitepaper's appendix B.
+ * router's.
  *
  * CONCURRENCY. The shared bus is a module global, one per Node process. A
  * server that renders requests concurrently creates a bus per request: it

@@ -13,34 +13,29 @@
  *   count >= max     gate on REFUSING     NaN -> refuses nothing   FAILS OPEN
  *
  * Two of the three are unbounded growth or a defeated guard, and they are the
- * two that are idiomatic to write. Measured through the public API before this
- * module existed: `history({ maxSize: NaN })` kept 500 entries against a cap of
- * 50, `metrics({ maxSize: NaN })` kept 1500 against 1000,
- * `circuitBreaker({ threshold: NaN })` sat closed through 20 straight failures,
- * and `StreamParser({ maxDepth: NaN })` accepted 5,000 levels of nesting
- * without once firing the depth guard that exists to stop exactly that.
+ * two that are idiomatic to write: `history({ maxSize: NaN })` would keep
+ * every entry, `circuitBreaker({ threshold: NaN })` would stay closed through
+ * any run of failures, and `StreamParser({ maxDepth: NaN })` would never fire
+ * the depth guard that exists to stop runaway nesting.
  *
- * WHY A MODULE AND NOT `Math.max(0, raw | 0)` AT EACH SITE. That idiom was
- * already applied by hand at five sites, and this sweep found seven more it had
- * never reached - the same shape as the arrow sweep that left 48 arrows in 15
- * files and the glyph sweep that left four in shipped strings. A rule spelled
- * out at each call site is a rule that is missing wherever nobody remembered it.
+ * WHY A MODULE AND NOT `Math.max(0, raw | 0)` AT EACH SITE. A rule spelled out
+ * at each call site is missing wherever nobody remembered it.
  *
- * It is also subtly wrong twice over. `Infinity | 0` is 0, so those five sites
- * turned "no bound" into "store nothing" - the opposite of the request. And
- * `| 0` truncates to 32 bits, so a cap of 3_000_000_000 silently went negative.
- * Both disappear here: `Math.trunc(Infinity)` is `Infinity` and `Math.min`
- * carries it through, so the unbounded case needs no branch of its own.
+ * That idiom is also subtly wrong twice over. `Infinity | 0` is 0, which turns
+ * "no bound" into "store nothing" - the opposite of the request. And `| 0`
+ * truncates to 32 bits, so a cap of 3_000_000_000 goes negative. Here
+ * `Math.trunc(Infinity)` is `Infinity` and `Math.min` carries it through, so
+ * the unbounded case needs no branch of its own.
  *
- * WHY A BAD OPTION FALLS BACK TO THE DEFAULT rather than to zero. The five
- * hand-clamped sites folded NaN to 0 on the argument that storing nothing is
- * "bounded, and loud rather than silent". Written out per site, that argument
- * collapses: an outbox that queues nothing DISCARDS the commands it exists to
- * hold; `idempotent` that remembers nothing DOUBLE-EXECUTES commands declared
- * idempotent; a transition that times out in 1ms removes the animation instead
- * of the hang. None of those is louder than the unbounded failure - only
- * costlier. A NaN option is indistinguishable in intent from a missing one (it
- * is what a failed config read produces), so it now behaves like a missing one.
+ * WHY A BAD OPTION FALLS BACK TO THE DEFAULT rather than to zero. Folding NaN
+ * to 0 on the argument that storing nothing is "bounded, and loud rather than
+ * silent" does not hold: an outbox that queues nothing DISCARDS the commands
+ * it exists to hold; `idempotent` that remembers nothing DOUBLE-EXECUTES
+ * commands declared idempotent; a transition that times out in 1ms removes the
+ * animation instead of the hang. None of those is louder than the unbounded
+ * failure - only costlier. A NaN option is indistinguishable in intent from a
+ * missing one (it is what a failed config read produces), so it behaves like a
+ * missing one.
  */
 
 /** The largest delay `setTimeout` accepts. Past it a timer fires IMMEDIATELY

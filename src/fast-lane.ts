@@ -69,7 +69,7 @@ export type FastLane = {
    */
   emit<T = any>(action: string, data: T): void;
 
-  /** Diagnostic: list registered actions. */
+  /** Diagnostic: list the actions with a `compile()`d handler (not those with only subscribers). */
   registeredActions(): string[];
 
   /** Reset all bindings. */
@@ -234,10 +234,8 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
         // LIVE mode (default, bus parity, the rule fanOutListeners states):
         // the listeners that existed when the emit started; one removed
         // during it is marked off and skipped, one added during it is past
-        // `len`. Nothing a listener does moves the cursor. The length-based
-        // cursor correction this replaced skipped or re-ran a listener when
-        // one removed several peers on both sides of itself (log s35.67).
-        // Allocation-free, which is this file's only currency.
+        // `len`. Nothing a listener does moves the cursor, so removing several
+        // peers on both sides of itself never skips or re-runs one (log s35.67).
         for (let i = 0, len = bucket.length; i < len; i++) {
           const e = bucket[i];
           if (!e.off) e.fn(data);

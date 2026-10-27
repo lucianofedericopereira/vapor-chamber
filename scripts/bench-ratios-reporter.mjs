@@ -5,8 +5,8 @@
  * comparisons typed by hand, and its own text admitted the hazard: "unlike the
  * size and coverage figures they have no generator behind them, so re-run the
  * bench before trusting them after a hot-path change". Two of the four had
- * drifted by the rc.7 cycle: one described a gap about twice the one it
- * measured, the other parity where it measured a 6-8% lead. Exactly the
+ * drifted: one described a gap about twice the one it measured, the other
+ * parity where it measured a 6-8% lead. Exactly the
  * failure `stamp-docs.mjs` exists to prevent, in the one corner it could not
  * reach: it can only own a value some file the repo produces already states,
  * and bench output went to stdout and a CI artifact.

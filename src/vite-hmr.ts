@@ -1,7 +1,7 @@
 /**
  * vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
  *
- * Two plugins (the history is in CHANGELOG.md):
+ * Three plugins (the history is in CHANGELOG.md):
  *   - `vaporChamberHMR()`, serve-only: marks each hot update, so the stores
  *     keep their states and a handler registered again raises no warning.
  *   - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
@@ -15,6 +15,8 @@
  *     pre-bundled install put two chamber modules in the page (see the
  *     function's note). In both it defines `__VC_LEAN__`, the build profile
  *     (the `profile` option), unless the app defines it.
+ *   - `vaporChamberTest()`: the Vitest plugin for `vapor-chamber/vitest`
+ *     (setup file, shared-bus exclusions, the island project).
  *
  * The rules the HMR shim keeps:
  *   - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of @vitejs/plugin-vue, and
@@ -154,7 +156,7 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
     /**
      * The transform below can only reach an app THROUGH its own source, so an
      * app whose entry script never names the package - every bus call living in
-     * SFCs, `main.ts` doing nothing but `createApp(App).mount()` - got no shim
+     * SFCs, `main.ts` doing nothing but `createApp(App).mount()` - gets no shim
      * at all, and its bus is rebuilt from scratch on every hot reload - a case
      * no amount of module matching can fix.
      *
@@ -301,14 +303,13 @@ export { getCommandBus, setCommandBus, resetCommandBus };
 
       // SAME LINE, deliberately, and with no sourcemap.
       //
-      // This prepended a whole line and returned a hand-built one-line shift
-      // map, on the correct reasoning that `map: null` means "no mapping
-      // information" to Vite, which reads it as identity - so a prepended LINE
-      // silently moved every stack frame, breakpoint and overlay location down
-      // by one. What that fix cost went unmeasured: a line-shift map can only
-      // say "output line N came from source line N-1, column 0", and Vite
-      // CHAINS maps, so every downstream map's column detail collapsed onto
-      // column 0. Measured on examples/vapor-sfc for v1.19.0, mappings length:
+      // `map: null` means "no mapping information" to Vite, which reads it as
+      // identity - so a prepended LINE would silently move every stack frame,
+      // breakpoint and overlay location down by one. A hand-built line-shift
+      // map is no fix: it can only say "output line N came from source line
+      // N-1, column 0", and Vite CHAINS maps, so every downstream map's column
+      // detail collapses onto column 0. Measured on examples/vapor-sfc,
+      // mappings length:
       //
       //                          src/main.ts     src/CartPanel.vue
       //   vue() alone               92                816
@@ -379,7 +380,7 @@ const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
  * through a runtime lookup that only Node or an import map resolves, never a
  * bundled page (log 36.F26). An app importing its composables from the root
  * therefore ships them without reactivity, cleanup or the KeepAlive guard -
- * which `warnUnwired()` in chamber.ts now reports once at runtime, and which
+ * which `warnUnwired()` in chamber.ts reports once at runtime, and which
  * `vapor-chamber/vue` / `vapor-chamber/vapor` fix by being imported instead.
  *
  * This plugin fixes it without changing an import. It resolves the bare
@@ -614,8 +615,8 @@ export function vaporChamberTest(options: VaporChamberTestOptions = {}): any {
       // Node-arm tests failed). This hook runs inside that project too, so it
       // replaces the include there.
       // Benchmark files have their own include, inherited the same way, and
-      // `vitest bench` ran each one again in this project: measured on this
-      // repository for v1.21.0, tests/perf.bench.ts twice and the CI bench job 89s -> 179s.
+      // `vitest bench` would run each one again in this project: measured on this
+      // repository, tests/perf.bench.ts twice and the CI bench job 89s -> 179s.
       // The island project runs no benchmarks; emptying the include is how.
       if (test.name === ISLAND_PROJECT) {
         test.include = [...ISLAND_INCLUDE];

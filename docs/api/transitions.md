@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transitions';
 
 ### createTransitionBridge
 
-**Function** - [src/transitions.ts:328](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L328)
+**Function** - [src/transitions.ts:323](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L323)
 
 ```ts
 createTransitionBridge(options: TransitionBridgeOptions & { bus: BaseBus; }) => TransitionBridge
@@ -47,7 +47,7 @@ reported as vuejs/core#15727, a fix proposed in vuejs/core#11824. Vapor's
 
 ### useTransitionCommand
 
-**Function** - [src/transitions.ts:374](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L374)
+**Function** - [src/transitions.ts:369](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L369)
 
 ```ts
 useTransitionCommand(options?: TransitionBridgeOptions) => TransitionBridge
@@ -106,7 +106,7 @@ export type TransitionBridgeOptions = {
    *
    * Vue waits for `done()` indefinitely, so a handler that never settles
    * leaves the element stuck mid-transition for the life of the page - see the
-   * note in `dispatchWithDone`. Clamped to at least 1ms.
+   * note in `dispatchWithDone`. Clamped to between 1ms and `MAX_TIMEOUT_MS`.
    */
   timeout?: number;
 };

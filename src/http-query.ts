@@ -8,19 +8,11 @@
 /**
  * Is this an absolute http(s) URL, as opposed to a path to hang off baseURL?
  *
- * This was `url.startsWith('http')`, which is also true of a RELATIVE path
- * whose first segment happens to begin with those four letters - `httpbin/get`,
- * `http-logs`, a REST resource literally named `http`. Two failures fall out of
- * the one misread, and the quiet one is the worse one:
- *
- *   - with no params, the baseURL is silently dropped and the request goes to
- *     a relative path against whatever the page origin is;
- *   - with params, `new URL('httpbin/get', undefined)` throws a bare
- *     "Invalid URL" TypeError out of a function nobody suspects.
- *
- * A scheme is also case-insensitive, so `HTTPS://host` was being read as
- * relative and prefixed. The regex says the thing the four letters were
- * standing in for.
+ * A bare `startsWith('http')` test is also true of a RELATIVE path whose first
+ * segment begins with those four letters (`httpbin/get`, `http-logs`), which
+ * would silently drop the baseURL, or with params make `new URL(...)` throw a
+ * bare "Invalid URL" TypeError. The scheme is also case-insensitive
+ * (`HTTPS://host` is absolute), so the test is a case-insensitive regex.
  */
 const ABSOLUTE_HTTP = /^https?:\/\//i;
 

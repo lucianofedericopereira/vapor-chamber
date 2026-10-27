@@ -305,8 +305,8 @@ export function schemaValidator(schema: BusSchema): PluginParts {
     });
   }
   // Coded through the plugin's own `fail`: `schemaValidator:invalid:payload`,
-  // a verdict (as a plain Error it read `failed`, and an outbox kept the record
-  // at its head for ever: tests/errors-match-catalogue.test.ts). _errResult,
+  // a verdict (a plain Error would read `failed`, and an outbox would keep the
+  // record at its head for ever: tests/errors-match-catalogue.test.ts). _errResult,
   // not a literal: one hidden class with the bus's results.
   const reject = (fail: Fail, action: string, errs: string[]): CommandResult =>
     _errResult(fail('invalid:payload', `[vapor-chamber] Validation failed for "${action}": ${errs.join(', ')}`, { action }));
@@ -561,11 +561,6 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
 /**
  * Creates a CommandBus typed from a flat runtime schema.
  * No separate CommandMap needed - TypeScript types are inferred automatically.
- *
- * (This block sat ABOVE `createAsyncSchemaCommandBus`'s own docblock, two
- * comments stacked with no declaration between them - so an editor attached
- * only the lower one to that function and this one to nothing, leaving the
- * sync factory with no tooltip at all.)
  *
  * @example
  * const bus = createSchemaCommandBus({

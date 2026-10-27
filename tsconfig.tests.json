@@ -1,11 +1,9 @@
 {
-  // Typechecks `tests/`, which nothing did before. `tsconfig.json` is
-  // `include: ["src/**/*"]` and `tsconfig.typecheck.json` adds two named
-  // files, so 2,400-odd tests compiled only through Vitest's transpiler -
-  // which strips types and never checks them. That is how a call to
-  // `bus.getHandler()` (no such method) and an option named `deadLetter` (no
-  // such key) sat in the suite asserting nothing, and how 21 call sites kept
-  // compiling against a `sync()` signature that had been replaced.
+  // Typechecks `tests/`. `tsconfig.json` is `include: ["src/**/*"]` and
+  // `tsconfig.typecheck.json` adds named files, so without this program the
+  // tests compile only through Vitest's transpiler, which strips types and
+  // never checks them. That is how a call to a method that does not exist and
+  // an option that is not a key sat in the suite asserting nothing.
   //
   // Its own program, not an addition to the others, for the reason
   // tsconfig.typecheck.json already gives: `tests/typed-contract.typecheck.ts`

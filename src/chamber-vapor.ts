@@ -35,14 +35,13 @@ import { _paceOf, pace, type Paced, type PaceOption, type PacedOn } from './pace
  * Why the `defineVapor*` wrappers warn instead of just returning null.
  *
  * Each returns `null` when the Vapor runtime is absent, and callers are
- * documented to check. But a bare `null` is the same failure shape that hid a
- * real bug for several releases: `tryKeepAliveHooks` guarded on an accessor
- * that silently answers "no" under Vapor, so a feature was inert with nothing
- * to see (rc.4 cycle - see tests/keepalive-input-scope-fixture.test.ts). Silent
- * negatives are how detection bugs survive.
+ * documented to check. But a bare `null` is a silent negative, and silent
+ * negatives are how detection bugs survive (an accessor that silently answers
+ * "no" left a feature inert with nothing to see: see
+ * tests/keepalive-input-scope-fixture.test.ts).
  *
- * So the null stays - throwing would break the documented contract and the
- * tests that assert it - but it is not quiet. The call sites gate on
+ * So the null stays - throwing would break the documented contract - but it
+ * is not quiet. The call sites gate on
  * `DEV`, so the whole call (and every byte of message text) folds out of the
  * production IIFE builds; this helper is then unreferenced and tree-shaken.
  */
@@ -86,9 +85,8 @@ export function createVaporChamberApp(
 ): unknown {
   const fn = getVaporAppFn();
   if (!fn) {
-    // The bare "Vapor required" message was the same whether Vue was absent,
-    // present-without-Vapor, or present-but-unreachable - three different
-    // problems with three different fixes. vueDetectionHint() names which.
+    // Vue absent, present without Vapor, and present but unreachable are three
+    // problems with three fixes; vueDetectionHint() names which.
     throw new Error(
       // The diagnosis ships (vueDetectionHint says why); the advice is DEV's.
       `[vapor-chamber] Vue 3.6+ with Vapor mode required. ${vueDetectionHint()}` +
@@ -116,17 +114,16 @@ export function getVaporInteropPlugin(): any | null {
 }
 
 // ---------------------------------------------------------------------------
-// Vapor Custom Elements (Vue 3.6 - defineVaporCustomElement introduced in 3.6.0-alpha.4, #14017)
+// Vapor Custom Elements (Vue 3.6)
 // ---------------------------------------------------------------------------
 
 /**
  * defineVaporCustomElement - create a custom element backed by Vapor rendering.
  *
- * Wraps Vue's `defineVaporCustomElement()` (introduced in 3.6.0-alpha.4, #14017). The generated custom
+ * Wraps Vue's `defineVaporCustomElement()`. The generated custom
  * element uses Vapor's compiler-optimized rendering instead of the VDOM, giving
  * zero-overhead DOM updates inside shadow DOM. Safe to call with a reused
- * options object, and children re-render on reactive prop changes (beta.14+;
- * per-beta detail: CHANGELOG / whitepaper alignment log).
+ * options object, and children re-render on reactive prop changes (Vue 3.6.0-beta.14+).
  *
  * Returns null if the Vapor runtime (Vue 3.6+) is not detected - check before calling
  * `customElements.define()`.
@@ -157,7 +154,7 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
 /**
  * defineVaporComponent - define a Vapor component with proper type inference.
  *
- * Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.7, #13831). Use this to get full
+ * Wraps Vue's `defineVaporComponent()`. Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
  * Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
  * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
@@ -190,7 +187,7 @@ export function defineVaporComponent<T = any>(options: object): T | null {
 /**
  * defineVaporAsyncComponent - define an async Vapor component for lazy loading.
  *
- * Wraps Vue's `defineVaporAsyncComponent()` (introduced in 3.6.0-alpha.3, #13059). Async Vapor
+ * Wraps Vue's `defineVaporAsyncComponent()`. Async Vapor
  * components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
  * The loading placeholder receives the deferred component's props and slots
  * (beta.14+) - render a skeleton matching the final shape. Per-beta detail:
@@ -252,13 +249,10 @@ export function defineVaporCommand<B extends BaseBus = CommandBus, D extends num
   // and an undo's stored copy keeps `bus` and the pace, which nothing reads.
   let unregister: (() => void) | null = bus.register(action, handler, options);
 
-  // `untracked`, like every other composable's dispatch. This one was the gap,
-  // and the worst place for it: a dispatch is an ACTION, not a read, and this
-  // helper is documented for hot paths in Vapor mode - i.e. the call most
-  // likely to be made from inside a render effect, where the handler's reads
-  // become that effect's dependencies and the component re-renders on state it
-  // never mentions. Pass-through when Vue is absent, so the "zero reactive
-  // overhead" claim above is unaffected for non-Vue consumers.
+  // `untracked`, like every other composable's dispatch: a dispatch is an
+  // ACTION, not a read, and a hot-path call is the one most likely made from
+  // inside a render effect, where the handler's reads would become that
+  // effect's dependencies. Pass-through when Vue is absent.
   function direct(target: any, payload?: any): PacedOn<B, CommandResult, D, T> {
     return untracked(() => bus.dispatch(action, target, payload)) as PacedOn<B, CommandResult, D, T>;
   }
@@ -295,8 +289,8 @@ export function defineVaporCommand<B extends BaseBus = CommandBus, D extends num
  * useVaporAsyncCommand - async-aware command dispatch for Vapor components
  * used inside Suspense boundaries.
  *
- * Vue 3.6.0-beta.10 introduced proper async component hydration under VDOM
- * Suspense. This composable wraps an AsyncCommandBus dispatch, untracked, and
+ * Vue 3.6.0-beta.10+ hydrates async components under VDOM Suspense. This
+ * composable wraps an AsyncCommandBus dispatch, untracked, and
  * gives `pending(action, target?)` (the bus's command state for that key,
  * `commandState`), making it safe for `<script setup vapor>` components that
  * await async operations. Error-boundary rendering and scheduler-flush
@@ -329,7 +323,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
 
   // Intentionally hand-rolled, NOT routed through chamber.ts's runCommand. A
   // single async/await is ~1.2x leaner on the dispatch wrapper than a
-  // .then-chain (measured, v1.18.0); this is the awaited HTTP/WS path, so keep
+  // .then-chain (measured); this is the awaited HTTP/WS path, so keep
   // it lean. Do not "consolidate" - the consistency isn't worth the wrapper
   // overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {

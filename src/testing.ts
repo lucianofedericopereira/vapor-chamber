@@ -84,8 +84,10 @@ export interface TestBus extends CommandBus<any> {
 }
 
 /**
- * Creates a test bus that stubs all handlers (returning `{ ok: true }`) unless
- * you register your own via `bus.register()`. All dispatches are recorded.
+ * Creates a test bus that records every dispatch and answers `{ ok: true }`
+ * with no value, without running handlers. With `passthroughHandlers: true`
+ * the registered handler runs. `transport` declares the transports whose
+ * actions are sent, as on the async bus.
  */
 export function createTestBus(opts: { passthroughHandlers?: boolean; transport?: AsyncCommandBusOptions['transport'] } = {}): TestBus {
   // The bus's own rule and send: an action a transport covers is sent, and its
@@ -153,10 +155,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean; transport?:
    * the listeners that existed when it started; one removed during it is
    * marked off and skipped, one added during it is past `n`.
    *
-   * It must match the real buses exactly. It once kept an older cursor
-   * correction after they were fixed: a test asserting "called once" failed
-   * against behaviour the production bus does not have, and one merely
-   * counting calls recorded a phantom and passed.
+   * It must match the real buses exactly: a different cursor rule would make a
+   * test assert behaviour the production bus does not have.
    */
   function fanOut(cmd: Command, result: CommandResult, matchAgainst: string): void {
     const pl = patternListeners;
@@ -233,8 +233,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean; transport?:
   function emit(event: string, data?: any): void {
     const cmd: Command = { action: event, target: data };
     const result: CommandResult = _okResult(undefined);
-    // Same fan-out, same cursor rule - this carried its own copy of the
-    // length-based bug and had to be fixed twice before it was one function.
+    // Same fan-out, same cursor rule as dispatch.
     fanOut(cmd, result, event);
   }
 

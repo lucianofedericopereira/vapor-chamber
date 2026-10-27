@@ -7,8 +7,8 @@ Thanks for considering a contribution.
 ## Setup
 
 You need:
-- Node.js >= 24.5.0 (matches `engines.node` in [package.json](./package.json))
-- npm 10+ (ships with the Node version above)
+- Node.js 24, 24.5.0 or later (`engines.node` in [package.json](./package.json) is `^24.5.0`; CI tests no other major)
+- npm 11 (ships with Node 24)
 
 ```bash
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
@@ -35,9 +35,10 @@ src/
   http.ts              Multi-method HTTP client (CSRF, interceptors, retry)
   http-cache.ts        Cache layer for the HTTP client
   http-query.ts        Query helpers
-  plugins-core.ts      Core plugins (logger, validator, debounce, throttle, ...)
+  plugins-core.ts      Core plugins (logger, validator, history, authGuard)
   plugins-extra.ts     Extra plugins (cache, circuitBreaker, rateLimit, metrics)
-  plugins-io.ts        I/O plugins (persist) + createChannel
+  plugins-io.ts        createChannel (BroadcastChannel over an event channel)
+  store-persist.ts     saveTo: a store's `persist` option
   plugins.ts           Re-export aggregator
   schema.ts            LLM tool-use layer (toAnthropicTools, toOpenAITools, ...)
   form.ts              Reactive form state
@@ -103,15 +104,17 @@ That is the whole check, and it is the one to run. It runs eleven steps in the
 house order, one line of output each, and stops at the first failure with the
 step named. So under `git rebase --exec 'npm run gate'` a red line identifies
 both the commit and the step. It does two things the manual list below cannot.
-It REGENERATES `docs/api/` and `docs/BUNDLE-SIZES.md` and then fails on a
-diff, rather than trusting you to have run them. And it ends by asserting a
-clean tree. A chain that merely regenerates would repair the drift and report
-green, which launders the defect instead of catching it.
+It REGENERATES `docs/api/`, `docs/errors.md`, `contract/`, the PHP contract
+fixture (`php/src/Contract/Fixture`) and `docs/BUNDLE-SIZES.md` and then fails
+on a diff, rather than trusting you to
+have run them. And it ends by asserting a clean tree. A chain that merely
+regenerates would repair the drift and report green, which launders the defect
+instead of catching it.
 
-Two things to know before you use it. It expects a COMMITTED tree, so running
-it with work in progress ends red at `clean tree` by design. The ten steps
-before it still report. And `npm run gate | tail` masks the exit code, so a red
-gate reads as green - pipe to a file instead.
+It expects a COMMITTED tree, so running it with work in progress ends red at
+`clean tree` by design; the ten steps before it still report. `npm run gate |
+tail` masks the exit code, so a red gate reads as green - pipe to a file
+instead.
 
 The steps individually, when you want to iterate on one of them:
 
@@ -120,7 +123,7 @@ npm run typecheck      # tsc --noEmit
 npm run build          # produces dist/ + prints sizes - BEFORE any test run
 npm run test:run       # default vitest project
 npm run test:vapor     # second project, `vue` aliased to the with-vapor dist
-npm run size:check     # fails if any IIFE variant exceeds its brotli budget
+npm run size:check     # fails if any IIFE variant exceeds its raw or brotli budget
 npm run lint:check     # biome + the prose guards (see below)
 npm run test:coverage  # 100% statements / branches / functions / lines
 ```
@@ -137,6 +140,14 @@ that chain:
 - `npm run check:example`: it drives three example builds and belongs to the
   alignment cycle, not to every commit.
 - `ab:vue`: it needs a second Vue installed.
+- `npm run test:browser`: it needs a Chromium install. CI runs it.
+- The suite runs the same on macOS and Linux (CI runs both), from a clone or
+  from an unpacked archive. Four cases read this repository's commits
+  (`tests/ab-ci.test.ts`, `tests/verify-contract-against.test.ts`); without
+  history they skip, by the rule in `tests/require-git.ts`. Of the scripts they
+  drive, only `scripts/ab/base-ok.sh` is also asserted against a throwaway
+  repository; from an archive `scripts/verify-contract.mjs --against` is
+  untested, and a clone or CI runs it. `git` itself must be installed.
 
 Three rules when you run the steps by hand:
 
@@ -171,12 +182,19 @@ rather than what it does, which a test cannot:
 - `stamp-docs --check`: fails on a stale generated number, or on a pinned range
   no version satisfies or that starts above the current version.
 
-CI runs these guards and the typecheck on Node 24, on Linux. It runs the build,
-both test projects and the size check on Node 24, on Linux and macOS
-(.github/workflows/ci.yml). The split is deliberate: every check on every cell
-takes too long and races on GitHub. A push that changes only files no check
-reads (`paths-ignore` in ci.yml: the funding file, the issue and PR templates)
-runs no CI.
+Every CI job runs on Node 24, the only major the package supports
+(.github/workflows/ci.yml). One Linux job, `check`, runs once: typecheck, the guards
+(`lint:check`), the generated docs diff, the suite under coverage (so the
+floors gate a pull request), the Vapor project, the size budgets and the LOC
+report, with the build coming from `prepare` at install. That is not the local
+gate: the gate runs its steps in another order and adds the `docs/BUNDLE-SIZES.md`
+diff and the clean-tree assertion, which CI does not run. The example builds, the browser suite and the perf A/B are their
+own jobs because each needs a different install or budget. The suite is the
+same under coverage: the timing loops run only with `VC_TIMING=1`
+(tests/under-coverage.ts). macOS runs the build, both test projects and the
+size budgets once `check` is green, so a Linux failure costs no macOS minutes.
+A push that changes only files no check reads (`paths-ignore` in ci.yml: the
+funding file, the issue and PR templates) runs no CI.
 
 `test:run` is not the whole suite. `tests/vapor/**` runs only under
 `vitest.vapor.config.ts`, which aliases `vue` to a build that includes Vapor
@@ -185,9 +203,10 @@ Run `test:vapor` after `build`, since its size guard measures a real production
 bundle.
 
 The `examples/` workspaces sit outside that gate. They build against the
-working tree on demand. `examples/exo-astro` needs Node >= 24.5.0 (the library's
-floor). Its directive scanner is covered by the repo suite, so `npm test` from
-the root does exercise that example's code.
+working tree on demand. `examples/exo-astro` pins the same Node 24 line as the
+library. It has no directive scanner of its own (it uses the library's page
+bindings, which the suite covers), so `npm test` from the root does not exercise
+that example's code.
 
 ### Performance work
 
@@ -330,8 +349,7 @@ See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items 
 
 - Comparative benchmarks vs RxJS Subject, Pinia.
 - Real-world integration examples in `examples/` (Rails, Django).
-- More `examples/` for the IIFE variants - embeddable widget, CDN-only Blade page.
-- TypeDoc -> static API reference site (target: `vapor-chamber.dev` or similar).
+- An embeddable-widget example for the `elements` IIFE variant.
 - A migration guide from Vuex.
 
 ---

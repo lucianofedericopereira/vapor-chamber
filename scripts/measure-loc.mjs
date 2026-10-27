@@ -9,6 +9,10 @@
  * A line with any code counts as code even if it has a trailing comment, so the
  * "code" column is never inflated by comments and comments are never code.
  *
+ * Walks every .ts file under the directory (not .d.ts). It only reports: it
+ * never exits non-zero on a count. A `/*` opened after code on the same line is
+ * not tracked as a block.
+ *
  * Run: node scripts/measure-loc.mjs [dir=src]
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';

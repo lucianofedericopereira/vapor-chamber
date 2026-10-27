@@ -105,7 +105,7 @@ export type FastLane = {
    */
   emit<T = any>(action: string, data: T): void;
 
-  /** Diagnostic: list registered actions. */
+  /** Diagnostic: list the actions with a `compile()`d handler (not those with only subscribers). */
   registeredActions(): string[];
 
   /** Reset all bindings. */

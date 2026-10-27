@@ -5,7 +5,9 @@
  * files it was given) runs in place of pact-verifier, and a local server
  * answers the monitor GET, so this needs neither a backend nor the binary.
  * Refs used: HEAD (holds contract/) and git's empty tree (holds nothing),
- * which every repository resolves, a shallow CI checkout included.
+ * which every repository resolves, a shallow CI checkout included. An
+ * unpacked archive has neither: those three cases skip there and run from a
+ * clone (tests/require-git.ts); the control needs no history.
  */
 import { execFile, spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -14,6 +16,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { gitHistory } from './require-git';
 
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 let server: Server;
@@ -41,7 +44,7 @@ const verify = (...extra: string[]) => new Promise<{ status: number | null; stdo
 });
 
 describe('verify-contract --against <ref>', () => {
-  it("replays the ref's own pact files, byte for byte", async () => {
+  it.skipIf(!gitHistory)("replays the ref's own pact files, byte for byte", async () => {
     const run = await verify('--against', 'HEAD');
     expect(run.status, run.stderr).toBe(0);
     const seen = readdirSync(join(scratch, 'seen')).sort();
@@ -55,13 +58,14 @@ describe('verify-contract --against <ref>', () => {
     expect(args).toContain('Sec-Fetch-Site=same-origin');
   });
 
-  it('says a ref with no contract has nothing to check, and exits 0', async () => {
+  it.skipIf(!gitHistory)('says a ref with no contract has nothing to check, and exits 0', async () => {
     const run = await verify('--against', EMPTY_TREE);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('holds no contract/*.pact.json: nothing to check against');
   });
 
-  it('exits 2 on a ref git cannot resolve', async () => {
+  // Without a repository every ref is unresolvable, so this would pass for the wrong reason.
+  it.skipIf(!gitHistory)('exits 2 on a ref git cannot resolve', async () => {
     const run = await verify('--against', 'no-such-ref-vc');
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('git cannot resolve no-such-ref-vc');

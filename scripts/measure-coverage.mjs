@@ -11,8 +11,9 @@
  *      node scripts/measure-coverage.mjs --json      machine-readable
  *      node scripts/measure-coverage.mjs --md         full generated doc (docs/COVERAGE.md)
  *
- * `npm run coverage:doc` writes --md to docs/COVERAGE.md; wire a CI
- * `git diff --exit-code` on it (like size:doc) so the numbers stay fresh.
+ * `npm run coverage:doc` writes --md to docs/COVERAGE.md. CI's push-only
+ * documentation step regenerates and commits it; no check fails on a stale copy
+ * (unlike docs/BUNDLE-SIZES.md, which `npm run gate` regenerates and diffs).
  */
 import { readFileSync, existsSync } from 'node:fs';
 

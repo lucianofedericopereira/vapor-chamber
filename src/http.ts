@@ -24,8 +24,7 @@ export type HttpConfig = {
    * Two consumers, two defaults - this type is shared by `postCommand` and by
    * `createHttpClient` (via `HttpRequestConfig`), and they do not agree:
    * **10_000 through `postCommand`, 30_000 through a client** (a command POST
-   * and a general-purpose GET have different patience). Stating only the first
-   * made this tooltip wrong for every `http.get()` caller.
+   * and a general-purpose GET have different patience).
    *
    * Bounds: a value that does not compare as a number (NaN, a non-numeric
    * string) takes that default; anything above
@@ -325,7 +324,8 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult | null> {
  * (`Sun, 06 Nov 1994 08:49:37 GMT`), and the obsolete rfc850-date
  * (`Sunday, 06-Nov-94 08:49:37 GMT`) and asctime-date
  * (`Sun Nov  6 08:49:37 1994`) a recipient MUST still accept. `Date.parse`
- * read asctime as LOCAL time and took any form it knew (ISO, `10/1/2026`).
+ * alone would read asctime as LOCAL time and take any form it knows (ISO,
+ * `10/1/2026`).
  */
 const HTTP_DATE =
   /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) (\w{3}) (\d{4})|(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day, (\d\d)-(\w{3})-(\d\d)|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\w{3}) ([ \d]\d)) (\d\d):(\d\d):(\d\d) (?:GMT|(\d{4}))$/;
@@ -502,40 +502,26 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
 // ---------------------------------------------------------------------------
 
 /**
- * A Response's headers as a plain object, tolerating a double or polyfill that
- * has no `headers` at all.
+ * A Response's headers as a plain object with lower-cased keys, tolerating a
+ * double or polyfill that has no `headers` at all.
  *
- * Extracted because this line existed TWICE, written out longhand - once in
- * `doFetch` and once in `doClientFetch`. That duplication is what let the two
- * drift: `doFetch` never touched `raw.headers` again and stayed correct, while
- * `doClientFetch` grew responseType handling whose content-type read went back
- * to the raw object and reintroduced the crash this guard exists to prevent.
- * One owner for "normalize a Response's headers" removes that channel.
+ * The one place that normalizes a Response's headers, for `doFetch` and
+ * `doClientFetch`. Every consumer reads this snapshot case-sensitively -
+ * `res.headers['retry-after']` in the retry loops, `['content-disposition']`
+ * in the download path - so a `Headers` whose `entries()` yields `Retry-After`
+ * would make all of them miss with NO error: backoff silently not honoured,
+ * filename silently lost.
  *
- * Keys are lower-cased here, and this is the only place that should do it.
- * Every consumer reads this snapshot case-sensitively -
- * `res.headers['retry-after']` in the retry
- * loops, `['content-disposition']` in the download path - so a `Headers` whose
- * `entries()` yields `Retry-After` makes all of them miss with NO error:
- * backoff silently not honoured, filename silently lost.
- *
- * The Fetch spec does store header names lower-cased, so against a compliant
+ * The Fetch spec stores header names lower-cased, so against a compliant
  * implementation this is a no-op, and it costs +6 bytes brotli in the minimal
- * consumer bundle (measured: 6_539 -> 6_545). Taken deliberately: the argument
- * for skipping it assumes every Headers implementation in every consumer's
- * environment is compliant, and the price of being wrong is a SILENT
- * mis-behaviour rather than a crash. Six bytes to make a silent failure
- * impossible is the trade this library wants - correctness over the byte.
- * Normalizing at the four call sites instead would re-create exactly the
- * duplication this helper exists to remove.
+ * consumer bundle (measured: 6_539 -> 6_545). Taken deliberately: a
+ * non-compliant `Headers` would cause a SILENT mis-behaviour rather than a
+ * crash.
  *
- * The content-type read in `doClientFetch` goes through `Headers.get()` rather
- * than this snapshot for the same reason from the other direction: `get()` is
- * case-insensitive BY SPEC and joins repeated headers, so delegating keeps
- * both guarantees the platform's problem rather than ours. Reading
- * `resHeaders['content-type']` instead would miss on odd casing - and a miss
- * there does not throw, it silently hands the caller a STRING where they asked
- * for JSON.
+ * The content-type read in `doClientFetch` goes through `Headers.get()`
+ * instead of this snapshot: `get()` is case-insensitive BY SPEC and joins
+ * repeated headers, while `resHeaders['content-type']` would miss on odd
+ * casing and silently hand the caller a STRING where they asked for JSON.
  */
 function headersToObject(headers: Headers | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -815,8 +801,8 @@ export function _postJson<T = unknown>(
     const { timeout: rawTimeout = 10_000, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
     // setTimeout fires a delay it cannot hold AT ONCE: NaN reads as 0, and past
     // MAX_TIMEOUT_MS Node clamps to 1ms and browsers wrap. So `timeout: NaN`
-    // (a failed `Number(config.x)`) and `timeout: Infinity` ("no timeout")
-    // aborted every request as it started. NaN takes the default, a larger
+    // (a failed `Number(config.x)`) or `timeout: Infinity` ("no timeout")
+    // would abort every request as it started. NaN takes the default, a larger
     // value the ceiling, 0 and negatives fire now (delayOption, the rule every
     // timer takes: tests/timer-delays.test.ts). Pinned by
     // tests/http-timeout-bounds.test.ts.
@@ -1059,8 +1045,8 @@ async function doClientFetch<T>(
     // spec; a miss here hands the caller a string where they asked for JSON).
     //
     // JSON is `application/json` or any `+json` structured suffix (RFC 6839) -
-    // `application/problem+json` (RFC 9457) above all, whose `code` was lost
-    // as an unparsed string. A type that only CONTAINS "json"
+    // `application/problem+json` (RFC 9457) above all, whose `code` would be
+    // lost as an unparsed string. A type that only CONTAINS "json"
     // (`application/json-seq`) is not JSON and stays text.
     const contentType = raw.headers?.get('content-type') || '';
     if (/[/+]json\s*(;|$)/i.test(contentType)) {
@@ -1179,7 +1165,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
   // once every caller holding it has aborted (`live` reaches 0). A read with
   // no entry here is one some caller holds without a signal: nothing cancels it.
   const shares = new WeakMap<Promise<unknown>, { ctrl: AbortController; live: number }>();
-  // The client's hub for invalidated groups (record revision 23 item 3). A
+  // The client's hub for invalidated groups. A
   // stored response is in a group when its own `Cache-Groups` names it.
   const groups = _groupHub((named) => cache.invalidateStored((res: HttpResponse) => {
     const own = res.headers['cache-groups'];
@@ -1246,8 +1232,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
     const fullUrl = buildFullUrl(url, config.baseURL, config.params);
     // Keys only for a read that dedupes or caches: a write, or a read doing
-    // neither, builds none (plan-transport-owned.md revision 9 F,
-    // tests/one-client.test.ts).
+    // neither, builds none (tests/one-client.test.ts).
     // responseType is part of both keys - a concurrent get(url) (json) and
     // get(url, { responseType: 'blob' }) must not collapse to one request or
     // one cache slot, or the loser receives the wrong data type.
@@ -1261,7 +1246,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // is not: they share one failure, marked in place, and a loud caller was
     // handed a silent failure (tests/silent-dedupe.test.ts). (`config.headers`
     // is always the merged object, the instance's defaults included.)
-    // Encoded once for both keys below: two encodings per request was 1.30's.
+    // Encoded once for both keys below.
     // Names lowercased (RFC 9110 5.1: case-insensitive, and `oneSpelling`
     // left one per name) and sorted (./canonical keyTextFor), so one request
     // on the wire is one key in any spelling or order
@@ -1335,7 +1320,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       }
     }
 
-    // Decision B (.probes/plan-router.md): a stale entry's refresh asks with the
+    // A stale entry's refresh asks with the
     // stored `ETag`, unless the app asks itself. Fetch hands the 304 to the page
     // (4.6: a conditional header runs the request in "no-store" mode).
     // tests/http-etag-refresh.test.ts.
@@ -1402,11 +1387,9 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // This wrapper is built BEFORE the promise is registered for dedupe, and
     // that ordering is the whole point. Registering the raw `fetchPromise`
     // while handing the caller a `.catch()`-wrapped one gives the two callers
-    // different promises: the leader was served the retained entry while a
+    // different promises: the leader would be served the retained entry while a
     // follower on the same key received the untouched rejection - the exact
-    // opposite of the sentence above. The features were only ever tested
-    // apart, every serveStaleOnError case passing `dedupe: false`, so the
-    // disagreement never showed up.
+    // opposite of the sentence above.
     const sharedPromise: Promise<HttpResponse<T>> =
       cacheEnabled && cacheCfg.serveStaleOnError
         ? fetchPromise.catch((error) => {

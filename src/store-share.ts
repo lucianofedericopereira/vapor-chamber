@@ -59,8 +59,8 @@ export type StoreShare<S> = (host: TabHost<S>) => { dispose: () => void; ready: 
 /**
  * @internal Whether this realm has tabs to share with: a page or a worker
  * with `BroadcastChannel`. Node, Deno and Bun define BroadcastChannel too: on
- * a server, two requests' stores of one id shared a channel, and each wrote
- * the other's state. The one reader for `shareTabs` and the outbox.
+ * a server, two requests' stores of one id would share a channel, and each
+ * would write the other's state. The one reader for `shareTabs` and the outbox.
  * tests/store-share.test.ts.
  */
 export function _hasTabs(): boolean {

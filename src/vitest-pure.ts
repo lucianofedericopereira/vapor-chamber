@@ -9,7 +9,7 @@
  * measured requirement, not tidiness: a setup file that imported the root
  * barrel at load ran chamber.ts's one-shot Vue detection and consumed a
  * warn-once before any test had set its preconditions, and 4 tests of this
- * repository's suite failed for it (v1.21.0).
+ * repository's suite failed for it.
  *
  * @example
  * import { expect } from 'vitest';
@@ -189,12 +189,10 @@ export function tap<B extends Tappable>(bus: B): B {
  *
  * THE SYMBOL CARRIES THE STATE, not a `() => BusInspection` closure, so this
  * counts `afterHooks` itself rather than reading `afterHookCount` off a
- * snapshot. The closure was what kept `inspect()` reachable from every bus
- * ever constructed and shipped its body to consumers that never import
- * `inspectBus`, against what two docblocks in command-bus.ts promised. This
- * reads one level deeper into a private shape as a result, which is the same
- * class of coupling a private symbol already is - and `tests/vitest-consumer`
- * drives it through a packed install, which is what caught the change.
+ * snapshot. A closure would keep `inspect()` reachable from every bus and ship
+ * its body to consumers that never import `inspectBus`. This reads one level
+ * into a private shape, the same class of coupling a private symbol already
+ * is; `tests/vitest-consumer` drives it through a packed install.
  */
 function tapRemoved(bus: object): boolean {
   const inspect = Object.getOwnPropertySymbols(bus).find((s) => s.description === 'vapor-chamber:inspect');

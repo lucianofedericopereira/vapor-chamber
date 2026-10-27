@@ -23,7 +23,7 @@ import { ... } from 'vapor-chamber/vitest/pure';
 
 ### beginTest
 
-**Function** - [src/vitest-pure.ts:230](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L230)
+**Function** - [src/vitest-pure.ts:228](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L228)
 
 ```ts
 beginTest() => void
@@ -51,7 +51,7 @@ beforeEach(beginTest);
 
 ### mcpClient
 
-**Function** - [src/vitest-pure.ts:440](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L440)
+**Function** - [src/vitest-pure.ts:438](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L438)
 
 ```ts
 mcpClient(handler: McpMessageHandler) => McpClient
@@ -72,7 +72,7 @@ await expect(mcp.call('orderDelete')).rejects.toMatchObject({ code: -32602 }); /
 
 ### stubEnv
 
-**Function** - [src/vitest-pure.ts:389](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L389)
+**Function** - [src/vitest-pure.ts:387](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L387)
 
 ```ts
 stubEnv<N extends string>(name: N, value: EnvValue<N>) => Restore
@@ -86,7 +86,7 @@ restore puts back the value that was there, or deletes the variable.
 
 ### stubGlobal
 
-**Function** - [src/vitest-pure.ts:370](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L370)
+**Function** - [src/vitest-pure.ts:368](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L368)
 
 ```ts
 stubGlobal(name: string | symbol, value: unknown) => Restore
@@ -138,7 +138,7 @@ A coded misuse diagnostic: `code` to switch on, `why`, `fix` and a `docs` link.
 
 ### McpClient
 
-**Interface** - [src/vitest-pure.ts:412](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L412)
+**Interface** - [src/vitest-pure.ts:410](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L410)
 
 ```ts
 export interface McpClient {
@@ -161,7 +161,7 @@ An MCP client for tests: what an agent does, without writing JSON-RPC envelopes.
 
 ### Restore
 
-**Interface** - [src/vitest-pure.ts:336](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L336)
+**Interface** - [src/vitest-pure.ts:334](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L334)
 
 ```ts
 export interface Restore {
@@ -180,7 +180,7 @@ the current test's after-hooks. Every Vitest mock is already disposable
 
 ### VaporChamberMatchers
 
-**Interface** - [src/vitest-pure.ts:718](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L718)
+**Interface** - [src/vitest-pure.ts:716](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L716)
 
 ```ts
 export interface VaporChamberMatchers<R = unknown, T = unknown> {
@@ -217,7 +217,7 @@ it alone never types a matcher it did not register.
 
 ### ActionOf
 
-**Type alias** - [src/vitest-pure.ts:702](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L702)
+**Type alias** - [src/vitest-pure.ts:700](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L700)
 
 ```ts
 export type ActionOf<T> = string extends keyof MapOf<T> ? string : keyof MapOf<T> & string;
@@ -227,7 +227,7 @@ The actions a matcher accepts for received value `T`: the bus's own names when t
 
 ### EnvValue
 
-**Type alias** - [src/vitest-pure.ts:380](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L380)
+**Type alias** - [src/vitest-pure.ts:378](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L378)
 
 ```ts
 export type EnvValue<N extends string> = N extends 'DEV' | 'PROD' | 'SSR' ? boolean : string | undefined;
@@ -237,7 +237,7 @@ The value `stubEnv` accepts for `name`: a boolean for Vite's DEV, PROD and SSR, 
 
 ### ExpectedCode
 
-**Type alias** - [src/vitest-pure.ts:711](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L711)
+**Type alias** - [src/vitest-pure.ts:709](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L709)
 
 ```ts
 export type ExpectedCode = BusErrorCode | (string & {});
@@ -248,7 +248,7 @@ is accepted too, because a handler's throw reaches `result.error` as thrown.
 
 ### ExpectedPayload
 
-**Type alias** - [src/vitest-pure.ts:705](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L705)
+**Type alias** - [src/vitest-pure.ts:703](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L703)
 
 ```ts
 export type ExpectedPayload<T, A> = A extends keyof MapOf<T> ? PayloadOf<MapOf<T>, A> : unknown;
@@ -258,7 +258,7 @@ The payload a matcher accepts for action `A` on received value `T`.
 
 ### McpMessageHandler
 
-**Type alias** - [src/vitest-pure.ts:409](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L409)
+**Type alias** - [src/vitest-pure.ts:407](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L407)
 
 ```ts
 export type McpMessageHandler = (message: unknown) => Promise<object | null>;
@@ -268,7 +268,7 @@ A JSON-RPC 2.0 message handler, such as `createMcpHandler(bus, { actionFilter })
 
 ### McpToolResult
 
-**Type alias** - [src/vitest-pure.ts:406](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L406)
+**Type alias** - [src/vitest-pure.ts:404](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L404)
 
 ```ts
 export type McpToolResult = { content: { type: string; text: string }[]; isError?: boolean };
@@ -332,7 +332,7 @@ for test tooling.
 
 ### matchers
 
-**Variable** - [src/vitest-pure.ts:599](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L599)
+**Variable** - [src/vitest-pure.ts:597](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L597)
 
 ```ts
 matchers: { toHaveBeenDispatched(this: MatcherContext, bus: unknown, action: string): { pass: boolean; message: () => string; }; toHaveBeenDispatchedWith(this: MatcherContext, bus: unknown, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveBeenDispatchedTimes(this: MatcherContext, bus: unknown, action: string, times: number): { pass: boolean; message: () => string; }; toHaveBeenDispatchedOnce(this: MatcherContext, bus: unknown, action: string): { pass: boolean; message: () => string; }; toHaveBeenNthDispatchedWith(this: MatcherContext, bus: unknown, nth: number, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveBeenLastDispatchedWith(this: MatcherContext, bus: unknown, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveFailedWith(this: MatcherContext, bus: unknown, action: string, code: string): { pass: boolean; message: () => string; }; toSucceedWith(this: MatcherContext, received: unknown, value_0?: unknown): { pass: boolean; message: () => string; }; toFailWith(this: MatcherContext, received: unknown, code: string): { pass: boolean; message: () => string; }; toBeToolResult(this: MatcherContext, received: unknown, value_0?: unknown): { pass: boolean; message: () => string; }; toBeToolError(this: MatcherContext, received: unknown, expected?: string | RegExp): { pass: boolean; message: () => string; }; }
@@ -345,7 +345,7 @@ matchers read a `CommandResult` and compare codes, never message text.
 
 ### vc
 
-**Variable** - [src/vitest-pure.ts:475](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L475)
+**Variable** - [src/vitest-pure.ts:473](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L473)
 
 ```ts
 vc: { tap: <B extends Tappable>(bus: B) => B; stubGlobal: (name: string | symbol, value: unknown) => Restore; stubEnv: <N extends string>(name: N, value: EnvValue<N>) => Restore; mcp: (handler: McpMessageHandler) => McpClient; }

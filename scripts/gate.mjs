@@ -7,10 +7,10 @@
  *   npm run gate
  *
  * WHY IT EXISTS. The rule "run `npm run docs` after every src-touching commit,
- * comment-only included" has now failed three times (s17.4, s18 baseline, s34.4),
- * and each time the miss was invisible until someone read for it. The same is
- * true of `size:doc` and of `docs:stamp`. A chain that runs them all, in one
- * command, turns a forgotten step into a red line with a name on it.
+ * comment-only included" failed three times, and each time the miss was
+ * invisible until someone read for it. The same is true of `size:doc` and of
+ * `docs:stamp`. A chain that runs them all, in one command, turns a forgotten
+ * step into a red line with a name on it.
  *
  * FOUR PROPERTIES IT HAS TO HAVE, each one because its absence is how a gate
  * quietly stops being a gate:
@@ -22,20 +22,13 @@
  *    (`git status --porcelain` empty, untracked included) rather than printing a
  *    status for a person to read.
  *
- * 2. THE STAMP CHECK IS UNCONDITIONAL. It was not, for exactly one commit. When
- *    this script was written `stamp-docs --check` was red on purpose - `vueAligned`
- *    read rc.8 while every pin read rc.9, and four more families were pending - so
- *    the gate carried an `--expect-stamp-drift` flag that accepted a NAMED list and
- *    nothing else. That list earned itself immediately by rejecting `vc:tests` and
- *    `vc:testFiles`, stamped at 2420 / 167 against a real 2448 / 179, which nobody
- *    had noticed. The stamp landed in the commit after, and the flag was deleted
- *    with it: it was a countdown, not a setting, and a second use would have made
- *    it one.
+ * 2. THE STAMP CHECK IS UNCONDITIONAL. There is no flag that accepts a list of
+ *    stale markers: a countdown that outlives its purpose becomes a setting.
  *
  *    ONE RED IS EXPECTED AND IS NOT A DEFECT: `npm run bench` writes host-specific
  *    ratios into the gitignored `docs/metrics.json`, and `stamp-docs` then reports
  *    every `vc:bench*` marker as stale. Those are never stamped from this tree
- *    (they belong to a clean committed tree - memory stamp-bench-markers-local-only).
+ *    (they belong to a clean committed tree, from `npm run bench:bands`).
  *    Drop the `bench` section from that local file and the check is green again;
  *    do not stamp them, and do not add an exception for them here.
  *
@@ -52,12 +45,13 @@
  * WHERE IT IS MEANT TO RUN: on a COMMITTED tree - before a commit lands, on the
  * commit after it, or under `git rebase --exec`. The last step asserts a clean
  * tree, so running it with work in progress ends red at `clean tree` by design;
- * the nine steps before it still report.
+ * the ten steps before it still report.
  *
  * NOT IN THE CHAIN, deliberately: `npm run bench` (its ratios are host state and
  * would make the gate non-deterministic, and its markers are never stamped here),
  * `check:example` (it drives an example build and belongs to the alignment
- * cycle, not to every commit), and `ab:vue` (needs a second Vue installed).
+ * cycle, not to every commit), `ab:vue` (needs a second Vue installed), and
+ * `test:browser` (needs a Chromium install; CI runs it).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -136,8 +130,8 @@ step('size:check', (name) => {
   const r = run('node', ['scripts/check-size.mjs'], { capture: true });
   const out = (r.stdout || '') + (r.stderr || '');
   if (r.status !== 0) fail(name, out);
-  // Print headroom per variant rather than a bare pass: a budget met exactly and
-  // a budget met with 200 B to spare are different facts.
+  // Print the per-variant lines of check-size's output rather than a bare pass:
+  // a budget met exactly and a budget met with 200 B to spare are different facts.
   const rows = out
     .split('\n')
     .filter((l) => /\.iife\.min\.js|\.iife\.min\.js/.test(l) || /iife/.test(l))
@@ -148,19 +142,16 @@ step('size:check', (name) => {
 });
 
 /**
- * `lint:check` chains with `&&` and `stamp-docs --check` sits fourth of five, so a
- * stamp failure has always hidden `check-ascii` behind it (s14). The gate runs the
- * pieces itself so every one of them reports, and gives the stamp check its own
- * step, which is also where the exception lives.
+ * `lint:check` chains with `&&` and `stamp-docs --check` sits sixth of seven, so a
+ * stamp failure hides `check-ascii` behind it. The gate runs the pieces itself
+ * so every one of them reports, and gives the stamp check its own step.
  */
 step('lint', (name) => {
   const pieces = [
     ['biome', ['check', 'src', 'tests', 'scripts', 'bin'], 'npx'],
     ['scripts/check-env-guards.mjs', [], 'node'],
-    // Added to `lint:check` by rc9/58 and NOT here, which is the failure this
-    // list invites: the gate enumerates the pieces by hand, so a check wired
-    // into the npm script is invisible to `npm run gate` until someone copies
-    // it across. A console-shape violation would have passed every gate run.
+    // The gate enumerates the pieces by hand, so a check wired into the npm
+    // script is invisible to `npm run gate` until someone copies it across.
     ['scripts/check-console-shape.mjs', [], 'node'],
     ['scripts/check-line-citations.mjs', [], 'node'],
     ['scripts/check-doc-claims.mjs', [], 'node'],
@@ -173,17 +164,14 @@ step('lint', (name) => {
     if (r.status !== 0) failures.push(`${label}:\n${(r.stdout || '') + (r.stderr || '')}`);
   }
   if (failures.length > 0) fail(name, failures.join('\n'));
-  // Derived from the list, not retyped: this line said "biome, env-guards,
-  // line-citations, doc-claims, ascii" while the list had six entries, which is
-  // the same drift the list itself just suffered.
+  // Derived from the list, not retyped, so the line cannot drift from it.
   ok(name, pieces.map(([bin]) => bin.replace('scripts/check-', '').replace('.mjs', '')).join(', '));
 });
 
 step('coverage', (name) => {
-  // The audit method's command. It and `npm run test:coverage` are one run now:
-  // tests/under-coverage.ts reads Vitest's own coverage flag, so under either
-  // the A/B files run their equivalence checks and skip only their timing loops
-  // (log s35.52). It was the npm script name, which made the two differ (s20.0).
+  // The same run as `npm run test:coverage`: tests/under-coverage.ts reads
+  // Vitest's own coverage flag, so under either the A/B files run their
+  // equivalence checks and skip only their timing loops.
   const r = run('npx', ['vitest', 'run', '--coverage'], { capture: true });
   const out = (r.stdout || '') + (r.stderr || '');
   if (r.status !== 0) fail(name, out.slice(-4000));

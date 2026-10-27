@@ -70,9 +70,8 @@ export type FormBusOptions<T extends Record<string, any>> = {
    */
   bus?: CommandBus;
   /**
-   * Action-name prefix, so two forms can share one bus. Default: `'form'`,
-   * which is exactly the names this module has always used - a single form is
-   * unchanged.
+   * Action-name prefix, so two forms can share one bus. Default: `'form'`
+   * (`formSet`, `formTouch`, ...).
    *
    * REQUIRED FOR THE SECOND FORM ON A SHARED BUS, and the reason is not
    * tidiness. The five action names derive from it, so two forms with one id
@@ -134,7 +133,7 @@ export type FormBus<T extends Record<string, any>> = {
   set<K extends keyof T>(field: K, value: T[K]): void;
   /** Mark a field as touched (shows errors for that field). */
   touch<K extends keyof T>(field: K): void;
-  /** Validate and call onSubmit. Returns true on success, false on validation failure. */
+  /** Validate and call onSubmit. Returns true on success; false on validation failure, a reset during validation, or a submit already in flight. */
   submit(): Promise<boolean>;
   /** Reset all fields to their initial values and clear errors/touched state. */
   reset(): void;
@@ -167,9 +166,7 @@ export type FormBus<T extends Record<string, any>> = {
    * Unregister this form's handlers from the bus and release its prefix.
    *
    * Only meaningful with an INJECTED bus: an isolated one is garbage with the
-   * form. Without it there was no way to take a form off a shared bus at all,
-   * so a modal form registered its handlers for the life of the page and its
-   * prefix stayed claimed.
+   * form. It is how a short-lived form (a modal) leaves a shared bus.
    */
   dispose(): void;
 };
@@ -297,7 +294,7 @@ export function createFormBus<T extends Record<string, any>>(
   /** The command `submit()`'s writes are a step of: a `$` name, the library's, never dispatched. */
   const SUBMIT = { action: `${id}$submit`, target: undefined };
 
-  // The form's state is one store (plan 1.32 4.2): values, errors, touched,
+  // The form's state is one store: values, errors, touched,
   // the errors from outside the rules, and isDirty / isValid derived where
   // each write builds it. Each command writes it once, through the store's
   // own write (a step of that command), so no reader sees a half-written
@@ -423,8 +420,7 @@ export function createFormBus<T extends Record<string, any>>(
 
   async function runSubmit(): Promise<boolean> {
     // Touch all fields so errors become visible; the server decides again, so
-    // its errors go. Written as the store's own write, no command, as these
-    // writes always were.
+    // its errors go. Written as the store's own write, not a command.
     write(SUBMIT, { ...store.state.value, touched: allTouched(), outside: {} });
 
     // ONE snapshot, validated and submitted. `values` is live state and this
@@ -464,7 +460,7 @@ export function createFormBus<T extends Record<string, any>>(
       return true;
     } catch (error) {
       // A refusal that names its fields (a 422 problem's `errors`) lands on
-      // them and the submit reports false; anything else rejects as before.
+      // them and the submit reports false; anything else rejects.
       const fieldErrors = fieldErrorsOf(error);
       if (!fieldErrors || Object.keys(normalizeErrors(fieldErrors, initial)).length === 0) throw error;
       setErrors(fieldErrors);
@@ -484,7 +480,7 @@ export function createFormBus<T extends Record<string, any>>(
   }
 
   // The field cells, not the plain store state: a render that calls aria() or
-  // firstInvalid() then follows the error (B4 i2).
+  // firstInvalid() then follows the error.
   function shownError<K extends keyof T>(field: K): string | undefined {
     return touched.value[field] ? errors.value[field] : undefined;
   }

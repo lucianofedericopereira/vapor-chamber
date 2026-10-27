@@ -36,8 +36,8 @@ export type ProblemDetails = {
  * The backend's RFC 9457 problem behind a failure, or `undefined` when no
  * backend answered. Walks the `cause` chain (a router failure's cause, a
  * plugin's wrap), so a consumer reads it once instead of digging (docs/contract.md 6):
- * a `remote:` failure (from the http client or a transport, the same failure
- * since log s35.131) gives its problem members. Log s35.121.
+ * a `remote:` failure (from the http client or a transport) gives its problem
+ * members.
  *
  * @example
  * const error = await router.push('/orders/7');
@@ -60,7 +60,7 @@ export function problemOf(error: unknown): ProblemDetails | undefined {
  * May a request answered with this status be sent again? The one retry rule
  * (`retryClass`) read through the status table: 408, 429 and every 5xx. A
  * transient one (408, 429, 503) for any request, an uncertain one (500, 502,
- * 504, ...) only for an identified request. Log s35.131, s35.162.
+ * 504, ...) only for an identified request.
  */
 export function isRetryableStatus(status: number): boolean {
   return retryClass(undefined, conditionOfStatus(status)) !== 'final';
@@ -76,7 +76,7 @@ export type ErrorClassification = {
  * Only when the server gave no answer or failed itself: a 5xx, a timeout, no
  * response. Not a retry rule - a 408 or a 429 is re-sent but not served stale,
  * and an abort is the caller's. Anything that is not the client's failure
- * reads as no response, as before.
+ * reads as no response.
  */
 export function classifyError(error: unknown): ErrorClassification {
   if (!(error instanceof BusError)) return { transient: true };

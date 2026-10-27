@@ -37,7 +37,7 @@ const runtimeOver = (make: <T>(value: T) => { value: T }): StoreRuntime => ({
   // then the old one, and ended on the old one, where the Vue store's effect
   // ends on the new one. tests/store-write-during-delivery.test.ts.
   // The watcher is a field of the cell, in its literal: a write reads it with
-  // no lookup (a WeakMap's get on every write of every core store, before).
+  // no lookup (a WeakMap's get on every write of every core store).
   cell<T>(initial: T) {
     const inner = make(initial);
     const cell: CoreCell<T> = {

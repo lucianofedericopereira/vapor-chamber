@@ -37,9 +37,10 @@ A cycle cannot see a claim about something Vue never had. Each release cut
 re-checks every claim this repo makes about Vue against Vue's shipped dist
 (log 36.8).
 
-**2. Bump.** `vue` and every direct `@vue/*` devDependency, the peer range, and
-the pins in each example. Rebuild all three examples and run `npm run check:example`,
-which clicks a real button in a built page.
+**2. Bump.** `vue` and every direct `@vue/*` devDependency and the peer range;
+`npm run docs:stamp` writes the examples' `vue` pins from the devDependency.
+Rebuild all three examples and run `npm run check:example`, which clicks a
+real button in a built page.
 
 **3. Run the suites.** `npm run build`, then `npm run test:run` and
 `npm run test:vapor`. Build first: several guards read `dist/`, and without
@@ -65,9 +66,8 @@ included; `npm run size:doc` when a size can move; `MCP_SERVER_VERSION` in
 
 **8. Document the cycle in four places.** A `CHANGELOG.md` entry (under the
 current unreleased heading), a row in the alignment table of the whitepaper's appendix B,
-the header of each module the cycle changed, and `ROADMAP.md` (last reviewed
-version, RC dates, peer-range statements, the support matrix and the version
-targets table).
+the header of each module the cycle changed, and `ROADMAP.md` (the RC dates
+and the version targets table; its aligned version is a stamped marker).
 
 **9. Check the `vue36` reopen condition.** `tests/vue-bundler-vapor-exports.test.ts`
 decides whether the withdrawn `vue36` build flavour should come back. It passing

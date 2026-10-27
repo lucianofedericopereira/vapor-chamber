@@ -21,8 +21,6 @@
  *   - createChannel / history, the store's persist and tab sync
  *   - mount() - DOM-coupled convenience
  *   - Vapor custom elements - see `vapor-chamber-elements.iife.js`
- *
- * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
  */
 
 import { createCommandBus, createAsyncCommandBus } from './command-bus';

@@ -7,11 +7,10 @@
  * buffering the whole payload. Framework-agnostic - no Vue imports; pair
  * with `http.ts`'s `HttpClient` or a bare `fetch()`.
  *
- * Reorganized from the source's one large dispatch switch into small
- * per-state-group handlers (the CDCC guideline, docs/whitepaper.md 3.5) -
- * notably, the keyword states (`true`/`false`/`null`) collapse from
- * ten near-duplicate `S_TRUE_1`/`S_FALSE_2`/... cases into one target-string
- * index walk.
+ * One small handler per state group (the CDCC guideline,
+ * docs/whitepaper.md 3.5) - notably, the keyword states
+ * (`true`/`false`/`null`) are one target-string index walk, not a state per
+ * letter.
  *
  * @example
  * const parser = createStreamParser({ onValue: (key, value, path) => console.log(key, value) });
@@ -318,8 +317,8 @@ export class StreamParser {
 
   private handleValue(cp: number): void {
     // `]` closes an array only directly after its `[`: an empty array. Once a
-    // member has started (or after a comma, `[1,]`) it is malformed JSON, as
-    // before. S_KEY's `}` is the same rule for an empty object.
+    // member has started (or after a comma, `[1,]`) it is malformed JSON.
+    // S_KEY's `}` is the same rule for an empty object.
     if (this.arrayOpened) {
       if (cp === CLOSE_BRACKET) { this.arrayOpened = false; this.closeArray(); return; }
       if (!isWhitespace(cp)) this.arrayOpened = false;

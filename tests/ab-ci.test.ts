@@ -1,6 +1,7 @@
 // CI's speed check decides from the A/B summaries: each failure it must catch, seeded.
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_WORKLOADS, decide, sameShippedCode } from '../scripts/ab/ci.mjs';
+import { gitHistory } from './require-git';
 
 const row = (verdict: string, controls = [true], ratios = [1]) => ({ verdict, controls, ratios, fit: null });
 const clean = () => ({
@@ -86,7 +87,9 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     return { status: r.status, out: r.stdout.trim() };
   };
 
-  it('accepts a commit this checkout has, or refuses it across an uncommitted version bump', async () => {
+  // Reads this checkout's HEAD: a clone only (tests/require-git.ts). The
+  // base-ok.sh paths also run against a throwaway repository two tests down.
+  it.skipIf(!gitHistory)('accepts a commit this checkout has, or refuses it across an uncommitted version bump', async () => {
     const { execSync } = await import('node:child_process');
     const { readFileSync } = await import('node:fs');
     const head = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();

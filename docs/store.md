@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli. Imports `vue`, the failure module and one chunk holding the library's `$` names and the commands a transport carried out: no bus, no probe.
+<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli. Its graph reaches `vue` and never the bus or the Vue probe ("The bus is always an argument", below).
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';
@@ -283,12 +283,14 @@ The first draft defaulted the argument and paid both costs while claiming not
 to. It measured 16.7 KB raw against a design estimate of 1-2 KB. With the bus
 a mandatory argument, it is <!-- vc:sizeStoreRaw -->15.6<!-- /vc:sizeStoreRaw --> KB minified
 (<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli), the `./store` row of
-[BUNDLE-SIZES.md](./BUNDLE-SIZES.md). `tests/chamber-store.test.ts` asserts the
-built entry imports only `vue` and the store's base, and the base only
-`./failure.js` and `./applied-remotely.js`. The failure module mints the store's
+[BUNDLE-SIZES.md](./BUNDLE-SIZES.md). `tests/chamber-store.test.ts` walks the
+built entry's graph: its one external is `vue`, and no chunk in it is
+`chamber.js`, the bus or the root barrel. What it holds is the store
+implementation both entries share, the failure module that mints the store's
 coded refusals (`store:missing:bus`, `store:missing:router`,
-`store:already:member`, `store:invalid:name`). The other chunk holds the
-library's `$` names and the commands a transport carried out.
+`store:already:member`, `store:invalid:name`), the library's `$` names and the
+commands a transport carried out, the fast lane the field events ride, and
+`saveTo` and `shareTabs`.
 
 ## State is shallow and replaced wholesale
 
@@ -322,8 +324,8 @@ the pending state. For a list that a burst of dispatches fills, read by a
 `v-for`. A state from outside the store (a server's, another tab's, a seed)
 is written at once, after the pending state lands, so a seeded store reads
 its seed when it is created and `storeStates` reads a write made in the same
-tick. Refused with `undo: true` (`store:invalid:coalesce`): the undo ring
-records each write as it lands. `tests/store-coalesce.test.ts`,
+tick. Refused with `undo: true` or `optimistic: true` (`store:invalid:coalesce`): the
+undo ring records each write as it lands. `tests/store-coalesce.test.ts`,
 `tests/store-facts-lane.test.ts`.
 
 ## Reading one field
@@ -499,8 +501,9 @@ On an async bus that is a promise, and the state is reset once it settles. The
 `$` keeps the name apart from an action of your own called `reset`, which is
 `cartReset`. Action names containing `$` are reserved for the library: a bus's
 `naming` rule does not check them. An action key cannot be one of the store's
-own members (`$id`, `state`, `url`, `$reset`, `$dispose`). It would replace
-the member, so `defineChamberStore` throws and names the key.
+own members (`$id`, `state`, `url`, `$reset`, `$dispose`, `$onField`,
+`$ready`). It would replace the member, so `defineChamberStore` throws
+`store:already:member` and names the key.
 
 `$reset()` goes back to whatever `state()` returns at that moment, so keep
 `state()` the default. A `state()` that reads storage makes the reset hand

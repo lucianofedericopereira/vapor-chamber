@@ -73,8 +73,9 @@ export type RevalidatePlugin = {
 export type RevalidateMap = Record<string, readonly string[] | 'affected'>;
 
 export type RevalidateOptions = {
-  /** Called when a revalidation fails. Default: rethrow-free console.error -
-   *  a failed refresh must not take down the command that succeeded. */
+  /** Called when a revalidation fails. Default: reported as
+   *  `router:failed:revalidate`, never thrown - a failed refresh must not
+   *  take down the command that succeeded. */
   onError?: (error: unknown) => void;
 };
 

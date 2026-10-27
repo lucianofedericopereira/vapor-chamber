@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/standard-schema';
 
 ### validateSchemas
 
-**Function** - [src/plugins-schema.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L143)
+**Function** - [src/plugins-schema.ts:142](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L142)
 
 ```ts
 validateSchemas(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => PluginParts
@@ -32,7 +32,7 @@ use {@link validateSchemasAsync} on `createAsyncCommandBus()` instead.
 
 ### validateSchemasAsync
 
-**Function** - [src/plugins-schema.ts:173](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L173)
+**Function** - [src/plugins-schema.ts:172](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L172)
 
 ```ts
 validateSchemasAsync(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => PluginParts
@@ -93,7 +93,7 @@ export type SchemaValidatorOptions = {
    * What to do on validation failure:
    * - `'reject'` (default) - return `{ ok: false, error }`, a `validateSchemas:invalid:payload` BusError,
    *   without invoking the handler
-   * - `'warn'` - `console.warn` and continue to the handler
+   * - `'warn'` - report a `validateSchemas:invalid:payload` warning and continue to the handler
    *
    * In both modes the handler gets the command as dispatched: the schema's
    * output (a coerced or defaulted value) is never written back

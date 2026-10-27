@@ -2,21 +2,25 @@
 /**
  * Gate: no unguarded `process.env` reads in src/.
  *
+ * Scope: every `.ts` file under src/, comments stripped, a read counted when no
+ * `typeof process !== 'undefined'` appears on its line or the WINDOW lines above.
+ * It does not check that the guard belongs to that read, and it does not look at
+ * bin/, scripts/ or tests/.
+ *
  * A bare `process.env.NODE_ENV` is a ReferenceError anywhere this library is
  * delivered without a bundler - Blade inline payloads, plain ESM + import map
  * (examples/router-demo), pattern-1 no-build. The guarded form is
  * `typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'`.
  *
- * Two files keep bare literals on purpose: there the literal is load-bearing
- * for bundler dead-code elimination, and both are bundler-only surfaces. They
- * are allowlisted below and document the reason at the site.
+ * Five files are allowlisted, each with its reason on ALLOWLIST below. Two keep
+ * bare literals because the literal is load-bearing for bundler dead-code
+ * elimination, and both are bundler-only surfaces.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// `fileURLToPath`, not `.pathname` - the latter yields `/C:/...` on Windows,
-// and stamp-docs.mjs next door already does it this way.
+// `fileURLToPath`, not `.pathname`, which yields `/C:/...` on Windows.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC = join(ROOT, 'src');
 
@@ -50,11 +54,9 @@ for (const file of walk(SRC)) {
   const rel = relative(ROOT, file);
   if (ALLOWLIST.has(rel)) continue;
   const lines = readFileSync(file, 'utf8').split('\n');
-  // Block-comment state has to be tracked ACROSS lines, not just stripped
-  // per line: a `process.env` mentioned in prose on a continuation line of a
-  // /** ... */ block matched neither the `//` nor the single-line `/* ... */`
-  // strip, so documenting this very rule tripped it. A guard that fires on
-  // its own explanation is not a guard.
+  // Block-comment state is tracked ACROSS lines: a `process.env` in prose on a
+  // continuation line of a block comment would otherwise trip the rule that
+  // documents it.
   let inBlockComment = false;
   lines.forEach((line, i) => {
     let code = line;

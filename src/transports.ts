@@ -203,16 +203,14 @@ function holding(holds: Holds, action: string, result: CommandResult): CommandRe
 const redirected = (url: string, action: string, handled: boolean): BusError =>
   transportError('refused:redirect', `Redirected to ${url}.${DEV && !handled ? ' No onRedirect handler is configured.' : ''}`, action, { url });
 
-/**
- * An answer, by contract: a `problem` is the failure, a `redirect` a
- * navigation, anything else the success, its `state` the value (absent when
- * the handler returned nothing: JSON drops `undefined`).
- */
 // What `meta.response` holds: the objects the client already built, no copy.
 const responseOf = (res: { status: number; headers?: Record<string, string>; url?: string; redirected?: boolean }): MetaResponse =>
   ({ status: res.status, headers: res.headers ?? {}, url: res.url, redirected: res.redirected });
 
-// A result's own headers are the response's, or the `headers` a batched result
+// An answer by contract: a `problem` is the failure, a `redirect` a navigation,
+// anything else the success, its `state` the value (absent when the handler
+// returned nothing: JSON drops `undefined`). A result's own headers are the
+// response's, or the `headers` a batched result
 // or a frame carries (OData JSON batch), read by `_headersOf`. `status`: a
 // batched result's or a frame's own (OData 19.5), which stands for the
 // response's when the problem has none. A single answer has none here.
@@ -594,11 +592,9 @@ function sendOne(options: HttpTransportOptions, http: HttpSender): Transport['se
   };
 }
 
-// `{ id } & BackendResponse`, not a restatement of it. Spelled out by hand
-// until now, which is why `code` had to be added in two places instead of one
-// - and how the two shapes would have drifted again at the next field. A WS
-// frame is one too. `status` and `headers`: the result's own response status
-// and headers, as an OData JSON batch response carries them; it has no HTTP
+// `{ id } & BackendResponse`, so the two shapes cannot drift. A WS frame is
+// one too. `status` and `headers`: the result's own response status and
+// headers, as an OData JSON batch response carries them; it has no HTTP
 // response of its own.
 type BatchedResult = { id: string; status?: number; headers?: Record<string, string> } & BackendResponse;
 /** A WebSocket push: a frame with no `id`, the SSE event's name and data (docs/contract.md 4). */
@@ -1142,10 +1138,8 @@ export function createSseBridge(options: SseBridgeOptions): {
 
     source.onerror = () => {
       // EventSource reconnects on its own, so `reconnect: true` needs no code.
-      // `reconnect: false` did until now: the option was declared, typed and
-      // documented with a default, and never read - setting it did nothing at
-      // all. Closing the stream is the only way to stop EventSource retrying,
-      // so that is what it means.
+      // Closing the stream is the only way to stop EventSource retrying, so
+      // that is what `reconnect: false` means.
       if (!reconnect) dispose();
     };
   }
@@ -1209,7 +1203,7 @@ export type EchoBridgeOptions = {
  * the store states its payload declares under `stores` (or a command via
  * `onBroadcast`). Presence membership (`here` / `joining` / `leaving`) is emitted
  * too. Receive-only by design - outbound commands still go through the HTTP
- * bridge. Pass your own Echo instance; the bridge never imports laravel-echo, so
+ * transport. Pass your own Echo instance; the bridge never imports laravel-echo, so
  * non-Laravel consumers don't pay for it.
  *
  * @example

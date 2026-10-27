@@ -1,10 +1,10 @@
 /**
  * The JSON Schema an action's tool takes: one generator for the three tool
  * outputs, `toAnthropicTools` / `toOpenAITools` (schema.ts) and
- * `busToMcpTools` (mcp.ts). There were two: the schema module's emitted
- * `{ type: 'any' }` (no JSON Schema type, so the whole tool schema was
- * invalid) and declared nothing `required`, so a model was told it could leave
- * out what the validator then refused. tests/tools-any-field.test.ts.
+ * `busToMcpTools` (mcp.ts). Sharing one generator keeps the three consistent:
+ * `'any'` is not a JSON Schema type, and a field the validator requires must be
+ * listed `required` or a model is told it may omit it. See
+ * tests/tools-any-field.test.ts.
  *
  * A typed field is required; an `'any'` field is `{}` (no constraint) and
  * optional. `target` and `payload` are required when the action declares them.

@@ -30,7 +30,7 @@ input as the client sent it (docs/integrations/laravel.md, "Input as the
 client sent it"). An older scaffold's `bootstrap/app.php` lines for the same
 are removed.
 
-Needs PHP ≥ 8.3 (Laravel 13) and Composer. `setup.sh` also builds the vapor-chamber `dist/`
+Needs PHP >= 8.3 (Laravel 13) and Composer. `setup.sh` also builds the vapor-chamber `dist/`
 on demand for the IIFE copy.
 
 `composer create-project` always pulls the **current** Laravel skeleton - last

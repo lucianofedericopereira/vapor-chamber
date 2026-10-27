@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # scripts/ab/base-ok.sh <sha>
-# Exit 0 when <sha> is a commit this checkout has, so `perf-ab` can build it as
-# the base arm. Otherwise exit 1 and print why on stdout, one line: the job
-# then skips with that message instead of failing with none (an all-zero
-# `github.event.before` on the push that creates the branch; a base dropped by
-# a force-push and absent from the checkout; a base on another release, whose
-# package.json version differs). A missing base is not a regression, so it is
-# not a red build. tests/ab-ci.test.ts.
+# Exit 0 when <sha> is a commit this checkout has, on the same package.json
+# version as the head, with no release tag for that version, so `perf-ab` can
+# build it as the base arm. Otherwise exit 1 and print why on stdout, one line:
+# the job then skips with that message instead of failing with none (an
+# all-zero `github.event.before` on the push that creates the branch; a base
+# dropped by a force-push and absent from the checkout; a base on another
+# release; a head whose version is already tagged). Having no comparable base
+# is not a regression, so it is not a red build. tests/ab-ci.test.ts.
 set -uo pipefail
 sha=${1:-}
 if [ -z "$sha" ]; then

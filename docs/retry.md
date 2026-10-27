@@ -34,7 +34,7 @@ tests/accepted.test.ts).
 seconds, larger ones Unix seconds, as Laravel and GitHub send it. A transient failure with a wait is re-sent for any
 action, after the wait. A verdict with a wait, such as a 409 with
 `Retry-After`, is re-sent only when identified
-(tests/retry-unidentified.test.ts:126,135).
+(tests/retry-unidentified.test.ts).
 
 A plugin's own refusal is never re-sent, though its condition is transient: it
 sits outside the call the runner re-sends. A call throttled at the sender

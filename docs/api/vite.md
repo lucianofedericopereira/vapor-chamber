@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/vite';
 
 ### vaporChamberHMR
 
-**Function** - [src/vite-hmr.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L130)
+**Function** - [src/vite-hmr.ts:132](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L132)
 
 ```ts
 vaporChamberHMR(options?: VaporChamberHMROptions) => any
@@ -33,7 +33,7 @@ Injects a small runtime shim that:
 
 ### vaporChamberTest
 
-**Function** - [src/vite-hmr.ts:596](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L596)
+**Function** - [src/vite-hmr.ts:597](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L597)
 
 ```ts
 vaporChamberTest(options?: VaporChamberTestOptions) => any
@@ -70,7 +70,7 @@ export default defineConfig({
 
 ### vaporChamberWire
 
-**Function** - [src/vite-hmr.ts:441](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L441)
+**Function** - [src/vite-hmr.ts:442](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L442)
 
 ```ts
 vaporChamberWire(options?: VaporChamberWireOptions) => any
@@ -82,7 +82,7 @@ The package root must work with no Vue in the tree, so it reaches Vue
 through a runtime lookup that only Node or an import map resolves, never a
 bundled page (log 36.F26). An app importing its composables from the root
 therefore ships them without reactivity, cleanup or the KeepAlive guard -
-which `warnUnwired()` in chamber.ts now reports once at runtime, and which
+which `warnUnwired()` in chamber.ts reports once at runtime, and which
 `vapor-chamber/vue` / `vapor-chamber/vapor` fix by being imported instead.
 
 This plugin fixes it without changing an import. It resolves the bare
@@ -146,7 +146,7 @@ export default defineConfig({
 
 ### VaporChamberHMROptions
 
-**Type alias** - [src/vite-hmr.ts:83](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L83)
+**Type alias** - [src/vite-hmr.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L85)
 
 ```ts
 export type VaporChamberHMROptions = {
@@ -165,7 +165,7 @@ export type VaporChamberHMROptions = {
 
 vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
 
-Two plugins (the history is in CHANGELOG.md):
+Three plugins (the history is in CHANGELOG.md):
   - `vaporChamberHMR()`, serve-only: marks each hot update, so the stores
     keep their states and a handler registered again raises no warning.
   - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
@@ -179,6 +179,8 @@ Two plugins (the history is in CHANGELOG.md):
     pre-bundled install put two chamber modules in the page (see the
     function's note). In both it defines `__VC_LEAN__`, the build profile
     (the `profile` option), unless the app defines it.
+  - `vaporChamberTest()`: the Vitest plugin for `vapor-chamber/vitest`
+    (setup file, shared-bus exclusions, the island project).
 
 The rules the HMR shim keeps:
   - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of
@@ -205,7 +207,7 @@ bus.register('cartAdd', handler)
 
 ### VaporChamberTestOptions
 
-**Type alias** - [src/vite-hmr.ts:488](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L488)
+**Type alias** - [src/vite-hmr.ts:489](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L489)
 
 ```ts
 export type VaporChamberTestOptions = {
@@ -231,7 +233,7 @@ export type VaporChamberTestOptions = {
 
 ### VaporChamberWireOptions
 
-**Type alias** - [src/vite-hmr.ts:333](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L333)
+**Type alias** - [src/vite-hmr.ts:334](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L334)
 
 ```ts
 export type VaporChamberWireOptions = {

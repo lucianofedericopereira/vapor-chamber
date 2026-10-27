@@ -139,24 +139,20 @@ export default defineConfig({
       //  - index.ts / plugins.ts: pure re-export aggregators
       //  - iife*.ts: thin namespace builders for `<script>` tag use; the
       //    underlying surface is covered via the regular test files
-      //  (vite-hmr.ts is NO LONGER excluded. Its reason read "Vite plugin code
-      //   that exercises in a real Vite server, not a unit test environment",
-      //   which was true and was also the hole: the plugin claimed `.vue` and
-      //   `.vapor.vue` and had never once delivered a shim to either, while 24
-      //   unit tests passed, because those tests called `plugin.transform()`
-      //   with a string Vite would never pass it. An exclusion whose reason is
-      //   "the real thing is hard to mount" is a standing invitation for the
-      //   fixture to disagree with reality. tests/vite-hmr-pipeline.test.ts
-      //   mounts the real thing - `createServer`, the actual plugin container,
-      //   and one case over a real socket - in about half a second, and the
-      //   file measures 100% with it.)
+      //  (vite-hmr.ts is measured, not excluded. "Vite plugin code that
+      //   exercises in a real Vite server" was once its exclusion, and the
+      //   plugin had never delivered a shim to `.vue` or `.vapor.vue` while 24
+      //   unit tests passed, because they called `plugin.transform()` with a
+      //   string Vite would never pass it. An exclusion whose reason is "the
+      //   real thing is hard to mount" invites the fixture to disagree with
+      //   reality. tests/vite-hmr-pipeline.test.ts mounts the real thing:
+      //   `createServer`, the actual plugin container, and one case over a
+      //   real socket, in about half a second.)
       //  - testing.ts: test-only utility (createTestBus); covering it
       //    would mean tests that test the test helper
-      //  (directives.ts and command-binding.ts are NO LONGER excluded: 1.32
-      //   fix-up B4, log 36.F14. The ruling kept guards no mount reaches. They
-      //   became the invariants they stood for, and
-      //   tests/command-binding-edges.test.ts reaches in happy-dom the keyboard
-      //   and form paths the browser suite proves, so both measure 100 x4.)
+      //  (directives.ts and command-binding.ts are measured, not excluded: the
+      //   keyboard and form paths the browser suite proves are reached in
+      //   happy-dom by tests/command-binding-edges.test.ts.)
       //  - router/vapor.ts: this project CANNOT IMPORT IT AT ALL. Its named
       //    imports (createDynamicComponent, createSlot, defineVaporComponent)
       //    do not exist on the `vue` build a bare specifier resolves to here,
@@ -170,8 +166,8 @@ export default defineConfig({
       //  - transitions/vapor.ts: the same, for `createIf` and
       //    `defineVaporComponent`. tests/vapor/vc-transition*.test.ts cover it
       //    under that config, dev build and an executed production bundle.
-      //  (devtools.ts is NO LONGER excluded: v1.9 promotes it to its own
-      //   public subpath, and a published entry point should be measured.)
+      //  (devtools.ts is measured, not excluded: it is a published subpath, and
+      //   a published entry point should be measured.)
       exclude: [
         'examples/**',
         'tests/**',
@@ -185,30 +181,22 @@ export default defineConfig({
         'src/transitions/vapor.ts',
       ],
       thresholds: {
-        // Floors sit ~2 points below current measured coverage - tight enough
-        // that a genuine regression trips the gate, loose enough that trivial
-        // test churn doesn't. Ratchet upward as coverage climbs; only lower
-        // with an explicit CHANGELOG note explaining the regression.
+        // The measured surface sits at 100% on all four axes, and `npm run
+        // gate` asserts that. These floors sit 2 points below it: a coverage
+        // run fails under them, and a genuine regression trips them while
+        // trivial test churn does not. Only lower them with an explicit
+        // CHANGELOG note explaining the regression.
         //
-        // v1.16 reaches 100% ON ALL FOUR AXES - statements, branches,
-        // functions and lines. Every branch in the measured surface is taken by
-        // a test in both directions.
+        // Where the last branches were unreachable because they guarded an
+        // invariant the code already enforces, the guard was removed and the
+        // invariant named in a comment, so a violation throws loudly instead of
+        // no-opping silently. That is the preferred order: deletion before
+        // classifying code as permanently uncoverable.
         //
-        // Getting the last few was as much deletion as testing, and that is the
-        // preferred order: where a branch was unreachable because it guarded an
-        // invariant the code already enforces (`if (keys)` in plugins-extra's
-        // dropKey, the `pending.get(...)` lookups in transports, `if (cmd.meta)`
-        // in outbox), the guard was removed and the invariant named in a
-        // comment, so a violation throws loudly instead of no-opping silently.
-        // The `__VC_PRECISE_TS__` build flag went the same way - it was
-        // unreachable from any configuration, so it was removed rather than
-        // classified as permanently uncoverable.
-        //
-        // The floors stay ~2 points below rather than at 100 deliberately: a
-        // 100% floor turns any refactor that adds an honest defensive branch
-        // into a red build, which pressures people to delete guards that should
-        // stay or write tests that assert nothing. Ratchet the floor when the
-        // measured number moves; do not pin it to the ceiling.
+        // The floors stay below 100 deliberately: a 100% floor turns any
+        // refactor that adds an honest defensive branch into a red build, which
+        // pressures people to delete guards that should stay or write tests
+        // that assert nothing.
         lines: 98,
         functions: 98,
         branches: 98,

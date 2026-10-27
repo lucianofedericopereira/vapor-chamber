@@ -28,7 +28,7 @@ busToMcpTools(schema: BusSchema) => McpTool[]
 Convert a BusSchema into MCP tool definitions (the `tools/list` shape).
 
 Mirrors `toAnthropicTools` (from the schema module): each action becomes one tool, with
-`target` and `payload` as nested object properties. Field types map 1:1 to
+`target` and `payload` (each when declared) as nested object properties. Field types map 1:1 to
 JSON Schema types; `'any'` fields get no type constraint and are excluded
 from `required` (all other fields are required).
 
@@ -48,7 +48,7 @@ const tools = busToMcpTools({
 
 ### createMcpHandler
 
-**Function** - [src/mcp.ts:189](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L189)
+**Function** - [src/mcp.ts:187](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L187)
 
 ```ts
 createMcpHandler(bus: McpBus, options?: McpHandlerOptions) => (message: unknown) => Promise<object | null>
@@ -89,7 +89,7 @@ const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 
 ### serveMcpStdio
 
-**Function** - [src/mcp.ts:388](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L388)
+**Function** - [src/mcp.ts:384](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L384)
 
 ```ts
 serveMcpStdio(bus: McpBus, options?: McpStdioOptions) => () => void
@@ -157,7 +157,7 @@ export type McpHandlerOptions = {
    * `createActionFilter([])` selects every action explicitly and silences the
    * warning, which is the point: demo convenience should be a deliberate
    * keystroke, not a default. To expose nothing, do not mount the handler:
-   * CloudEvents rejects an empty `any`. Log s35.180.
+   * CloudEvents rejects an empty `any`.
    */
   actionFilter?: ActionFilter;
   /** Server name reported by `initialize`. Default: `'vapor-chamber'`. */
@@ -169,7 +169,7 @@ export type McpHandlerOptions = {
 
 ### McpStdioOptions
 
-**Type alias** - [src/mcp.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L337)
+**Type alias** - [src/mcp.ts:333](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L333)
 
 ```ts
 export type McpStdioOptions = McpHandlerOptions & {
@@ -219,7 +219,7 @@ An MCP tool definition, as returned by the `tools/list` method.
 
 ### MCP_SERVER_VERSION
 
-**Variable** - [src/mcp.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L130)
+**Variable** - [src/mcp.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L128)
 
 ```ts
 MCP_SERVER_VERSION: "1.32.0"
@@ -227,7 +227,5 @@ MCP_SERVER_VERSION: "1.32.0"
 
 Version reported by the MCP `initialize` handshake.
 
-Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline -
-it sat at a hardcoded '1.7.0' for four releases, so every handshake
-advertised a version that had not existed for months. A failing test at
-release time is the cheapest possible checklist.
+Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline, so
+a handshake never advertises a stale version.

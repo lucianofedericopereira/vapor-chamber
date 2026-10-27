@@ -4,7 +4,6 @@
  * A name with `$` is the library's (`<id>$reset`, `<action>$undo`): an app
  * registering one is refused, the bus and the outbox keep such a command
  * local. Its own module so the store reaches it without importing the bus.
- * Log s35.114, s35.117.
  */
 
 /** @internal A `$` name marks a handler the library registered: handled locally, never sent or queued (no backend contract defines it). */

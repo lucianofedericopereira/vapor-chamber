@@ -2,9 +2,9 @@
  * Build orchestrator - single source of truth for the JS pipeline.
  *
  * Outputs:
- *   ESM multi-entry library (tree-shakable, sideEffects: false)
- *     dist/index.js, dist/transports.js, dist/directives.js,
- *     dist/transitions.js, dist/ssr.js, dist/vite-hmr.js, dist/iife.js
+ *   ESM multi-entry library, one dist/<entry>.js per entry of the `lib.entry`
+ *   map below (the package.json "exports" subpaths and the three iife entries).
+ *   Which files carry side effects is package.json's `sideEffects` list.
  *
  *   IIFE variants (script-tag drop-ins, three sized bundles)
  *     dist/vapor-chamber.iife.js          + .min.js   (full)
@@ -175,7 +175,8 @@ function resolveDevFlag() {
   };
 }
 
-// 1. ESM multi-entry library - preserves sub-path exports defined in package.json
+// 1. ESM multi-entry library. The entry map is written by hand: a new subpath
+//    export needs its line here as well as in package.json "exports".
 await build({
   configFile: false,
   logLevel: 'warn',
@@ -317,14 +318,12 @@ for (const v of iifeVariants) {
 /**
  * Remove JavaScript this build did not emit.
  *
- * Both Vite builds write into `dist/` in sequence and both set
+ * Every Vite build here writes into `dist/` in sequence and sets
  * `emptyOutDir: false`, because emptying it between them would delete what the
  * previous one just wrote - and `tsc` has already put the declarations there
  * before this script runs at all. The consequence was that `dist/` only ever
  * grew: a renamed chunk, or a local measurement that once wrote here, stayed
- * indefinitely, while `files: ["dist"]` ships the directory whole. One tree
- * carried a `dist/dist.js` five days older than the rest of the build, holding
- * a second inlined copy of the bus that no export named and nothing imported.
+ * indefinitely, while `files: ["dist"]` ships the directory whole.
  *
  * `emitted` is the authority rather than a list: the licence plugin fills it as
  * each file is written, and `dist/LICENSE.txt` is already derived from it. Only

@@ -47,8 +47,9 @@ export type ResolveBaseOptions = {
    *  Omit for locale-first URLs where the pathname starts with the locale. */
   prefix?: string;
   /** Locale segments to detect after the prefix (or at the pathname start
-   *  when there is no prefix). The segment is OPTIONAL - absent locale just
-   *  yields the prefix alone. */
+   *  when there is no prefix), matched case-insensitively and returned
+   *  lowercased. The segment is OPTIONAL - absent locale just yields the
+   *  prefix alone. */
   locales?: readonly string[];
   /** Pathname to inspect. Default: window.location.pathname. */
   pathname?: string;

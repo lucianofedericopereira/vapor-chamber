@@ -1,12 +1,11 @@
 /**
  * vapor-chamber - the shared command bus.
  *
- * Its own module, and free of the Vue probe on purpose: it lived in
- * `chamber.ts`, whose top-level `probeVue()` runs a dynamic `import('vue')`,
- * so a Vue-less app that only used the shared bus kept that module and
- * loaded a Vue chunk at start under esbuild and webpack
- * (tests/root-probe-builds.test.ts). `chamber.ts` re-exports all three, so
- * every import path is unchanged.
+ * Its own module, free of the Vue probe on purpose: `chamber.ts`'s top-level
+ * `probeVue()` runs a dynamic `import('vue')`, so a Vue-less app importing the
+ * shared bus from there would load a Vue chunk at start under esbuild and
+ * webpack (tests/root-probe-builds.test.ts). `chamber.ts` re-exports
+ * `getCommandBus`, `setCommandBus` and `resetCommandBus`.
  */
 
 import { createCommandBus, type AsyncCommandBus, type BaseBus, type CommandBus, type CommandMap, type CommandResult } from './command-bus';

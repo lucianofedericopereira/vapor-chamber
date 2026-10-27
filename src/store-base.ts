@@ -4,7 +4,7 @@
  * `vapor-chamber/store` (Vue) and `vapor-chamber/store/core` (no Vue) are this
  * implementation over a different runtime (`StoreRuntime`): the rules - actions
  * as commands, the registry per bus, takeover, undo, field events, sharing,
- * the coded refusals - exist once. Log s35.130. The design notes on the store
+ * the coded refusals - exist once. The design notes on the store
  * are in src/store.ts and docs/store.md.
  */
 
@@ -35,7 +35,7 @@ export type ChamberStoreOptions<S extends object, R extends Record<string, Store
    * dispatches `cartAdd`, and becomes the method `cart.add`), each value
    * returns the next state from the current one and the call's target and
    * payload. `actions` elsewhere in the library is an ActionScope (names),
-   * so the map has its own word. Log s35.147. `null` is an action a
+   * so the map has its own word. `null` is an action a
    * transport sends with no local change: its state comes from `answer` or
    * the server's `stores`. A function for a sent action is refused unless the
    * store is `optimistic` (`core:invalid:handler`).
@@ -336,7 +336,7 @@ const fieldCells = /* @__PURE__ */ new WeakMap<object, Map<string, { value: unkn
  * write of the store. One cell per store and field, for the store's life,
  * made by `make` (Vue's `shallowRef` for `fieldRef`, the library's `signal()`
  * for a form). Against a computed per field, it pays off from a few readers
- * (docs/store.md, log s35.125).
+ * (docs/store.md).
  */
 export function _fieldCell<S extends object, K extends keyof S & string>(
   store: { readonly state: { readonly value: S }; $onField: (key: K, fn: (value: S[K]) => void) => () => void },
@@ -422,7 +422,7 @@ export type StateHalf<S> = {
 };
 
 /**
- * @internal The state half (plan 1.32 4.2, step 4a): a cell, its one watcher,
+ * @internal The state half: a cell, its one watcher,
  * and what that watcher feeds, in this order: persist's save, share's send,
  * the field events. A store builds its command half on it (reducers, the
  * ring, `coalesce`, facts). The library's own queues (the outbox, history,
@@ -445,11 +445,11 @@ export function _stateHalf<S>(
   const cell = rt.cell(options.first ? options.first(initial) : initial);
   let live = true;
 
-  // One watcher feeds everything that follows the writes (plan 1.32 section
-  // 4.2): the save, the tab send, then the field events. Started by the
-  // first of them, stopped by `dispose`; a half with none starts none. The
-  // handlers never change: any check in them cost every store's writes (log
-  // s35.125). A store with both ran an effect each per write.
+  // One watcher feeds everything that follows the writes: the save, the tab
+  // send, then the field events. Started by the first of them, stopped by
+  // `dispose`; a half with none starts none. The handlers never change: any
+  // check in them would cost every store's writes, and one watcher replaces
+  // an effect each per write.
   // tests/store-one-watcher.test.ts.
   let save: (() => void) | null = null;
   let send: ((next: S) => void) | null = null;
@@ -489,7 +489,7 @@ export function _stateHalf<S>(
     cell,
     hooks,
     ready: hooks !== null ? hooks.ready : null,
-    // Keyed field events (log s35.125) on a lane in its live mode, the rule a
+    // Keyed field events on a lane in its live mode, the rule a
     // bus listener follows: one unsubscribed during a write is not called,
     // one added during a write is called from the next
     // (tests/store-field-unsubscribe-during-write.test.ts). A subscriber's
@@ -535,7 +535,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
   // replace it: `reducers: { state }` left `store.state` a function. Refused
   // here, where the options are first known. tests/store-review.test.ts.
   // A `$` name is the library's (`<id>$reset`, `<action>$undo`): an id or an
-  // action key carrying one would read as the library's command. Log s35.117.
+  // action key carrying one would read as the library's command.
   if (_isLibraryAction(id)) {
     throw storeFail('invalid:name', `Store "${id}": a name with "$" is the library's.${DEV ? ' Rename the store.' : ''}`, { context: { id } });
   }
@@ -622,7 +622,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
 
     // `undo: true`: every write is a step in a ring of UNDO_RING entries
     // (actions, `$reset`, a tab's state), not in weak maps keyed by every
-    // command (5x the action's cost, log s35.118). The inverse runs inside the
+    // command (5x the action's cost). The inverse runs inside the
     // bus's `<action>$undo` command and rebases (Memento for owned state, as
     // Replicache and Apollo's optimistic layers rebase): from the undone step's
     // "before" it re-applies every later step, calling the reducer directly, so
@@ -631,8 +631,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // last command undone, and when the state is still the one that undo
     // restored, a redo writes the state the step recorded instead of running
     // the reducer again: same object, same ids. tests/store-undo.test.ts,
-    // tests/store-rollback-rebase.test.ts (log s35.157),
-    // tests/store-redo-recorded.test.ts (log s35.158).
+    // tests/store-rollback-rebase.test.ts, tests/store-redo-recorded.test.ts.
     let step: ((cmd: any, prev: S, f: StoreReducer<S>) => S) | undefined;
     let inverse: { undo: (cmd: any) => unknown; canUndo: (cmd: any) => boolean } | undefined;
     // `share`, across tabs: the command a step was credited to (a redo's is
@@ -813,7 +812,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // `version`, a state older than the one held is dropped, the server's
     // number ordering its writes. Only an object is a state, whether `answer` mapped it or a
     // reply declared it under `stores`: anything else writes nothing.
-    // Written, `null` or `undefined` made every reader throw.
+    // A written `null` or `undefined` would make every reader throw.
     // tests/store-facts-lane.test.ts, tests/store-declared-by-server.test.ts,
     // tests/store-answer-not-a-state.test.ts.
     const versionOf = options.version;
@@ -1030,11 +1029,6 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       }
     }
 
-    // Auto-dispose when the LAST holding scope ends; outside a scope the caller
-    // owns `$dispose`, same contract as every composable here.
-    // `getCurrentScope()` rather than an instance accessor - the rule
-    // `tryAutoCleanup` records. `getCurrentInstance()` answers null in a Vapor
-    // setup; the package reads it only as tryKeepAliveHooks' fallback.
     // A state from outside this store reaches it on the stores' lane, by id:
     // the async bus emits a reply's `stores` at the transport's level, a step
     // of the command that got the reply, a push its own (`_pushed`), a seed
@@ -1052,6 +1046,11 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // by persist, and the server's over a saved one.
     // tests/ssr-store-states.test.ts.
     if (existing !== undefined && existing.store === null) write(SEEDED, existing.seeded);
+    // Auto-dispose when the LAST holding scope ends; outside a scope the caller
+    // owns `$dispose`, same contract as every composable here.
+    // `getCurrentScope()` rather than an instance accessor - the rule
+    // `tryAutoCleanup` records. `getCurrentInstance()` answers null in a Vapor
+    // setup; the package reads it only as tryKeepAliveHooks' fallback.
     join(rt.scope, entry);
     return store;
   };

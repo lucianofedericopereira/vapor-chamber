@@ -22,15 +22,15 @@
  * below do not exist there, and importing a missing name is a link error, not a
  * soft failure - so a 3.5 consumer importing `vapor-chamber/vue` must not be
  * made to resolve them. Splitting them out is what lets both audiences have a
- * static entry. `src/vue.ts`'s SCOPE note has said "Vapor wiring belongs in a
- * 3.6-only subpath" since it was written; this is that subpath.
+ * static entry. `src/vue.ts`'s SCOPE note puts Vapor wiring in a 3.6-only
+ * subpath; this is that subpath.
  *
  * WHAT IT FIXES, concretely. The package root reaches Vue through a runtime
  * probe - a bare dynamic `import()` of a specifier held in a variable - because
  * the root must survive with no Vue in the tree at all. That probe answers
  * correctly under a dev server and **cannot resolve in a production bundle**,
  * where a bare specifier has nothing to resolve against and the rejection is
- * swallowed. Two failures follow, and both have actually shipped:
+ * swallowed. Two failures follow:
  *
  *   1. Vapor detection comes up empty, so `createVaporChamberApp()` throws
  *      "Vue 3.6+ with Vapor mode required. No Vue detected." on a page with

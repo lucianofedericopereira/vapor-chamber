@@ -31,7 +31,7 @@
  *
  * SCOPE: named imports, and only the Vue 3.5-safe surface. A namespace import
  * (`import * as Vue`) would force the consumer's bundler to retain every Vue
- * export - measured at 3x bundle size on the vapor-sfc example in v1.18.0 - and the Vapor
+ * export - measured at 3x bundle size on the vapor-sfc example - and the Vapor
  * APIs do not exist on 3.5, where importing them by name is a link error. Vapor
  * wiring belongs in a 3.6-only subpath.
  *
@@ -83,11 +83,10 @@ configureVue({
 });
 
 // `@vue/reactivity` and not `vue`: the tracking primitives are not on the `vue`
-// entry. Re-verified at 3.6.0-rc.6 by enumerating both modules - `pauseTracking`,
+// entry. Verified at 3.6.0-rc.6 by enumerating both modules - `pauseTracking`,
 // `resetTracking`, `enableTracking` and `setActiveSub` are all undefined on
 // `vue` and all functions on `@vue/reactivity`, which resolves to the *same
-// module instance* Vue itself uses. (First verified at rc.3; this was the
-// second copy of that claim, and chamber.ts carried the first.)
+// module instance* Vue itself uses.
 _wireUntrack(pauseTracking, resetTracking, /* viaSubpath */ true);
 
 /**

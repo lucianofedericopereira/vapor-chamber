@@ -19,7 +19,7 @@ Also exports everything from [`vapor-chamber/vitest/pure`](vitest-pure.md), docu
 
 ### VaporChamberFixtures
 
-**Interface** - [src/vitest.ts:137](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L137)
+**Interface** - [src/vitest.ts:136](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L136)
 
 ```ts
 export interface VaporChamberFixtures {
@@ -45,7 +45,7 @@ expect(val: any, message?: string) => Chai.Assertion
 
 ### it
 
-**Variable** - [src/vitest.ts:155](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L155)
+**Variable** - [src/vitest.ts:154](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L154)
 
 ```ts
 it<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void
@@ -56,7 +56,7 @@ The same API as `test`, as Vitest's `it` is its `test`.
 
 ### test
 
-**Variable** - [src/vitest.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L128)
+**Variable** - [src/vitest.ts:127](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L127)
 
 ```ts
 test<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void

@@ -192,7 +192,7 @@ corpus of 200 enterprise event identifiers, modeled across 500 LLM responses:
 > - ibid., section 4.2
 
 Cross-model consistency was verified across GPT-4o, GPT-4, and Claude. All three achieve
-Spearman rho = 1.000. camelCase wins universally.
+Spearman rho = 1.000.
 
 **Why camelCase over snake_case:** Both outperform dot notation. camelCase edges out snake_case
 because underscores, like dots, are punctuation. They force the tokenizer to split adjacent
@@ -223,9 +223,10 @@ bus.register('cart_add', handler)  // throws
 bus.register('cart.add', handler)  // throws
 ```
 
-The library names a store's actions, store id then action name (`liveLanded`,
-`src/store.ts`). So a verb-first pattern rejects every store action on the bus
-that hosts the store.
+The library names a store's actions, store id then capitalized action name
+(`cartAdd` for store `cart`, action `add`: `actionName` in `src/store-base.ts`).
+So a verb-first pattern rejects every store action on the bus that hosts the
+store.
 
 **Reference:** Pereira, L. F. (2026). *Empirical Validation of Cognitive-Derived Coding
 Constraints and Tokenization Asymmetries in LLM-Assisted Software Engineering*. Zenodo.
@@ -284,26 +285,29 @@ dispatch(action, target, payload)
   3. build Command { action, target, payload, meta: { ts, id, correlationId, causationId,
      origin, idempotencyKey, response, request } } (+ signal on the async bus)
   4. bare bus (no plugins, hooks or listeners): call the handler, return its result
-  5. run beforeHooks - throw to cancel: { ok: false }, core:refused:hook, cause: the throw
-  6. run plugins in priority order (cached runner - rebuilt only when a plugin is added or removed)
-  7. execute handler (Map.get - O(1) lookup)
+  5. `started`: each plugin's start part hears the command, before its rules
+  6. the rules: every plugin's `authorize`, then every `validate` - the first
+     refusal is the answer, and the work never runs
+  7. the work's steps, each kind for every plugin before the next: `reuse` a
+     stored answer, `admit` a limit, `begin` the send; then the work itself
+     (the action's transport, else its handler: Map.get - O(1) lookup)
   8. run afterHooks
-  9. notify listeners: the exact bucket, then the wildcards (4.3)
+  9. each plugin's `settled` part, then the listeners: the exact bucket, then
+     the wildcards (4.3)
  10. return CommandResult { ok, value, error }
 ```
 
-`seal()` gates configuration (register, use, the hooks, respond, clear), not
+`seal()` gates configuration (register, use, onAfter, respond, clear), not
 dispatch. There is no disposed state. `dispose()` runs each plugin's
 `dispose()`, clears state and settles waiting
 `request()`s, and the bus stays usable. On a bus given a `buffer` a
-command with no handler is held before step 5. So its hooks and listeners
-run when it is replayed, not now.
+command with no handler is held before step 5. So its parts, hooks and
+listeners run when it is replayed, not now.
 
-The plugin chain is built once when plugins are added or removed. Each dispatch
-creates the innermost `execute` closure and one `next` closure per plugin level.
-The runners are re-entrant, so the bus's retry and deferred continuations
-re-enter the chain at the right level. `buildRunner`'s PERF NOTE in
-`src/command-bus.ts` records what that costs.
+There is no plugin chain. A plugin is an object of parts, and the bus places
+each part at its step when `use()` installs it (5.2). The steps run once per
+dispatch, never per re-send, so the async bus's retry (4.7) spends no second
+`rateLimit` slot.
 
 ### 4.3 Depth, and listeners that change during a dispatch
 
@@ -314,7 +318,7 @@ a handler that queries itself stops there too.
 
 On the sync bus the depth is a counter around the call. On the async bus it is
 the depth of the dispatch whose code is running now. Each stretch of a dispatch
-that calls user code (before-hooks, the runner, after-hooks, listeners) runs at
+that calls user code (the rules, the steps and the work, after-hooks, listeners) runs at
 that dispatch's depth and restores the one it found. So concurrent dispatches
 are each at depth 1, and a listener or after-hook that re-dispatches its own
 action is stopped at 16. A loop that passes through the user's own `await` is
@@ -330,7 +334,7 @@ array instead of splicing the one a dispatch may be walking. So nothing a
 listener does moves the loop's cursor.
 (`tests/command-bus.test.ts`, `tests/fast-lane.test.ts`, log s35.67.)
 
-**Before- and after-hooks follow the same rule**, on both buses and in
+**After-hooks follow the same rule**, on both buses and in
 `createTestBus()`, `clear()` from a hook included.
 (`tests/hook-removal-parity.test.ts`, log s35.209.)
 
@@ -343,23 +347,25 @@ createAsyncCommandBus(options)  // async: await-able, plugins can be async
 
 // Bus interface (BaseBus - both extend it)
 dispatch(action, target, payload?)    // mutation territory - fire and get result
-dispatchBatch(commands, options?)     // sequential dispatch; successCount + failCount
 register(action, handler, options?)   // bind a handler; { undo?, canUndo?, answer?, optimistic?, exclusive? }
-use(plugin, options?)                 // add middleware to the pipeline; returns its remover
-onBefore(hook)                        // pre-dispatch; throw to cancel
+use(plugin)                           // install a plugin's parts (5.2); returns its remover
 onAfter(hook)                         // post-dispatch side effects
 on(pattern, listener)                 // subscribe to matching commands
 once(pattern, listener)               // one-shot subscription - auto-unsubs after first match
 offAll(pattern?)                      // remove all listeners for pattern, or all listeners
-request(action, target, payload?, options?) // query territory - expects a responder
-respond(action, handler)              // register a query responder
 hasHandler(action)                    // introspect
 registeredActions()                   // -> string[] of all registered actions
-query(action, target, payload?)       // CQRS read-only dispatch - skips onBefore hooks
+query(action, target, payload?)       // CQRS read-only dispatch - the rules, the steps, the handler, afterHooks
 emit(event, data?)                    // domain events - no handler, no result
 seal()                                // freeze configuration - rejects register/use/clear
+isSealed()                            // -> true once sealed
 dispose()                             // clean teardown - clears state, cancels timers, settles waiting requests
 clear()                               // reset - useful for testing and HMR
+
+// On CommandBus and AsyncCommandBus, not on BaseBus
+dispatchBatch(commands, options?)     // sequential dispatch; successCount + failCount
+request(action, target, payload?, options?) // query territory - expects a responder
+respond(action, handler)              // register a query responder
 
 // Standalone (tree-shakeable)
 inspectBus(bus)                       // -> BusInspection topology snapshot
@@ -368,8 +374,9 @@ unsealBus(bus)                        // unseal a sealed bus
 
 ### 4.5 CQRS distinction
 
-`dispatch` is mutation territory. `query` is read territory. It skips `onBefore` hooks
-(no auth gates, no loading spinners for reads) but runs plugins, handlers, and afterHooks.
+`dispatch` is mutation territory. `query` is read territory. It runs the
+action's rules, the steps, the handler and the afterHooks, and the command
+state does not count it as in flight (no loading spinner for a read).
 `emit` fires domain events and needs no handler. `request` asks one responder
 (`respond`) and waits for its answer, bounded by a timeout (5000 ms by default).
 
@@ -467,10 +474,11 @@ A stable `action:target` string key enables cache invalidation integration with 
 The sender's `pace` keys by it, and so do `idempotent`, `cache` and
 `supersede`. It is public so an app can key the same way.
 
-**Why `onBefore`?**
-Guards belong before execution, not inside plugins. A `beforeHook` that throws cancels the
-dispatch cleanly without needing to wrap the entire plugin chain. Auth gates, rate-limit checks,
-and loading-state management are cleaner here than as plugins.
+**Why a rule, not a hook?**
+Guards belong before execution, not inside the work. An `authorize` or
+`validate` part refuses before every plugin's step and the work, so a refused
+command spends no limit, no cache, no retry and no transport. The `onBefore`
+hook that once held guards was removed for it (CHANGELOG v1.32.0, appendix C).
 
 ### 4.9 DDD positioning
 
@@ -487,8 +495,13 @@ In Domain-Driven Design terms:
 
 ### 5.1 The pipeline
 
-Plugins are middleware. They wrap every dispatch in priority order (highest first, then
-registration order). This is where cross-cutting concerns live:
+A plugin is an object of parts the bus places at its steps (5.2). Each kind
+of part runs for every plugin before the next kind, so no `validate` runs
+before an `authorize`, whichever plugin was installed first. Within a kind the
+plugins run in install order, and there the order decides: the first rule
+that refuses answers, the first `reuse` that answers wins, and so does the
+first `admit` that refuses (`_refusal` and `_stepped` in
+`src/command-bus.ts`). This is where cross-cutting concerns live:
 
 ```ts
 bus.use(logger())            // log every command
@@ -500,21 +513,22 @@ The pipeline is composable and is the same model on sync and async buses.
 
 ### 5.2 The contract, and what a plugin cannot see
 
-A plugin is `(cmd, next, fail) => result`, with an optional `id`, `dispose`,
-`actions`, `actionFilter`, `transport` and `forget` (`Plugin` and
-`PluginParts` in `src/command-bus.ts`). It sees every dispatch and query its
-`actions` and `actionFilter` select (both absent: all), with its result. It
-may answer in place of the handler. The bus decides the selection once per
-action.
+A plugin is `PluginParts` (`src/command-bus.ts`): an object with the parts
+the bus places, and `use()` refuses one with none. The facts: `started(cmd)`
+and `settled(cmd, result)`. The rules: `authorize(action)` and
+`validate(action)`, asked once per action for a refusal. The work's steps:
+`reuse(cmd)` a stored answer, `admit(cmd, fail)` a limit's refusal,
+`begin(cmd)` the send, with a `WorkTicket` (`signal`, `landed`, `answer`).
+Beside them `id` (the owner of its failures), `dispose`, `forget`,
+`attach(bus)`, and `actions` and `actionFilter`, which select the dispatches
+and queries it sees (both absent: all), decided once per action.
 
 Once an undo of a command lands, the bus calls `forget(cmd)` on every plugin,
 whatever its selection. `cache` and `idempotent` drop the answer they kept for
 it, so a redo runs.
 
-On the async bus `next()` returns a promise. So a plugin that reads the result
-does it through `onSettled`, which stays synchronous on the sync bus. `Plugin`
-is generic in what `next()` returns, so reading `.ok` straight off `next()` does
-not compile. `SyncPlugin` and `AsyncPlugin` are the one-bus shapes. A plugin's
+On the async bus a step's answer may be a promise. `onSettled` reads a result
+that may not have arrived yet, synchronously on the sync bus. A plugin's
 failures carry its `id` as their owner, and its own throw becomes
 `<id>:failed:plugin` (4.6).
 
@@ -538,7 +552,7 @@ the pipeline it sits in.
 | `idempotent` | Exactly-once | Collapses duplicate commands (double-submit/retry/reconnect). Stamps an `Idempotency-Key` the HTTP transport forwards to the backend |
 | `schemaValidator` | Guards | A `validate` part: checks field types against the schema (auto-installed in the schema bus) |
 | `createChannel` | Multi-context | Mirror emitted facts to every other same-origin context through BroadcastChannel. Not a bus plugin: it takes a fast lane, not the bus |
-| `supersede` | Concurrency | Aborts the in-flight dispatch of the same key when a newer one arrives. Async bus only: it mutates `cmd.signal` |
+| `supersede` | Concurrency | Aborts the in-flight dispatch of the same key when a newer one arrives. A `begin` step, after every limit admitted the command. Async bus only: it hands the bus the signal the work runs under |
 | `schemaLogger` | DX | `logger` plus the schema's descriptions and a per-field validation mark |
 | `validateSchemas` / `validateSchemasAsync` | Guards | Standard Schema validation as a `validate` part, from `vapor-chamber/standard-schema` |
 | `storeStates` / `seedStores` | SSR | The state of every store the request wrote into the page, then the client's stores take them |
@@ -586,8 +600,8 @@ tabSync.dispose()
 
 A transport is declared at the async bus, one or a map by action pattern
 where the most specific match wins. It is the work for the actions it covers:
-every plugin wraps it, wherever it was installed, and an action no pattern
-covers runs its local handler.
+the plugins' steps run around it, wherever they were installed, and an action
+no pattern covers runs its local handler.
 
 ```ts
 // HTTP fetch - CSRF, timeout, scope-aware abort; the bus re-sends (4.7)
@@ -913,7 +927,7 @@ and is the complete list.
 | `useCommandError()` | `errors`, `latestError` | Component-scoped error display |
 | `useSharedCommandState()` | One shared set per bus, plus one per `pending()` key | Global spinners and error lists, and per-(action, target) loading |
 | `useCommandHistory()` | `past`, `future`, `canUndo`, `canRedo` | Undo/redo UI |
-| `useCommandQuery()` | `data`, `loading` | CQRS read-side (skips onBefore) |
+| `useCommandQuery()` | `data`, `loading` | CQRS read-side (`query`, 4.5) |
 | `useTransitionCommand()` | `phase` | `<Transition>` hook -> bus dispatch |
 
 `useCommand()` gates on `hasInjectionContext()`, not `getCurrentInstance()`, so
@@ -1205,8 +1219,9 @@ invoke: {
 
 The generic `wsTransport` works with any WebSocket server that answers its
 envelope. It sends commands as JSON and pairs each answer with its request by
-id. A frame with no pending id is ignored, so the transport has no hook for a
-framework's own protocol.
+id. A frame with no `id` is the server's push, `{ event, data }`, emitted on
+the bus (docs/contract.md 4); a frame whose `id` matches no pending command is
+ignored. The transport has no hook for a framework's own protocol.
 
 For Laravel Reverb / Echo, `createEchoBridge` in `vapor-chamber/transports`
 routes public, private and presence channels to the bus. It also tracks
@@ -1810,8 +1825,16 @@ src/
   alien-signals.ts  - alienSignalAdapter, configureAlienSignals (opt-in alien-signals backing)
   reactive.ts       - deepSignal (deep-reactivity companion, vapor-chamber/reactive)
   observable.ts     - observe, dispatchFrom (RxJS-style observable adapter)
-  plugins-core.ts   - logger, validator, history, authGuard, optimistic
+  plugins-core.ts   - logger, validator, history, authGuard
   pace.ts           - pace (debounce or throttle at the sender)
+  buffer.ts         - createBuffer: a command dispatched before its handler exists waits for it
+  canonical.ts      - the text a key or a hash is made of
+  command-binding.ts - bindCommands: a control that dispatches a command, with no Vue in it
+  page-bindings.ts  - bindDisplay: data-vc-text / -show / -each / -pending over a store of the bus
+  widget.ts         - defineWidget, emitDOMEvent: a Vapor custom element registered when the page needs it
+  tool-schema.ts    - the JSON Schema an action's tool takes, one generator for schema.ts and mcp.ts
+  iife-app.ts       - createApp and connect, the same in every IIFE variant
+  store-share.ts    - shareTabs: a store across tabs, each write crossing as its command
   plugins-io.ts     - createChannel
   plugins-extra.ts  - cache, circuitBreaker, rateLimit, metrics, idempotent, supersede
   plugins-schema.ts - validateSchemas / validateSchemasAsync
@@ -1894,9 +1917,6 @@ Where the current numbers live, both generated and CI-verified fresh:
 | what each release changed | [`CHANGELOG.md`](../CHANGELOG.md) |
 | forward plans, the version policy, per-module status | [`ROADMAP.md`](../ROADMAP.md) |
 
-`npx vitest run` prints the authoritative file and test counts, which is
-faster than reading a list that might be wrong.
-
 ---
 
 ## 17. References and licence
@@ -1911,11 +1931,6 @@ faster than reading a list that might be wrong.
 5. Vite: https://vite.dev
 
 GNU Lesser General Public License v2.1 (LGPL-2.1)
-
----
-
-*vapor-chamber is built for the Vue Vapor + Laravel stack.
-The core is open for anyone building similar coordination layers.*
 
 ---
 
@@ -1994,7 +2009,7 @@ the bus, normalized entity storage. The wall held every time.
 That wall still holds with `vapor-chamber/store` shipped: the store owns state,
 the bus does not, and a store's actions reach it only as dispatches.
 
-### B. The Vue 3.6 alignment log, beta.8 to rc.12 (was section 9.2)
+### B. The Vue 3.6 alignment log, beta.8 to rc.13 (was section 9.2)
 
 
 Every Vue 3.6 release gets an alignment cycle. Read each commit at source and
@@ -4642,3 +4657,44 @@ tracking is its cost, one effect per mounted control. As it stood:
 > `vcCommandVapor`, `v-vc:command` for Vapor components, reading its binding
 > getter at dispatch. The `renderEffect` a tracked port needs would break the
 > subpath on Vue 3.5.
+
+#### From 5.2 Dispatch flow (the plugin chain and `onBefore`, removed in v1.32.0)
+
+Steps 5 and 6, as they stood:
+
+  5. run beforeHooks - throw to cancel: { ok: false }, core:refused:hook, cause: the throw
+  6. run plugins in priority order (cached runner - rebuilt only when a plugin is added or removed)
+
+The paragraph under the steps is the second 5.2 entry above. Its last sentence
+had since come to read "`buildRunner`'s PERF NOTE in `src/command-bus.ts`
+records what that costs."
+
+#### From CQRS distinction (`onBefore`, removed in v1.32.0)
+
+The sentence on `query` ended:
+
+> skips `onBefore` hooks (no auth gates, no loading spinners for
+> reads) but runs plugins, handlers, and afterHooks.
+
+#### From 6 Design Decisions, why onBefore (removed in v1.32.0)
+
+**Why `onBefore`?**
+Guards belong before execution, not inside plugins. A `beforeHook` that throws cancels the
+dispatch cleanly without needing to wrap the entire plugin chain. Auth gates, rate-limit checks,
+and loading-state management are cleaner here than as plugins.
+
+#### From the plugin contract (the `(cmd, next, fail)` plugin, removed in v1.32.0)
+
+Three of its sentences, each as it stood:
+
+> A plugin is `(cmd, next, fail) => result`, with an optional `id`, `dispose`,
+> `actions`, `actionFilter`, `transport` and `forget` (`Plugin` and
+> `PluginParts` in `src/command-bus.ts`).
+>
+> It may answer in place of the handler.
+>
+> On the async bus `next()` returns a promise. So a plugin that
+> reads the result does it through `onSettled`, which stays synchronous on the
+> sync bus. `Plugin` is generic in what `next()` returns, so reading `.ok`
+> straight off `next()` does not compile. `SyncPlugin` and `AsyncPlugin` are the
+> one-bus shapes.

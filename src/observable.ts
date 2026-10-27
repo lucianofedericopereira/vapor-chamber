@@ -128,15 +128,11 @@ export function observe(bus: BaseBus, pattern: string): InteropObservable<BusObs
  *
  * "Fire-and-forget" means the RESULT is not awaited, not that a failure is
  * dropped on the floor. On an async bus `dispatch` returns a promise, and
- * discarding it left a rejection with no handler - an unhandled rejection,
- * which Node terminates the process over by default. Measured: one emitted
- * value into a bus with `onMissing: 'throw'` produced exactly that. A rejected
- * dispatch is now reported on the same `<action>:error` channel the source's
+ * discarding it would leave a rejection with no handler - an unhandled
+ * rejection, which Node terminates the process over by default (one emitted
+ * value into a bus with `onMissing: 'throw'` does exactly that). A rejected
+ * dispatch is reported on the same `<action>:error` channel the source's
  * own errors use, so it is observable rather than either fatal or silent.
- *
- * `ssr.ts` guards the same shape on its replay path and `plugins-io.ts`'s
- * `createChannel()` was fixed for it; this was the third place a promise from
- * `BaseBus.dispatch` was allowed to float.
  *
  * @example
  * import { interval } from 'rxjs';

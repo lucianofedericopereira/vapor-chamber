@@ -1,10 +1,9 @@
 # Accessibility
 
 What the library guarantees to people using a keyboard, a screen reader,
-magnification or reduced motion, and what only the app can do. Accessibility
-is designed in, not audited after: every UI-facing change names who it could
-exclude before it is built, and is done only when its WCAG criterion has a
-test. The open items are in [ROADMAP.md](../ROADMAP.md).
+magnification or reduced motion, and what only the app can do. Every
+UI-facing change names who it could exclude before it is built ("Definition
+of done", below). The open items are in [ROADMAP.md](../ROADMAP.md).
 
 ## What the library does
 
@@ -39,7 +38,6 @@ test. The open items are in [ROADMAP.md](../ROADMAP.md).
   both renderers (tests/form-aria-render.test.ts).
 - **Undo is honest.** Both histories move their stacks back when an undo or a
   redo does not land (tests/history-undo-lands.test.ts).
-
 - **Plain HTML gets the same.** `bindCommands(root, { bus })` mounts the
   directive's interaction on every `[data-vc-command]`, so a page with no Vue
   keeps focus, answers the keyboard and announces failures the same way

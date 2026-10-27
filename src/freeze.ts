@@ -10,11 +10,9 @@
  * optimistically, stashes a computed title on `route.meta` - therefore rewrites
  * what every later hit reads, silently and at a distance.
  *
- * This list said "both caches" while `idempotent` was a third site and went
- * unfrozen, which is the failure mode of a policy applied by hand at each
- * call site rather than encoded in one place: the site that was forgotten was
- * also the site absent from the list of sites. Add to this list when adding a
- * store, or the next one is silent too.
+ * A policy applied by hand at each call site is easy to miss at one of them, so
+ * keep this list in step: add to it when adding a store, or that store's
+ * entries stay mutable.
  *
  * The contract is "treat cached values as immutable", and this makes that
  * contract enforceable where it matters: in dev, mutation throws at the

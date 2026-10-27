@@ -10,7 +10,7 @@
  * Two pairs look extractable: the bounded eviction in `cache()` and
  * `idempotent()`, and the "compact when more than half the buffer is dead"
  * block in `rateLimit()` and `metrics()`. Both extractions were built,
- * measured and rejected (v1.19, 2026-09-10).
+ * measured and rejected.
  *
  * Shared `evictOldest` + `compactHead` helpers made the `.` ESM entry +66
  * bytes minified / +24 gzip. The generic parameters they need - an optional
@@ -75,14 +75,11 @@ export function cache(options: CacheOptions = {}): PluginParts & {
   // stops caching is still a bad option behaving as something other than the
   // documented default.
   const ttl = countOption(rawTtl, 30_000, 0, MAX_TIMEOUT_MS);
-  // Clamped, because it was not: a negative `maxSize` made `evictIfNeeded`'s
-  // old `while (store.size > maxSize)` loop true against an EMPTY store, and
-  // its `firstKey !== undefined` guard then made no progress - so
-  // `cache({ maxSize: -1 })` hung the process on the first eviction instead of
-  // throwing. Reachable from the public API with one bad option.
-  // The NaN half of that lives in ../bounds now, along with the reason the old
-  // `| 0` was not enough: it mapped `Infinity` to 0, so asking for an unbounded
-  // cache got you one that stored nothing.
+  // Clamped: a negative `maxSize` would make a `while (store.size > maxSize)`
+  // eviction loop true against an EMPTY store and hang the process on the
+  // first eviction. The NaN half lives in ../bounds, along with the reason a
+  // bare `| 0` is not enough: it maps `Infinity` to 0, so asking for an
+  // unbounded cache would get one that stores nothing.
   const maxSize = countOption(rawMaxSize, 100);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
@@ -565,15 +562,10 @@ export function idempotent(options: IdempotentOptions = {}): PluginParts {
   // nothing and every duplicate re-executes - the dedupe guarantee silently
   // absent on a plugin whose entire purpose is that guarantee.
   const ttl = countOption(rawTtl, 60_000, 0, MAX_TIMEOUT_MS);
-  // Clamped and floored exactly as `cache()` clamps `maxSize`, because the two
-  // options disagreed on what the same number means. `cache({ maxSize: 0 })`
-  // stored nothing; `idempotent({ maxSize: 0 })` stored one entry, because it
-  // evicted a single oldest key BEFORE inserting - on an empty map that evicted
-  // nothing and the insert landed anyway. Same word, same library, opposite
-  // behaviour. A negative was likewise a silent 1-entry cache rather than an
-  // error. Eviction below now runs down to the bound after the insert, which is
-  // `cache()`'s rule, so `maxSize: 0` remembers nothing.
-  // Bounded through ../bounds, for the same reason as cache() above.
+  // Clamped and floored exactly as `cache()` clamps `maxSize`, so the two
+  // options mean the same number. Eviction runs down to the bound AFTER the
+  // insert (`cache()`'s rule), so `maxSize: 0` remembers nothing. Bounded
+  // through ../bounds, for the same reason as cache() above.
   const maxSize = countOption(rawMaxSize, 500);
   // key -> completed result (with timestamp); in-flight promises are in `inflight`.
   const done = new Map<string, { at: number; result: CommandResult }>();
@@ -584,7 +576,7 @@ export function idempotent(options: IdempotentOptions = {}): PluginParts {
 
   // The caller's own view of a shared run: its own abort settles it at once,
   // and the run is cancelled only when no holder is left (the HTTP client's
-  // joined-GET rule, 1.29). tests/idempotent-own-abort.test.ts.
+  // joined-GET rule). tests/idempotent-own-abort.test.ts.
   function hold(share: Share, cmd: Command): Promise<CommandResult> {
     const signal = cmd.signal;
     if (!signal) { share.held = true; return share.run; }
@@ -618,10 +610,8 @@ export function idempotent(options: IdempotentOptions = {}): PluginParts {
     // Frozen for the same reason the `cache()` plugin freezes: every later
     // duplicate within `ttl` gets this exact object back, and the concurrent
     // duplicates sharing `run` already share it. A consumer that sorts the
-    // list it was handed, or deletes a row optimistically, rewrites what every
-    // later dispatch reads. This site was the one the freeze contract did not
-    // cover, so it corrupted silently where the other two throw at the
-    // mutation.
+    // list it was handed, or deletes a row optimistically, would rewrite what
+    // every later dispatch reads.
     done.set(k, { at: Date.now(), result: freezeCached(result) });
     // Oldest first, down to the bound - `cache()`'s evictIfNeeded rule.
     // Bounding the ITERATION rather than looping on the size is what makes a

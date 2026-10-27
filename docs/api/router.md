@@ -41,7 +41,7 @@ ancestor, active-stamped against `currentPath`.
 
 ### canUseWebHistory
 
-**Function** - [src/router/history.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L98)
+**Function** - [src/router/history.ts:99](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L99)
 
 ```ts
 canUseWebHistory() => boolean
@@ -67,7 +67,7 @@ with no regex of its own matches its type's pattern.
 
 ### createMemoryHistory
 
-**Function** - [src/router/history.ts:172](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L172)
+**Function** - [src/router/history.ts:173](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L173)
 
 ```ts
 createMemoryHistory(rawBase?: string, initialFullPath?: string) => RouterHistory
@@ -93,7 +93,7 @@ createRouteTable(rows: readonly RouteRecord[]) => RouteTable
 
 ### createWebHistory
 
-**Function** - [src/router/history.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L110)
+**Function** - [src/router/history.ts:111](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L111)
 
 ```ts
 createWebHistory(rawBase?: string) => RouterHistory
@@ -204,7 +204,7 @@ Trailing-slash tolerant. exact = same path; active = exact or path prefix
 
 ### preheatIdle
 
-**Function** - [src/router/dom.ts:324](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L324)
+**Function** - [src/router/dom.ts:320](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L320)
 
 ```ts
 preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options?: IdlePreheatOptions) => () => void
@@ -225,11 +225,11 @@ readRoutesPayload(raw: unknown) => RoutesPayload
 
 A routes payload as a read answers it: plain JSON, the table itself. A
 failure is a non-2xx problem, which the http client throws; an envelope
-(`{ state }`, a 2xx `{ problem }`) is off-protocol (log s35.115).
+(`{ state }`, a 2xx `{ problem }`) is off-protocol.
 
 ### resolveBase
 
-**Function** - [src/router/history.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L72)
+**Function** - [src/router/history.ts:73](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L73)
 
 ```ts
 resolveBase(options?: ResolveBaseOptions) => string
@@ -265,7 +265,7 @@ How a query write lands in browser history. Ladder (first hit wins):
 
 ### revalidateRoutes
 
-**Function** - [src/router/revalidate.ts:81](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L81)
+**Function** - [src/router/revalidate.ts:82](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L82)
 
 ```ts
 revalidateRoutes(router: Router, loaders: LoaderHandlers, map: RevalidateMap, options?: RevalidateOptions) => RevalidatePlugin
@@ -324,7 +324,7 @@ failures throw coded RouterErrors (cause attached, abort -> `aborted:navigation`
 
 ### stampActiveLinks
 
-**Function** - [src/router/dom.ts:294](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L294)
+**Function** - [src/router/dom.ts:290](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L290)
 
 ```ts
 stampActiveLinks(base: string, currentPath: string, root?: ParentNode) => void
@@ -534,7 +534,7 @@ for tests and SSR. Link handling lives in router/dom.ts, not here.
 
 ### IdlePreheatOptions
 
-**Type alias** - [src/router/dom.ts:311](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L311)
+**Type alias** - [src/router/dom.ts:307](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L307)
 
 ```ts
 export type IdlePreheatOptions = {
@@ -808,8 +808,9 @@ export type ResolveBaseOptions = {
    *  Omit for locale-first URLs where the pathname starts with the locale. */
   prefix?: string;
   /** Locale segments to detect after the prefix (or at the pathname start
-   *  when there is no prefix). The segment is OPTIONAL - absent locale just
-   *  yields the prefix alone. */
+   *  when there is no prefix), matched case-insensitively and returned
+   *  lowercased. The segment is OPTIONAL - absent locale just yields the
+   *  prefix alone. */
   locales?: readonly string[];
   /** Pathname to inspect. Default: window.location.pathname. */
   pathname?: string;
@@ -833,8 +834,9 @@ route's whole load chain. Patterns use the bus's glob shape (`cart*`).
 
 ```ts
 export type RevalidateOptions = {
-  /** Called when a revalidation fails. Default: rethrow-free console.error -
-   *  a failed refresh must not take down the command that succeeded. */
+  /** Called when a revalidation fails. Default: reported as
+   *  `router:failed:revalidate`, never thrown - a failed refresh must not
+   *  take down the command that succeeded. */
   onError?: (error: unknown) => void;
 };
 ```
