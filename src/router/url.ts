@@ -1,8 +1,7 @@
 /**
  * vapor-chamber-router - URL/query layer. Pure string/data functions.
  *
- * Query params are STATE, not navigation (docs/router.md, "Path = navigation,
- * query = state"): the typed codec here backs the engine's query fast path and
+ * Query params are STATE, not navigation (docs/router.md, "Path is navigation, query is state"): the typed codec here backs the engine's query fast path and
  * useQueryParam.
  */
 

@@ -126,7 +126,7 @@ describe('SSR by the stores states', () => {
 /*
  * Plan 1.32 4g. The SSR plugin recorded every command the server ran, and the
  * client replayed them: a reducer that minted an id or read a clock ended on a
- * different state in the browser (docs/store.md, "Loading saved state"), and
+ * different state in the browser (docs/store.md, "Loading state from the server"), and
  * the recorder sat on every server dispatch. Now the page carries the states:
  * `storeStates(bus)` reads each store on the request's bus, `seedStores(bus,
  * states)` gives them to the client's stores. A store already there takes its

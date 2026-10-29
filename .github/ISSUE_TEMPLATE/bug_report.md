@@ -15,7 +15,7 @@ assignees: ''
 ## Reproduction
 
 <!-- A minimal failing test (in `tests/`) is the gold standard.
-     A short code snippet is the second-best option. Avoid screenshots of code. -->
+     A short code snippet is the next best. Avoid screenshots of code. -->
 
 ```ts
 // minimal repro here

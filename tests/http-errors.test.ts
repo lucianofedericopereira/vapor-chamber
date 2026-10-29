@@ -46,7 +46,7 @@ describe('isRetryableStatus', () => {
     }
   });
 
-  it('both rules are exported from the package root (README documents them)', () => {
+  it('both rules are exported from the package root (manual chapter 4, "How a failure is judged")', () => {
     expect(root.classifyError).toBe(classifyError);
     expect(root.isRetryableStatus).toBe(isRetryableStatus);
   });

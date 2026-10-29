@@ -2262,7 +2262,7 @@ function _syncDispatchInner(s: SyncState, cmd: Command, executeOverride?: () => 
   // (A cached `isBare` boolean was tested and showed a 25% regression vs
   // these direct reads - V8's tight ICs on Map.size / Array.length already
   // optimize the inline check; adding a state field changed the hidden
-  // class for no benefit. CHANGELOG v1.2.0, the performance table.)
+  // class for no benefit. log section 37, v1.2.0, "splice-inspired optimization sweep")
   if (
     executeOverride === undefined &&
     s.plugins.length === 0 &&
@@ -2304,7 +2304,7 @@ function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandRes
   // _syncDispatchInner holds through handleMissing (nothing fires there).
   // Skipped for the request/respond path (executeOverride). The gate is one
   // read of the options: a gate on the queue's own state
-  // read faster only when monomorphic (CHANGELOG 1.x, "lazily allocated").
+  // read faster only when monomorphic (log section 37, v1.7.0, "Core coverage to 100%, lazy buffer allocation").
   if (executeOverride === undefined && s.opts.buffer !== undefined && rec.handler === undefined) {
     return handleMissing(s, cmd, true);
   }

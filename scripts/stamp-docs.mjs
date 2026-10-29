@@ -110,8 +110,7 @@ const metrics = readJson('docs/metrics.json');
  * The Vapor outlet's measured saving, published by
  * `tests/vapor/vapor-outlet-size.test.ts`.
  *
- * This one earned its markers the hard way. It is quoted in the CHANGELOG, the
- * ROADMAP, the README, docs/router.md and the whitepaper, it moves whenever
+ * This one earned its markers the hard way. It is quoted in the ROADMAP, docs/router.md, manual chapter 6, the whitepaper and the alignment log, it moves whenever
  * anything on the SHARED side of that A/B changes - and it did move, leaving
  * five copies of "20.03" wrong at once, each corrected by hand. A number that
  * a run can compute belongs to the generator, not to five authors.
@@ -189,7 +188,7 @@ const sizes = (() => {
 })();
 if (sizes) {
   const put = (name, key) => { if (sizes[key]) VALUES[name] = sizes[key].brotli; };
-  // Variants are quoted with all three columns in README's chooser table, so
+  // Variants are quoted with all three columns in manual chapter 8, "Pick a variant" chooser table, so
   // those get raw/gzip too - same rule: if prose repeats a measured number, the
   // number comes from the generator, not from a human.
   const putAll = (name, key) => {
@@ -216,7 +215,7 @@ if (sizes) {
   put('sizeRouterRemote', './router/remote');
   put('sizeRouterFetch', './router-fetch');
   // Vapor wiring deltas (Vue bundled) and the mitt comparison - rows of
-  // BUNDLE-SIZES, so the README's "+N KB raw" and the migration guide's
+  // BUNDLE-SIZES, so the manual chapter 1 and the whitepaper's `vapor-entry` footnote
   // "~200 bytes" are never retyped. The Raw variants carry the
   // minified figure the README quotes.
   putAll('sizeVaporEntry', 'vapor-chamber/vapor over that');

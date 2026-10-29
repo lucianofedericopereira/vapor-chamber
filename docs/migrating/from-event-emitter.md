@@ -1,15 +1,13 @@
 # Migrating from Node EventEmitter / eventemitter3
 
 [Node's `EventEmitter`](https://nodejs.org/api/events.html) and
-[`eventemitter3`](https://github.com/primus/eventemitter3) are the canonical
-class-based event emitters. vapor-chamber is a command bus - a different
-shape. This guide is for users who reached for an EventEmitter for app-wide
-state coordination and outgrew it.
+[`eventemitter3`](https://github.com/primus/eventemitter3) are the canonical class-based event
+emitters. vapor-chamber is a command bus, a different shape. This guide is for users who reached
+for an EventEmitter for app-wide state coordination and outgrew it.
 
-If you only need pub/sub event broadcast (no return values, no plugins,
-no transports), **stay on EventEmitter** or use vapor-chamber's
-[fast lane](../performance.md). Both are smaller and faster than the
-general-purpose bus.
+If you need only pub/sub broadcast (no return values, no plugins, no transports), **stay on
+EventEmitter**, or use vapor-chamber's [fast lane](../performance.md). Both are smaller and
+faster than the general-purpose bus.
 
 ---
 
@@ -22,11 +20,11 @@ general-purpose bus.
 | `emitter.once('foo', fn)`                       | `bus.once('foo', fn)`                                      |
 | `emitter.off('foo', fn)` / `removeListener`     | the unsubscribe function `bus.on('foo', fn)` returns       |
 | `emitter.removeAllListeners('foo')`             | `bus.offAll('foo')`                                        |
-| `emitter.removeAllListeners()`                  | `bus.offAll()` (no arg removes everything)                 |
-| `emitter.emit('foo', a, b, c)`                  | `bus.emit('foo', { a, b, c })` *(single-arg payload)*      |
+| `emitter.removeAllListeners()`                  | `bus.offAll()` (no argument removes everything)            |
+| `emitter.emit('foo', a, b, c)`                  | `bus.emit('foo', { a, b, c })` *(single-argument payload)* |
 | `emitter.listeners('foo')`                      | `inspectBus(bus).listenerPatterns`                         |
-| `emitter.listenerCount('foo')`                  | No per-pattern count - `listenerPatterns` lists patterns   |
-| `setMaxListeners(n)`                            | No equivalent - vapor-chamber doesn't cap listener count   |
+| `emitter.listenerCount('foo')`                  | No per-pattern count: `listenerPatterns` lists patterns    |
+| `setMaxListeners(n)`                            | No equivalent: vapor-chamber does not cap listener count   |
 
 ## Multi-argument emit -> single-payload emit
 
@@ -36,7 +34,7 @@ emitter.emit('userUpdate', userId, oldName, newName, timestamp);
 emitter.on('userUpdate', (userId, oldName, newName, timestamp) => {});
 ```
 
-vapor-chamber takes a single payload (more typeable, easier to extend):
+vapor-chamber takes a single payload, which is easier to type and to extend:
 ```ts
 bus.emit('userUpdate', { userId, oldName, newName, timestamp });
 bus.on('userUpdate', (cmd) => {
@@ -56,14 +54,13 @@ onArgs('userUpdate', (userId, oldName, newName) => {});
 
 ## Listener signature change
 
-EventEmitter listeners receive the emitted args directly. vapor-chamber
-listeners receive `(cmd, result)` - `cmd.target` is the payload, `result`
-is `{ ok, value, error }`. For pure pub/sub the second argument doesn't
-matter: emit always uses a singleton ok-result.
+EventEmitter listeners receive the emitted arguments directly. vapor-chamber listeners receive
+`(cmd, result)`: `cmd.target` is the payload, and `result` is `{ ok, value, error }`. For pure
+pub/sub the second argument does not matter, because emit always uses a singleton ok-result.
 
 ## Class-based vs functional
 
-EventEmitter is class-based and intended for inheritance:
+EventEmitter is class-based and meant for inheritance:
 ```ts
 class MyService extends EventEmitter {
   constructor() { super(); }
@@ -79,14 +76,14 @@ class MyService {
 }
 ```
 
-If your codebase has many `extends EventEmitter` services, consider
-keeping them and using vapor-chamber as the *cross-service* bus that
-those services emit/listen on. They're complementary.
+If your codebase has many `extends EventEmitter` services, consider keeping them and using
+vapor-chamber as the *cross-service* bus those services emit and listen on. The two
+complement each other.
 
 ## Beyond what EventEmitter does
 
-You probably reached for vapor-chamber because you needed something
-EventEmitter lacks. Here is the surface:
+You probably reached for vapor-chamber because you needed something EventEmitter lacks. Here is
+the surface:
 
 ```ts
 // Handlers with results - emit doesn't have a return path
@@ -109,28 +106,26 @@ const tools = toAnthropicTools(busSchema);
 
 ## Memory leaks: listener cleanup
 
-EventEmitter's `setMaxListeners(n)` is a leak detector: it warns if you
-accumulate too many listeners. vapor-chamber has no equivalent because the
-lib's composables (`useCommand`, `useSharedCommandState`) clean up
-automatically through `tryAutoCleanup`, on Vue scope or component disposal.
+EventEmitter's `setMaxListeners(n)` is a leak detector: it warns when too many listeners
+accumulate. vapor-chamber has no equivalent, because the library's composables (`useCommand`,
+`useSharedCommandState`) clean up through `tryAutoCleanup`, on Vue scope or component disposal.
 
-For non-Vue code, capture the unsubscribe closure:
+For non-Vue code, keep the unsubscribe closure:
 ```ts
 const off = bus.on('cartAdd', handler);
 // later: off();
 ```
 
-`inspectBus(bus).listenerPatterns` lists patterns, not subscriptions, so a
-leak of repeated `on('cartAdd')` does not grow it. Check instead that each
-`on()` has its unsubscribe called.
+`inspectBus(bus).listenerPatterns` lists patterns, not subscriptions, so a leak of repeated
+`on('cartAdd')` does not grow it. Check instead that each `on()` has its unsubscribe called.
 
 ## When NOT to migrate
 
-- Your codebase is built around `extends EventEmitter` - vapor-chamber's
-  functional shape doesn't fit. Keep EventEmitter for the per-class event
-  surface and use vapor-chamber as the cross-cutting bus.
-- You only need EventEmitter's pub/sub semantics and don't need results,
-  plugins, transports, or schema. Use the fast lane:
+- **Your codebase is built around `extends EventEmitter`.** vapor-chamber's functional shape does
+  not fit. Keep EventEmitter for the per-class event surface, and use vapor-chamber as the
+  cross-cutting bus.
+- **You need only EventEmitter's pub/sub semantics**, with no results, plugins, transports or
+  schema. Use the fast lane:
 
 ```ts
 import { createFastLane } from 'vapor-chamber/fast-lane';
@@ -140,32 +135,20 @@ lane.emit('userUpdate', { userId, name });
 ```
 
 On three-listener fan-out the fast lane's `on`/`emit` runs
-**<!-- vc:benchFastLaneVsEventEmitter3 -->1.01-1.16<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
-and **<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x mitt**.
-Against eventemitter3 that is level: the band falls on both sides of 1. The
-general bus's `emit` is behind eventemitter3 on the same fan-out, at
-**<!-- vc:benchEmitVsEventEmitter3Fanout -->0.62-0.99<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**.
-So moving EventEmitter pub/sub onto the bus costs some speed on this path.
-Onto the fast lane, it costs about none.
-The fast lane figure is the default removal mode, `'live'`, which matches the
-main bus. A listener removed mid-emit does not run, and one added mid-emit
-runs from the next emit.
-`createFastLane({ removal: 'snapshot' })` skips the per-listener `off` check
-and runs somewhat faster. The check is the price of that correctness
-(the measured gap is in [performance.md](../performance.md)).
+**<!-- vc:benchFastLaneVsEventEmitter3 -->1.01-1.16<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3** and
+**<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x mitt**.[^bands] Against eventemitter3 that is level, since the
+band falls on both sides of 1. The general bus's `emit` is behind eventemitter3 on the same
+fan-out, at **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.62-0.99<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**. So moving EventEmitter pub/sub onto the bus costs some
+speed on this path, and onto the fast lane about none.
 
-Single-handler `compile()` dispatch runs
-**<!-- vc:benchCompileVsDispatch -->14.44<!-- /vc:benchCompileVsDispatch -->x** the general bus's `dispatch`,
-and nothing above affects it. For the mode trade-off, see
+The fast lane figure is the default removal mode, `'live'`, which matches the main bus. A
+listener removed mid-emit does not run, and one added mid-emit runs from the next emit.
+`createFastLane({ removal: 'snapshot' })` skips the per-listener `off` check and runs somewhat
+faster. The check is the price of that correctness, and the measured gap is in
 [performance.md](../performance.md).
 
-> These ratios are **generated**, not typed: `npm run bench:bands` runs the
-> bench several times through `scripts/bench-ratios-reporter.mjs`, and
-> `npm run docs:stamp` publishes them. Ratios rather
-> than hz on purpose: an absolute hz figure is host state (rows here swing
-> 20-30% run to run) and a same-run ratio is not. Even a ratio moves. A ratio
-> between two libraries is a fact about one host (docs/V8-RULES.md rule 15),
-> so it is printed as the range over the runs. A ratio between two of this
-> library's own paths is the median. These: <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
-> A micro-loop emitting one name over and over flatters emitters keyed by a
-> plain object. With varying names they fall behind (docs/performance.md).
+Single-handler `compile()` dispatch runs **<!-- vc:benchCompileVsDispatch -->14.44<!-- /vc:benchCompileVsDispatch -->x** the general bus's
+`dispatch`, and nothing above affects it. For the mode trade-off, see
+[performance.md](../performance.md).
+
+[^bands]: These ratios are **generated**, not typed. `npm run bench:bands` runs the bench several times through `scripts/bench-ratios-reporter.mjs`, and `npm run docs:stamp` publishes them. They are ratios rather than hz on purpose: an absolute hz figure is host state (rows here swing 20-30% run to run), and a same-run ratio is not. Even a ratio moves. A ratio between two libraries is a fact about one host (docs/V8-RULES.md rule 15), so it is printed as the range over the runs. A ratio between two of this library's own paths is the median. These: <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->. A micro-loop that emits one name over and over flatters emitters keyed by a plain object. With varying names they fall behind (docs/performance.md).

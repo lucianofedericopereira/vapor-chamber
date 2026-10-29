@@ -6,7 +6,7 @@
  * undoable, and a redo offered for a change that never happened. That is a correctness defect and an accessibility one (WCAG
  * 3.3.4 asks that a submission be reversible; a history that lies about what
  * was reversed defeats it, most of all for a screen-reader user, who cannot
- * see that nothing changed). CHANGELOG v1.25.0 and docs/accessibility.md.
+ * see that nothing changed). (v1.25.0) and docs/accessibility.md.
  *
  * The API does not change: undo() and redo() still return the command at
  * once. An undo handler that returns a promise is awaited; one that returns

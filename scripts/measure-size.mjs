@@ -167,7 +167,7 @@ async function coreRow() {
  * static Vue import shows. `vapor-chamber/vapor` wires three of the five
  * Vapor names `configureVue` reads and leaves two out; src/vapor.ts carries
  * the measurement that decided the split, taken on the vapor-sfc example at
- * rc.6, and the README quotes the deltas. These rows re-take them on every
+ * rc.6, and the same two places. These rows re-take them on every
  * run, from `dist/`: the first row is a hand-wired minimum (`createVaporApp`
  * alone, the composables from `vapor-chamber/vue`), each row after it is the
  * DIFFERENCE from the row above - the columns are deltas, not sizes.

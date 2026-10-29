@@ -9,7 +9,7 @@
  * text in a search term) made it a value `Headers` refuses outright: the
  * request never left. The fetch mock the old test used accepts anything, so it
  * could not see either. The platform's own Headers is the judge here.
- * CHANGELOG v1.25.0.
+ * (v1.25.0)
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';

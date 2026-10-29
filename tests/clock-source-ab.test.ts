@@ -1,8 +1,7 @@
 /**
  * EXPERIMENT: where does `meta.ts` come from, and what does that source cost?
  *
- * docs/performance.md states the per-dispatch costs and concludes "none of those
- * are free, all are unavoidable for the bus pattern's semantics." That is right
+ * Test concludes "none of those are free, all are unavoidable for the bus pattern's semantics." That is right
  * about the meta ALLOCATION. It never asks a narrower question: `stampMeta` reads
  * the clock with `Date.now()` on every dispatch, and a clock read is not an
  * allocation. This measures whether that read is a material share of a dispatch.

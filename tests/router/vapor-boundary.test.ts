@@ -115,7 +115,7 @@ describe.skipIf(!esbuild)('Vapor boundary', () => {
     expect(imports).toContain('h');
   });
 
-  it('the outlet alone retains exactly the bindings docs/router.md and the README list', async () => {
+  it('the outlet alone retains exactly the bindings docs/router.md and manual chapter 6, "Pick an outlet"', async () => {
     // The `vapor-chamber/router/vapor` row of both retained-bindings tables.
     // It once listed no `createIf`, which the outlet's slot branch imports.
     const imports = await vueImportsOf(`

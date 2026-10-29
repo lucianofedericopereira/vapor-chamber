@@ -27,7 +27,7 @@ Open the printed URL (default `http://localhost:5173`).
 
 The examples are npm **workspaces**, so one `npm install` at the repo root
 installs all of them into a single `node_modules/` and symlinks the library into
-it - the example always runs against your working tree, with nothing to
+it. The example always runs against your working tree, with nothing to
 re-sync after an edit. The library `dist/` builds itself: the repo root has a
 `prepare` script, and this example's `predev`/`prebuild` hooks build it on demand
 if `dist/` is missing.
@@ -38,15 +38,15 @@ the library and runs `npm run check:example`, which builds every example.
 
 ## What to look for
 
-- **CartPanel** - the pressed button marks only itself busy (`aria-disabled`, so keyboard focus
-  stays on it), not the other one or the page: each reads the key it
+- **CartPanel:** the pressed button marks only itself busy (`aria-disabled`, so keyboard focus
+  stays on it), not the other one or the page. Each reads the key it
   dispatches, `pending('cartAdd', { id })`. "Add invalid product" shows the
   server's refusal. The third button asks for more than the stock when qty is
   above 10: `v-vc-optimistic` shows the count at once and takes it back.
-- **SearchPanel** - type at least 2 characters (try `usb`). The search waits for a
+- **SearchPanel:** type at least 2 characters (try `usb`). The search waits for a
   pause, sends the last text only, and lists the results. An older answer never
   replaces a newer one.
-- **StatusBar** - its error list observes every failed dispatch on the bus. Its
+- **StatusBar:** its error list observes every failed dispatch on the bus. Its
   "loading..." indicator is `anyPending`: any command in flight, so a Cart click or a
   search lights it.
 
@@ -76,12 +76,12 @@ npm run preview    # serve the production build locally
 
 ## Notes
 
-- This example uses the **local checkout** of vapor-chamber via
+- This example uses the **local checkout** of vapor-chamber through
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.33.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.34.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
   aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->`, and
-  that pin is owned by the root `devDependencies.vue` - `npm run docs:stamp`
+  the root `devDependencies.vue` owns that pin. `npm run docs:stamp`
   rewrites it, and `lint:check` fails when the two disagree. When Vue 3.6 ships
   stable, bump the root and re-stamp. Nothing here is retyped by hand.
 - To talk to a real backend, drop the `httpClient` option in `shop.ts`: the

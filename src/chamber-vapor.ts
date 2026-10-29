@@ -157,8 +157,7 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
  * Wraps Vue's `defineVaporComponent()`. Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
  * Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
- * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
- * whitepaper alignment log).
+ * compiler optimizations are Vue behavior (whitepaper appendix B, and log section 37).
  *
  * Returns null if the Vapor runtime (Vue 3.6+) is not detected.
  *
@@ -191,7 +190,7 @@ export function defineVaporComponent<T = any>(options: object): T | null {
  * components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
  * The loading placeholder receives the deferred component's props and slots
  * (beta.14+) - render a skeleton matching the final shape. Per-beta detail:
- * CHANGELOG / whitepaper alignment log.
+ * whitepaper appendix B, and log section 37.
  *
  * Returns null if the Vapor runtime (Vue 3.6+) is not detected.
  *
@@ -295,7 +294,7 @@ export function defineVaporCommand<B extends BaseBus = CommandBus, D extends num
  * `commandState`), making it safe for `<script setup vapor>` components that
  * await async operations. Error-boundary rendering and scheduler-flush
  * behavior around async components are Vue runtime concerns (per-beta detail:
- * CHANGELOG / whitepaper alignment log).
+ * whitepaper appendix B, and log section 37).
  *
  * The dispatch function returns a Promise<CommandResult>, matching the
  * AsyncCommandBus interface. Use this when your commands hit async transports

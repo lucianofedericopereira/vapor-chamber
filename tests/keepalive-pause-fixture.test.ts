@@ -3,7 +3,7 @@
  * FIXTURE - what Vue's KeepAlive scope-pausing (#15237) does and does NOT
  * suppress, measured on vue@3.6.0-rc.3.
  *
- * WHY. `docs/router.md` carries this note about `tryKeepAliveHooks` in
+ * WHY. `docs/router.md` carried this note about `tryKeepAliveHooks` in
  * `src/chamber.ts`:
  *
  *   "it hand-solves what #15237 proposes doing natively, so if that lands the

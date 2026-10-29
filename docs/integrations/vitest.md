@@ -6,13 +6,9 @@ fixtures built with `test.extend`, and a plugin for what needs configuration.
 Every command bus in a test is the real one. The entry records what it
 dispatched and asserts on that.
 
-Every code block on this page is checked, and the tag after its language says
-how. `tests/vitest-consumer.test.ts` installs the built package in a temporary
-project and uses this page's two config blocks as its `vitest.config.ts`. It
-runs every test block there with a real Vitest. The rest are compared rather
-than run. The failure block is compared against what a real failing run
-prints. The branding block is compared against real stderr, and the two JSON
-blocks against what the package ships.
+Every code block on this page is checked, and the tag after its language says how.[^checked]
+
+[^checked]: `tests/vitest-consumer.test.ts` installs the built package in a temporary project and uses this page's two config blocks as its `vitest.config.ts`. It runs every test block there with a real Vitest. The rest are compared rather than run: the failure block against what a real failing run prints, the branding block against real stderr, and the two JSON blocks against what the package ships.
 
 ---
 
@@ -58,10 +54,10 @@ export default defineConfig({
 - `islands`: files named `*.island.test.*` or `*.island.spec.*`, and files
   under `test/islands/` or `tests/islands/`, run in a project of their own.
   It has a DOM (`happy-dom` unless `islands.environment` says otherwise). That project
-  inherits the rest of your config - aliases, setup files, plugins - which is
+  inherits the rest of your config (aliases, setup files, plugins), which is
   Vitest 5's default for projects. `false` turns it off.
 - The setup file is placed first in `setupFiles`, once, and yours are kept.
-- On a Vitest major this release does not know, one warning,
+- On a Vitest major this release does not know, it gives one warning,
   `test:unexpected:version`, never a failure.
 
 A run with the plugin opens with one line, in Vue's green and slate where the
@@ -418,7 +414,7 @@ it('registers only what you ask for', () => {
 });
 ```
 
-Needs Vitest 5 (`vitest >=5.0.0`, an optional peer dependency). The API
+It needs Vitest 5 (`vitest >=5.0.0`, an optional peer dependency). The API
 reference is [docs/api/vitest.md](../api/vitest.md),
 [docs/api/vitest-pure.md](../api/vitest-pure.md) and
 [docs/api/vite.md](../api/vite.md).

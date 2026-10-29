@@ -247,8 +247,8 @@ function buildHooks(
  * Return eight hooks as ENUMERABLE own keys, and `onMove`, `phase` and
  * `dispose` as NON-ENUMERABLE ones.
  *
- * This exists because of the usage this module documents and the README
- * repeats: `<Transition v-bind="t">`. `v-bind="obj"` spreads an object's own
+ * This exists because of the usage this module documents and the Manual chapter 5
+ * shows: `<Transition v-bind="hooks">`. `v-bind="obj"` spreads an object's own
  * ENUMERABLE keys into the component's props. Vue matches the eight enter and
  * leave hooks to `<Transition>`'s declared props and passes the rest through
  * as fallthrough ATTRIBUTES, which are stringified onto the transitioned

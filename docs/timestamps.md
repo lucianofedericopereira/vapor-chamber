@@ -1,9 +1,10 @@
 # Timestamps
 
-One rule: a timestamp that stays in the process is **epoch milliseconds**, a
-number (`Date.now()`). One that crosses a boundary (storage, a backend, a
-panel a person reads) is **RFC 3339 text in UTC**. That text names its own unit
-and zone (`2026-10-02T17:41:19.250Z`). Every timestamp the library produces:
+One rule. A timestamp that stays in the process is **epoch milliseconds**, a number
+(`Date.now()`). A timestamp that crosses a boundary (storage, a backend, a panel a person reads)
+is **RFC 3339 text in UTC**, which names its own unit and zone (`2026-10-02T17:41:19.250Z`).
+
+Every timestamp the library produces:
 
 | Where | Field | Form | Crosses a boundary? | Pinned by |
 |---|---|---|---|---|
@@ -14,11 +15,13 @@ and zone (`2026-10-02T17:41:19.250Z`). Every timestamp the library produces:
 | `vapor-chamber/devtools` | the inspector's `time` row | RFC 3339 text | yes: shown to a person | `tests/devtools.test.ts` |
 | `createOutbox()` | a record's `queuedAt` | RFC 3339 text | yes: storage, and a backend a custom storage syncs to | `tests/outbox.test.ts` |
 
-`meta.ts` is a wall clock, for correlation and audit, not for timing: it can
-move backwards when the system clock does. Time a span with
-`performance.now()` (see the field's own comment in `src/command-bus.ts`).
+`meta.ts` is a wall clock, for correlation and audit, not for timing. It moves backwards when
+the system clock does. Time a span with `performance.now()`.[^meta-ts]
 
-A **duration** is milliseconds, a number, wherever it appears (`retryIn`,
-`timeout`, `maxDelay`, a buffer's `ttl`). A backend's `Retry-After` header arrives
-as seconds or an HTTP-date (RFC 9110 5.6.7). The client reads it into
-`retryIn` (`tests/retry-after-grammar.test.ts`).
+[^meta-ts]: The field's own comment in `src/command-bus.ts` says the same.
+
+A **duration** is milliseconds, a number, wherever it appears: `retryIn`, `timeout`,
+`maxDelay`, a buffer's `ttl`. A backend's `Retry-After` header arrives as seconds or an
+HTTP-date (RFC 9110 5.6.7), and the client reads it into `retryIn`.[^retry-after]
+
+[^retry-after]: `tests/retry-after-grammar.test.ts`.

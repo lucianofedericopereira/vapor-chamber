@@ -133,10 +133,10 @@ describe('$reset goes back to state(), so state() is the reset target', () => {
 });
 
 describe('naming: a name with `$` is the library\'s', () => {
-  // The pattern README shows, with 'throw'.
+  // The pattern manual chapter 2, "Enforce a naming convention" shows, with 'throw'.
   const naming = { pattern: /^[a-z][a-zA-Z0-9]+$/, onViolation: 'throw' as const };
 
-  it('a store on a bus with the README naming rule creates and resets', () => {
+  it('a store on a bus with the manual chapter 2, "Enforce a naming convention" naming rule creates and resets', () => {
     const bus = createCommandBus({ naming });
     const store = useCounter(bus);
     store.set(5);
@@ -160,6 +160,6 @@ describe('naming: a name with `$` is the library\'s', () => {
 //
 // The name carries `$` so that no user action can collide with it: a store
 // with an action `reset` already owns `<id>Reset`. A naming rule such as the
-// README's camelCase pattern would reject `$`, so names containing `$` are
+// manual chapter 2, "Enforce a naming convention" camelCase pattern would reject `$`, so names containing `$` are
 // reserved for the library and skip the naming check (log s35.70). The check
 // runs only after the pattern has failed, so a name that passes pays nothing.

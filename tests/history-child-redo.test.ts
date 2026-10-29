@@ -209,7 +209,7 @@ describe.each(BUSES)('a declared handler child on the %s bus', (_name, make) => 
  * still applied: the child applied twice. The library does not infer a child from the
  * dispatch depth: the record rejected inferring a nested dispatch (whitepaper.md, "infer root
  * from derived dispatches") and decided the side that knows declares. The handler declares
- * with the documented `__causationId: cmd.meta.id` (README "meta"). The ledger reads it at
+ * with the documented `__causationId: cmd.meta.id` (manual chapter 2, "Read a command's metadata"). The ledger reads it at
  * press time: a member's declared child below it goes with the press; on redo it is not
  * dispatched, the parent's handler dispatches it again (origin redo, not recorded), and its
  * entry moves back once the parent lands. A child that declares nothing is its own step, as

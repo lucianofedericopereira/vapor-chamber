@@ -1,14 +1,16 @@
 # Contributing to vapor-chamber
 
-Thanks for considering a contribution.
+Thank you for considering a contribution.
 
 ---
 
 ## Setup
 
 You need:
-- Node.js 24, 24.5.0 or later (`engines.node` in [package.json](./package.json) is `^24.5.0`; CI tests no other major)
-- npm 11 (ships with Node 24)
+
+- Node.js 24, 24.5.0 or later. `engines.node` in [package.json](./package.json) is `^24.5.0`,
+  and CI tests no other major.
+- npm 11, which ships with Node 24.
 
 ```bash
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
@@ -18,8 +20,8 @@ npm run test:run    # default vitest project (`npm test` runs both projects)
 npm run build       # tsc + Vite library build + IIFE variants
 ```
 
-Lockfile drift from `npm install` is expected on a fresh clone. Commit the
-resulting `package-lock.json` with your PR.
+Lockfile drift from `npm install` is expected on a fresh clone. Commit the resulting
+`package-lock.json` with your pull request.
 
 ---
 
@@ -100,23 +102,23 @@ ROADMAP.md             RC tracking, version policy, feature matrix
 npm run gate           # all of the below, in order, on a committed tree
 ```
 
-That is the whole check, and it is the one to run. It runs eleven steps in the
-house order, one line of output each, and stops at the first failure with the
-step named. So under `git rebase --exec 'npm run gate'` a red line identifies
-both the commit and the step. It does two things the manual list below cannot.
-It REGENERATES `docs/api/`, `docs/errors.md`, `contract/`, the PHP contract
-fixture (`php/src/Contract/Fixture`) and `docs/BUNDLE-SIZES.md` and then fails
-on a diff, rather than trusting you to
-have run them. And it ends by asserting a clean tree. A chain that merely
-regenerates would repair the drift and report green, which launders the defect
-instead of catching it.
+That is the whole check, and it is the one to run. It runs eleven steps in the house order, one
+line of output each, and stops at the first failure with the step named. So under
+`git rebase --exec 'npm run gate'` a red line names both the commit and the step.
 
-It expects a COMMITTED tree, so running it with work in progress ends red at
-`clean tree` by design; the ten steps before it still report. `npm run gate |
-tail` masks the exit code, so a red gate reads as green - pipe to a file
-instead.
+It does two things the manual list below cannot:
 
-The steps individually, when you want to iterate on one of them:
+- It REGENERATES `docs/api/`, `docs/errors.md`, `contract/`, the PHP contract fixture
+  (`php/src/Contract/Fixture`) and `docs/BUNDLE-SIZES.md`, then fails on a diff, rather than
+  trusting you to have run them.
+- It ends by asserting a clean tree. A chain that merely regenerated would repair the drift and
+  report green, which launders the defect instead of catching it.
+
+It expects a COMMITTED tree, so a run with work in progress ends red at `clean tree` by design,
+and the ten steps before it still report. `npm run gate | tail` masks the exit code, so a red
+gate reads as green. Pipe to a file instead.
+
+The steps one by one, when you want to iterate on one of them:
 
 ```bash
 npm run typecheck      # tsc --noEmit
@@ -128,226 +130,223 @@ npm run lint:check     # biome + the prose guards (see below)
 npm run test:coverage  # 100% statements / branches / functions / lines
 ```
 
-All seven must pass, and the order is part of the gate. `npm run gate` runs them
-in exactly this order plus the drift and clean-tree steps. Deliberately NOT in
-that chain:
+All seven must pass, and the order is part of the gate. `npm run gate` runs them in exactly this
+order, plus the drift and clean-tree steps. Deliberately NOT in that chain:
 
 - `npm run bench`: one run, which only records its ratios.
-- `npm run bench:bands`: N runs, the one writer of the `vc:bench*` values. It
-  writes the median for this library's own ratios and the min-max band for a
-  ratio against a peer library. Run it from a clean committed checkout, never a
-  working tree.
-- `npm run check:example`: it drives three example builds and belongs to the
-  alignment cycle, not to every commit.
+- `npm run bench:bands`: N runs, the one writer of the `vc:bench*` values. It writes the median
+  for this library's own ratios, and the min-max band for a ratio against a peer library. Run it
+  from a clean committed checkout, never a working tree.
+- `npm run check:example`: it drives three example builds and belongs to the alignment cycle,
+  not to every commit.
 - `ab:vue`: it needs a second Vue installed.
 - `npm run test:browser`: it needs a Chromium install. CI runs it.
-- The suite runs the same on macOS and Linux (CI runs both), from a clone or
-  from an unpacked archive. Four cases read this repository's commits
-  (`tests/ab-ci.test.ts`, `tests/verify-contract-against.test.ts`); without
-  history they skip, by the rule in `tests/require-git.ts`. Of the scripts they
-  drive, only `scripts/ab/base-ok.sh` is also asserted against a throwaway
-  repository; from an archive `scripts/verify-contract.mjs --against` is
-  untested, and a clone or CI runs it. `git` itself must be installed.
+
+The suite runs the same on macOS and Linux (CI runs both), from a clone or from an unpacked
+archive. `git` itself must be installed.
+
+- Four cases read this repository's commits (`tests/ab-ci.test.ts`,
+  `tests/verify-contract-against.test.ts`). Without history they skip, by the rule in
+  `tests/require-git.ts`.
+- Of the scripts they drive, only `scripts/ab/base-ok.sh` is also asserted against a throwaway
+  repository. From an archive, `scripts/verify-contract.mjs --against` is untested, and a clone
+  or CI runs it.
 
 Three rules when you run the steps by hand:
 
-- **Build before the test runs.** The size, boundary and Vite-plugin guards read
-  `dist/` and fail at load when it is absent (`tests/require-dist.ts`). They used
-  to skip, and a skipped test cannot go red: CI's `test` job ran without a build
-  and read green. CI builds first now, as `prepublishOnly` and the gate do. One suite also reads a
-  file that only `tsc` emits (`dist/router/index.d.ts`).
-- **After any change under `src/`, comments included, run `npm run docs`** and
-  commit `docs/api/` with the change. The API reference carries source line
-  anchors, so a comment that moves a line moves them. Run `npm run size:doc` too
-  when a change can move a size row. Both must regenerate with no diff.
-- **After adding or removing tests, run `npm run docs:stamp` after
-  `test:coverage`.** The test-count markers publish only from a built run with
-  coverage on. The `stamp-docs --check` inside `lint:check` follows a plain
-  `test:run`, so it cannot see a stale count.
+- **Build before the test runs.** The size, boundary and Vite-plugin guards read `dist/` and fail
+  at load when it is absent (`tests/require-dist.ts`).[^build-first] One suite also reads a file
+  that only `tsc` emits (`dist/router/index.d.ts`).
+- **After any change under `src/`, comments included, run `npm run docs`**, and commit `docs/api/`
+  with the change. The API reference carries source line anchors, so a comment that moves a line
+  moves them. Run `npm run size:doc` too when a change can move a size row. Both must regenerate
+  with no diff.
+- **After adding or removing tests, run `npm run docs:stamp` after `test:coverage`.** The
+  test-count markers publish only from a built run with coverage on. The `stamp-docs --check`
+  inside `lint:check` follows a plain `test:run`, so it cannot see a stale count.
 
-`lint:check` runs more than biome. These guards check what the source *says*
-rather than what it does, which a test cannot:
+[^build-first]: They used to skip, and a skipped test cannot go red: CI's `test` job ran without a build and read green. CI builds first now, as `prepublishOnly` and the gate do.
+
+`lint:check` runs more than biome. These guards check what the source *says* rather than what it
+does, which a test cannot:
 
 - `check-env-guards`: no unguarded `process.env`.
-- `check-console-shape`: a value with structure is a console ARGUMENT, never a
-  substring of the message. It classifies by type rather than by a list of
-  names, and `--self-test` injects the violations into real modules to prove it
-  can still fail.
+- `check-console-shape`: a value with structure is a console ARGUMENT, never a substring of the
+  message. It classifies by type rather than by a list of names, and `--self-test` injects the
+  violations into real modules to prove it can still fail.
 - `check-line-citations`: no source-line numbers in test titles.
-- `check-doc-claims`: no docblock attached to nothing, and no documented
-  default whose value is absent from the file. No release status in a comment
-  either: that belongs in CHANGELOG.md.
-- `check-ascii`: plain ASCII in `src/`. Elsewhere it rejects typographic and
-  invisible characters.
-- `stamp-docs --check`: fails on a stale generated number, or on a pinned range
-  no version satisfies or that starts above the current version.
+- `check-doc-claims`: no docblock attached to nothing, and no documented default whose value is
+  absent from the file. No release status in a comment either: that belongs in CHANGELOG.md.
+- `check-ascii`: plain ASCII in `src/`. Elsewhere it rejects typographic and invisible
+  characters.
+- `stamp-docs --check`: fails on a stale generated number, or on a pinned range no version
+  satisfies or that starts above the current version.
 
-Every CI job runs on Node 24, the only major the package supports
-(.github/workflows/ci.yml). One Linux job, `check`, runs once: typecheck, the guards
-(`lint:check`), the generated docs diff, the suite under coverage (so the
-floors gate a pull request), the Vapor project, the size budgets and the LOC
-report, with the build coming from `prepare` at install. That is not the local
-gate: the gate runs its steps in another order and adds the `docs/BUNDLE-SIZES.md`
-diff and the clean-tree assertion, which CI does not run. The example builds, the browser suite and the perf A/B are their
-own jobs because each needs a different install or budget. The suite is the
-same under coverage: the timing loops run only with `VC_TIMING=1`
-(tests/under-coverage.ts). macOS runs the build, both test projects and the
-size budgets once `check` is green, so a Linux failure costs no macOS minutes.
-A push that changes only files no check reads (`paths-ignore` in ci.yml: the
-funding file, the issue and PR templates) runs no CI.
+**CI.** Every job runs on Node 24, the only major the package supports
+(`.github/workflows/ci.yml`).
 
-`test:run` is not the whole suite. `tests/vapor/**` runs only under
-`vitest.vapor.config.ts`, which aliases `vue` to a build that includes Vapor
-(its header says why). The router/vapor outlet's acceptance guards live there. `npm test` runs both projects back to back.
-Run `test:vapor` after `build`, since its size guard measures a real production
-bundle.
+- One Linux job, `check`, runs once: typecheck, the guards (`lint:check`), the generated docs
+  diff, the suite under coverage (so the floors gate a pull request), the Vapor project, the size
+  budgets and the LOC report. The build comes from `prepare` at install.
+- That is not the local gate. The gate runs its steps in another order, and adds the
+  `docs/BUNDLE-SIZES.md` diff and the clean-tree assertion, which CI does not run.
+- The example builds, the browser suite and the perf A/B are their own jobs, because each needs a
+  different install or budget.
+- The suite is the same under coverage: the timing loops run only with `VC_TIMING=1`
+  (`tests/under-coverage.ts`).
+- macOS runs the build, both test projects and the size budgets once `check` is green, so a Linux
+  failure costs no macOS minutes.
+- A push that changes only files no check reads (`paths-ignore` in ci.yml: the funding file, the
+  issue and PR templates) runs no CI.
 
-The `examples/` workspaces sit outside that gate. They build against the
-working tree on demand. `examples/exo-astro` pins the same Node 24 line as the
-library. It has no directive scanner of its own (it uses the library's page
-bindings, which the suite covers), so `npm test` from the root does not exercise
-that example's code.
+`test:run` is not the whole suite. `tests/vapor/**` runs only under `vitest.vapor.config.ts`,
+which aliases `vue` to a build that includes Vapor (its header says why). The router/vapor
+outlet's acceptance guards live there. `npm test` runs both projects back to back. Run
+`test:vapor` after `build`, since its size guard measures a real production bundle.
+
+The `examples/` workspaces sit outside that gate. They build against the working tree on demand.
+`examples/exo-astro` pins the same Node 24 line as the library. It has no directive scanner of its
+own (it uses the library's page bindings, which the suite covers), so `npm test` from the root
+does not exercise that example's code.
 
 ### Performance work
 
-If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`),
-read [docs/V8-RULES.md](./docs/V8-RULES.md) first. It holds the shape,
-allocation and measuring rules this project has already settled, each with its
-evidence. [docs/TESTING_PROCEDURE.md](./docs/TESTING_PROCEDURE.md) gives the
-steps of a measurement, from the shapes apps use to the log section.
+If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`), read
+[docs/V8-RULES.md](./docs/V8-RULES.md) first. It holds the shape, allocation and measuring rules
+this project has already settled, each with its evidence.
+[docs/TESTING_PROCEDURE.md](./docs/TESTING_PROCEDURE.md) gives the steps of a measurement, from
+the shapes apps use to the log section.
 
-1. Build the base and your change (`npm run ab:dists`), then run `npm run ab`
-   on a workload in `scripts/ab/workloads/` that runs the changed path
-   (V8-RULES rule 16). CI's `perf-ab` job runs the same comparison on every
-   pull request and fails on a counted "slower".
-2. Report each row's verdict and its ns in the PR description.
-3. **Keep a "performance" change only if a path that runs it reads faster and
-   none reads slower.**
-4. For a new hot path, add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts)
-   too, so `npm run bench:bands` stamps its ratio.
+1. Build the base and your change (`npm run ab:dists`), then run `npm run ab` on a workload in
+   `scripts/ab/workloads/` that runs the changed path (V8-RULES rule 16). CI's `perf-ab` job runs
+   the same comparison on every pull request and fails on a counted "slower".
+2. Report each row's verdict and its ns in the pull request description.
+3. **Keep a "performance" change only if a path that runs it reads faster and none reads
+   slower.**
+4. For a new hot path, add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts) too, so
+   `npm run bench:bands` stamps its ratio.
 
 If your change might shift bundle size:
 
 1. Run `npm run build` and note the printed sizes.
-2. If the size budget guard (`npm run size:check`) fails and the increase is
-   intentional, update `BUDGETS` in [scripts/check-size.mjs](./scripts/check-size.mjs)
-   and explain why in the PR description.
+2. If the size budget guard (`npm run size:check`) fails and the increase is intentional, update
+   `BUDGETS` in [scripts/check-size.mjs](./scripts/check-size.mjs) and explain why in the pull
+   request description.
 
 ### Code style
 
-- Biome handles linting. Run `npm run lint` to auto-fix. CI runs `lint:check`.
-- TypeScript strict mode is on. No `any` leaks at the public API boundary. Internal `any` is fine where the alternative is verbose generics.
-- Comments are sparse by design - write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
-- Plain ASCII in `src/`, emoji included: `check-ascii` rejects anything above U+007F there, outside `src/glyphs.ts`. Everywhere else (tests, scripts, docs, examples, root files) it rejects dashes, curly quotes, the ellipsis, the times sign, arrows and invisible characters. Emoji and box drawing pass there.
-- Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`). Cross-cutting concerns get their own file.
+- Biome handles linting. `npm run lint` fixes what it can, and CI runs `lint:check`.
+- TypeScript strict mode is on. No `any` leaks at the public API boundary. An internal `any` is
+  fine where the alternative is verbose generics.
+- Comments are sparse by design. Write one when the *why* is not obvious: a hidden constraint, an
+  invariant, a workaround for a specific bug. Do not paraphrase the code.
+- Plain ASCII in `src/`, emoji included: `check-ascii` rejects anything above U+007F there,
+  outside `src/glyphs.ts`. Everywhere else (tests, scripts, docs, examples, root files) it rejects
+  dashes, curly quotes, the ellipsis, the times sign, arrows and invisible characters. Emoji and
+  box drawing pass there.
+- Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`).
+  Cross-cutting concerns get their own file.
 
 ### How a change is judged
 
 The owner's rules, in the order they decide:
 
-0. **Correctness and performance decide. Results talk.** A claim becomes a
-   decision when it is measured or tested, not when it is argued.
-1. **A decision stands on its reason, not its outcome.** A shape can be
-   rejected for a borrowed reason ("the standard says so") and accepted for
-   one that belongs to this codebase (size, speed, one shape, less drift).
-   `docs/decisions.md` records the reason that belongs here.
-2. **Core changes are blocked first.** A change to the core passes when the
-   core is plainly wrong, a plugin cannot do it, or the plugin version is
-   measurably slower. A better shape that keeps performance is always open to
-   discussion.
-3. **Size is a discipline, not a number to argue away.** It forces a rethink:
-   one helper instead of N call sites. Never push work out to call sites to
-   keep a module small. The core may grow when it takes over work plugins and
-   apps each repeat by hand. Report deltas on the core ESM and on a tree-shaken
-   ESM consumer. The IIFE builds never decide a design.
-4. **The library's own pieces before hand-rolled code**, in the library, in
-   plugins and in consumers.
-5. **Standards at the boundary.** Where a standard defines a shape between two
-   parties, use it. A standard governs a boundary, not the internals.
+0. **Correctness and performance decide. Results talk.** A claim becomes a decision when it is
+   measured or tested, not when it is argued.
+1. **A decision stands on its reason, not its outcome.** A shape can be rejected for a borrowed
+   reason ("the standard says so") and accepted for one that belongs to this codebase (size,
+   speed, one shape, less drift). `docs/decisions.md` records the reason that belongs here.
+2. **Core changes are blocked first.** A change to the core passes when the core is plainly
+   wrong, a plugin cannot do it, or the plugin version is measurably slower. A better shape that
+   keeps performance is always open to discussion.
+3. **Size is a discipline, not a number to argue away.** It forces a rethink: one helper instead
+   of N call sites. Never push work out to call sites to keep a module small. The core may grow
+   when it takes over work plugins and apps each repeat by hand. Report deltas on the core ESM
+   and on a tree-shaken ESM consumer. The IIFE builds never decide a design.
+4. **The library's own pieces before hand-rolled code**, in the library, in plugins and in
+   consumers.
+5. **Standards at the boundary.** Where a standard defines a shape between two parties, use it. A
+   standard governs a boundary, not the internals.
 6. **An integrated list is an outcome, never something to maintain.**
-7. **Allow both paths** where two resolutions can share one contract, held
-   together by a test that proves they agree.
-8. **Pick the better option** and say why. "Not worth it" needs its own
-   evidence.
+7. **Allow both paths** where two resolutions can share one contract, held together by a test
+   that proves they agree.
+8. **Pick the better option**, and say why. "Not worth it" needs its own evidence.
 9. **Accessibility is designed in, not audited after**
    ([docs/accessibility.md](docs/accessibility.md)).
-10. **The front reads by contract, never guesses**
-    ([docs/contract.md](docs/contract.md)).
+10. **The front reads by contract, never guesses** ([docs/contract.md](docs/contract.md)).
 
 ### Module discipline
 
-Rules that apply across modules, each one written down because it was learned
-the expensive way:
+Rules that apply across modules, each written down because it was learned the expensive way:
 
 - **A subpath is named for what it costs.** It gets its own measured row in
-  `docs/BUNDLE-SIZES.md` and a boundary fixture in the `vdom-boundary.test.ts`
-  shape. A subpath that imports nothing the core lacks isolates nothing and
-  should not exist. Minting one also adds a build entry, which re-chunks shared
-  code and has moved an unrelated size guard.
-- **Cleanup is `onScopeDispose` only**, gated on `hasInjectionContext()` where a
-  gate is needed. `getCurrentInstance()` returns null in Vapor by design, and
-  upstream has confirmed that is permanent, so never branch on it. The one
-  exception is `tryKeepAliveHooks`: it falls back to `getCurrentInstance()`
-  only for a partially-supplied Vue namespace without `hasInjectionContext()`.
-- **Errors are coded taxonomies per module**, and tests switch on `code`, never
-  on message text.
-- **Performance claims are interleaved A/B on the real path**, with derived
-  baselines and a control row. No committed bench, no claim in the docs. An
-  isolated loop is not evidence - a loop-invariant read gets hoisted and the
-  number is garbage.
-- **External strings are never keys on `{}`** (`src/dict.ts`): store ids, state
-  keys, command patterns and query params all read through `Object.hasOwn`. This
-  class has been found at six sites so far.
-- **A number a human retypes is a number that drifts.** Anything a run can
-  compute belongs to a `vc:` marker fed by `scripts/stamp-docs.mjs`, not to
-  prose. `CHANGELOG.md` is the deliberate exception: it is history, and its
-  numbers must stay frozen at what was true for that release. A doc that
-  quotes an earlier release pins its marker to an npm range, as
-  `vc:sizeCore@1.30`: it is stamped only while package.json's version satisfies
-  the range, then frozen.
+  `docs/BUNDLE-SIZES.md` and a boundary fixture in the `vdom-boundary.test.ts` shape. A subpath
+  that imports nothing the core lacks isolates nothing and should not exist. Minting one also adds
+  a build entry, which re-chunks shared code and has moved an unrelated size guard.
+- **Cleanup is `onScopeDispose` only**, gated on `hasInjectionContext()` where a gate is needed.
+  `getCurrentInstance()` returns null in Vapor by design, and upstream has confirmed that is
+  permanent, so never branch on it. The one exception is `tryKeepAliveHooks`: it falls back to
+  `getCurrentInstance()` only for a partially supplied Vue namespace without
+  `hasInjectionContext()`.
+- **Errors are coded taxonomies per module**, and tests switch on `code`, never on message text.
+- **Performance claims are interleaved A/B on the real path**, with derived baselines and a
+  control row. No committed bench, no claim in the docs. An isolated loop is not evidence: a
+  loop-invariant read gets hoisted, and the number is garbage.
+- **External strings are never keys on `{}`** (`src/dict.ts`). Store ids, state keys, command
+  patterns and query params all read through `Object.hasOwn`.[^six-sites]
+- **A number a human retypes is a number that drifts.** Anything a run can compute belongs to a
+  `vc:` marker fed by `scripts/stamp-docs.mjs`, not to prose.
+  - `CHANGELOG.md` is the deliberate exception. It is history, and its numbers stay frozen at what
+    was true for that release.
+  - A doc that quotes an earlier release pins its marker to an npm range, as `vc:sizeCore@1.30`.
+    It is stamped only while package.json's version satisfies the range, then frozen.
+
+[^six-sites]: This class has been found at six sites so far.
 
 ---
 
 ## Releasing (maintainer-only)
 
-1. Update [CHANGELOG.md](./CHANGELOG.md) with a new section for the release.
-   Check the Laravel side against the wire contract: build the demo with
-   `examples/laravel-app/setup.sh`, serve it, and run
-   `node scripts/verify-contract.mjs --base http://127.0.0.1:8000`
-   ([`pact-verifier`](https://github.com/pact-foundation/pact-reference/releases)
-   on the `PATH`). Every case must pass. Then replay the last release's
-   contract against the same demo:
-   `node scripts/verify-contract.mjs --base http://127.0.0.1:8000 --against v<last release>`.
-   A case that fails there is a change an app sees: it needs its CHANGELOG
-   line, or the backend is wrong. A release with no `contract/` (before
-   1.32) has nothing to check.
+1. Update [CHANGELOG.md](./CHANGELOG.md) with a new section for the release. Then check the
+   Laravel side against the wire contract:
+   - Build the demo with `examples/laravel-app/setup.sh`, serve it, and run
+     `node scripts/verify-contract.mjs --base http://127.0.0.1:8000`, with
+     [`pact-verifier`](https://github.com/pact-foundation/pact-reference/releases) on the
+     `PATH`. Every case must pass.
+   - Replay the last release's contract against the same demo:
+     `node scripts/verify-contract.mjs --base http://127.0.0.1:8000 --against v<last release>`.
+     A case that fails there is a change an app sees: it needs its CHANGELOG line, or the backend
+     is wrong. A release with no `contract/` (before 1.32) has nothing to check.
 2. Bump `version` in [package.json](./package.json).
 3. Commit: `release: vX.Y.Z`.
 4. Tag: `git tag vX.Y.Z && git push --tags`.
-5. `npm publish`. The `prepublishOnly` script runs the seven gates of "Before opening a PR"
-   in that order (build before either test project, coverage last). All must pass.
+5. `npm publish`. The `prepublishOnly` script runs the seven gates of "Before opening a PR" in
+   that order (build before either test project, coverage last). All must pass.
 6. GitHub release notes copy the CHANGELOG section verbatim.
 
-A breaking change to a surface documented as stable needs a major. Before Vue 3.6 stable, experimental surfaces take breaking changes in minors (ROADMAP, "Version policy before 3.6 stable"). Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0 (see [ROADMAP.md](./ROADMAP.md)). The ESM main entry follows strict semver.
+A breaking change to a surface documented as stable needs a major. Before Vue 3.6 stable,
+experimental surfaces take breaking changes in minors (ROADMAP, "Version policy before 3.6
+stable"). The *contents* of the IIFE variants are not under semver before v2.0 (see
+[ROADMAP.md](./ROADMAP.md)). The ESM main entry follows strict semver.
 
 ---
 
 ## Reporting bugs
 
-- A reproduction as a minimal failing test in `tests/`. A PR that adds the failing test, even without a fix, is a useful contribution by itself.
-- Vue version, Node version, OS, and which IIFE variant (if applicable).
-- Browser if the issue is browser-specific.
+- A reproduction as a minimal failing test in `tests/`. A pull request that adds the failing test,
+  even without a fix, is a useful contribution by itself.
+- The Vue version, Node version, OS, and which IIFE variant, if any.
+- The browser, if the issue is browser-specific.
 
-For security issues, see [SECURITY.md](./SECURITY.md) - do not open a public
-issue.
+For a security issue, see [SECURITY.md](./SECURITY.md), and do not open a public issue.
 
 ---
 
 ## Areas where contributions are welcome
 
-See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items where help is appreciated:
+See [ROADMAP.md](./ROADMAP.md) for the plan. Near-term items where help is welcome:
 
-- Comparative benchmarks vs RxJS Subject, Pinia.
+- Comparative benchmarks against RxJS Subject and Pinia.
 - Real-world integration examples in `examples/` (Rails, Django).
 - An embeddable-widget example for the `elements` IIFE variant.
 - A migration guide from Vuex.
@@ -356,4 +355,5 @@ See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items 
 
 ## License
 
-By contributing you agree your contributions will be licensed under the LGPL-2.1 license used by the rest of the project. See [LICENSE](./LICENSE).
+By contributing, you agree that your contributions are licensed under the LGPL-2.1 license used by
+the rest of the project. See [LICENSE](./LICENSE).

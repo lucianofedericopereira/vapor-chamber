@@ -2,11 +2,7 @@
  * What does `vue`'s BUNDLER entry actually export, and does the exports map
  * carry a vapor condition?
  *
- * WHY THIS IS A FIXTURE AND NOT A PARAGRAPH. ROADMAP.md's "Thin Vapor wrappers"
- * section turns on this question - it is the stated **reopen condition** for the
- * withdrawn `vue36` build flavor - and the section instructs each cycle to
- * settle it "by enumerating the module's real exports, not by grepping for the
- * name: a substring hit in that file is not an export."
+ * WHY THIS IS A FIXTURE AND NOT A PARAGRAPH. ROADMAP.md's "ROADMAP.md appendix B, "the static-import argument, and how it was corrected". The section body keeps two facts"
  *
  * It was then answered, for two cycles, by hand-quoting the entry's named-export
  * line into the roadmap. That quote omitted the `export * from

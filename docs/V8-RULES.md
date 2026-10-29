@@ -1,337 +1,249 @@
 # V8 rules
 
-What this library has settled about V8, for anyone changing a hot path or
-measuring one. A rule is here only with evidence in this repository: a test, a
-measured A/B, or a recorded log section, named at the rule. What V8's design
-suggests but nothing here has measured yet is under "Open" at the end, and
-becomes a rule when it is measured. The full record, with the numbers, is
-[performance.md](./performance.md). The steps of a measurement are in
-[TESTING_PROCEDURE.md](./TESTING_PROCEDURE.md).
+What this library has settled about V8, for anyone who changes a hot path or measures one. A
+rule is here only with evidence in this repository: a test, a measured A/B or a recorded log
+section, named in the rule's footnote. What V8's design suggests, but nothing here has measured
+yet, is under "Open" at the end. It becomes a rule when it is measured.
+
+- The full record, with the numbers: [performance.md](./performance.md).
+- The steps of a measurement: [TESTING_PROCEDURE.md](./TESTING_PROCEDURE.md).
 
 ## Writing code
 
-1. **One hidden class per read-many object.** `Command`, `CommandResult`,
-   `CommandMeta` and the bus state are each built by one literal or one
-   factory, same fields, same order. So every reader's inline cache stays
-   monomorphic. A result is always `okResult` / `errResult`
-   (`{ ok, value, error }`, the unused slot `undefined`), never a hand-built
-   literal.
-   (`tests/v8-shapes.test.ts` compares maps with `%HaveSameMap` and fails on a
-   hand-built result literal in `src/`. [performance.md, "Hot-path shape consistency"](./performance.md#hot-path-shape-consistency))
-2. **No late field writes on a read-many object.** All fields go in the
-   literal that creates it. A field added later is a map transition. Measured
-   on `meta.idempotencyKey` (written by `idempotent` and the retry runner): the
-   two maps differ (`%HaveSameMap` false). The cost was first inside the
-   control band (log s35.44). Log s35.81 then put the slot in every meta
-   literal (`idempotencyKey: undefined`), one map for every command
-   (`tests/v8-shapes.test.ts`). A call inside the literal is a late write
-   too: the object is allocated before the call runs. Inside a try region,
-   the call's exception edge then sees the object half built, and escape
-   analysis keeps an object nothing reads. Measured 2026-10-06, v1.27, Node
-   24.21.0 (log s35.204). Sync dispatch built
-   `{ ..., meta: stampMeta(payload) }` inside the depth's try/finally, and
-   every bare dispatch kept a dead meta.
-   Built before the try, the meta went: bare dispatch 0.62-0.71x (7-12 ns).
-   Move the build out of the try. A one-use `const` does not do it: the
-   bundler folds it back into the literal. The query took the same shape on
-   2026-10-24, Node 24.22.1, an Intel i7-8650U: a bare query 0.967-0.971x
-   (2.8-3.1 ns), its dispatch control 1.000 (log 36.F50).
-3. **Decide a mode once, not on every call.** Choose behaviour at factory or
-   build time and keep the branch off the hot path. The fast lane picks its
-   `removal` mode at factory time. Rule 3 is about a branch, not a field: a
-   `signal` slot in every command literal, `undefined` on the sync bus, read
-   no cost on a bare sync dispatch (0.999x, MDE 0.1%, log 36.F56), so both
-   buses build one command map (rule 1).
-   ([performance.md, "Two doorways"](./performance.md#two-doorways-general-bus-vs-fast-lane))
-4. **No closure per call on a hot path.** A closure that captures a call's
-   arguments is an allocation. V8 did not remove it in either case measured.
-   One was the composable dispatch thunk (removed: 0.915-0.934x, 2.7-3.9 ns).
-   The other was a filter's `patterns.some(p => matchesPattern(p, action))`
-   (removed: 0.979-0.986x, 4.6-6.6 ns, on a chain of four scoped plugins and a
-   listener). The plugin chain's `next` per level was kept for correctness, at
-   13.5% on "3 plugins + 1 listener" (v1.12.0); it went with the chain in 1.32
-   (log 36.108). A new one needs a measured reason like that.
-   (log s35.44, s35.53) A function handed to a builtin is never removed:
-   JSON.stringify calls its replacer from C++. `keyText` built its replacer
-   per call, with a context for the parameter it read. `keyTextFor` builds it
-   once per caller (`src/canonical.ts`, log 36.36).
-5. **Call the target directly, not through a generic helper.** A helper that
-   takes a function (`untracked(fn)`) and calls it at one site serves every
-   caller from that site. `runDispatch` calls `bus.dispatch` / `bus.query`
-   itself between the tracking slots. Passing the method and calling it with
-   `.call` gained nothing, for a reason not yet settled (see Open).
-   (log s35.44)
-6. **No `typeof` of an undefined global on a per-call path.** It found
-   nothing to cache: `warnUnwired`'s build-flag guard, checked on every
-   composable creation, cost creation 7-9%. Put a cheap module-variable test
-   first. Keep the `typeof` inside the condition whose block a define must
-   fold away. A module-level `const` copy of the flag broke the fold in a Vite
-   build (+609 B brotli on the vapor-sfc demo). (log s35.44)
-7. **Shape rules are for read-many paths.** A write-once, serialize-once
-   object (the HTTP envelope) stays idiomatic: making it shape-stable was
-   measured and gained nothing. ([decisions.md, 2026-10-13](./decisions.md))
-8. **No loop-syntax micro-optimizations.** Cached `length`, index loops
-   against `for...of`: TurboFan handles these, and the few index loops kept
-   are documented where they are. Rule 4 is not this: a callback that
-   captures per-call state is an allocation, not syntax. Nor is rule 19.
-   ([performance.md, "Philosophy"](./performance.md#philosophy))
+1. **One hidden class per read-many object.** `Command`, `CommandResult`, `CommandMeta` and the
+   bus state are each built by one literal or one factory, with the same fields in the same
+   order. So every reader's inline cache stays monomorphic. A result is always `okResult` /
+   `errResult` (`{ ok, value, error }`, the unused slot `undefined`), never a hand-built
+   literal.[^r1]
+2. **No late field writes on a read-many object.** All fields go in the literal that creates it.
+   A field added later is a map transition.[^r2-late] A call inside the literal is a late write
+   too, because the object is allocated before the call runs. Inside a try region, the call's
+   exception edge then sees the object half built, and escape analysis keeps an object nothing
+   reads. Build the object before the try. A one-use `const` does not do it: the bundler folds it
+   back into the literal.[^r2-try]
+3. **Decide a mode once, not on every call.** Choose behaviour at factory or build time, and keep
+   the branch off the hot path. The fast lane picks its `removal` mode at factory time. The rule
+   is about a branch, not a field: both buses build one command map (rule 1), with a `signal`
+   slot that is `undefined` on the sync bus.[^r3]
+4. **No closure per call on a hot path.** A closure that captures a call's arguments is an
+   allocation, and V8 removed it in neither case measured.[^r4] A new one needs a measured
+   reason. A function handed to a builtin is never removed, because `JSON.stringify` calls its
+   replacer from C++. So `keyTextFor` builds its replacer once per caller
+   (`src/canonical.ts`).[^r4-replacer]
+5. **Call the target directly, not through a generic helper.** A helper that takes a function
+   (`untracked(fn)`) and calls it at one site serves every caller from that site. `runDispatch`
+   calls `bus.dispatch` / `bus.query` itself between the tracking slots.[^r5]
+6. **No `typeof` of an undefined global on a per-call path.** It finds nothing to cache. Put a
+   cheap module-variable test first. Keep the `typeof` inside the condition whose block a define
+   must fold away: a module-level `const` copy of the flag breaks the fold.[^r6]
+7. **Shape rules are for read-many paths.** A write-once, serialize-once object (the HTTP
+   envelope) stays idiomatic.[^r7]
+8. **No loop-syntax micro-optimizations.** Cached `length` and index loops against `for...of`
+   are TurboFan's job, and the few index loops kept are documented where they are. Rule 4 is not
+   this: a callback that captures per-call state is an allocation, not syntax. Neither is
+   rule 19.[^r8]
 
-A rule added after rule 18 takes the next number, so a cited number never
-moves.
+[^r1]: `tests/v8-shapes.test.ts` compares maps with `%HaveSameMap` and fails on a hand-built result literal in `src/`. [performance.md, "Hot-path shape consistency"](./performance.md#hot-path-shape-consistency).
 
-19. **Test `typeof` where it is compared.** Write `typeof x === 'string'` at
-    each test, never one `typeof` kept in a variable and compared later. V8
-    compiles the first to an inline type check. The second calls its `Typeof`
-    builtin, unless the values seen were all numbers, all strings or all
-    functions. Measured 2026-10-14, Node 24.21.0, 10 processes: `commandKey`
-    over string and number targets read 0.765x, 1.1 ns per key (row
-    `key_primitives`, log 36.36). Over numbers only it read 0.999, as V8
-    speculates (row `primitive_cache`). `Number.isFinite` needs no such care:
-    TurboFan inlines it. (V8 13.6 as Node 24.21.0 ships it, under
-    https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/:
-    interpreter/bytecode-generator.cc 7415-7474,
-    compiler/bytecode-graph-builder.cc 3520-3570,
-    compiler/js-type-hint-lowering.cc 419-437,
-    maglev/maglev-graph-builder.cc 8000-8030,
-    compiler/turboshaft/graph-builder.cc 2055-2056,
-    compiler/js-call-reducer.cc 7841.)
+[^r2-late]: Measured on `meta.idempotencyKey`, written by `idempotent` and the retry runner: the two maps differ (`%HaveSameMap` false). The cost was first inside the control band (log s35.44). Log s35.81 then put the slot in every meta literal (`idempotencyKey: undefined`), one map for every command (`tests/v8-shapes.test.ts`).
 
-20. **No async frame, `.then` or thenable resolve on an async hot path
-    that does not need one.** Each is a promise and a microtask job per
-    call. An `async` function allocates its promise and resumes its frame.
-    `.then` allocates the promise it returns. An `async` function that
-    returns a promise resolves its own with a thenable, which queues two
-    jobs (ECMAScript 27.2.1.3.2). Run the work in a plain function and hand
-    off only when a value is a thenable. Measured 2026-10-24, Node 24.22.1,
-    an Intel i7-8650U, each against the commit before it: after-hooks in a
-    plain loop, an async dispatch with two hooks 0.894x (61 ns, log 36.F45).
-    The retry's success read with no `.then`, a local async operation 0.970x
-    (71 ns, log 36.F46). `_postJson` with no `async`, a sent command 0.951x
-    (203 ns, log 36.F48). A sync handler outside an async frame and a
-    composable with no `.then` on a bus that cannot reject leaned the same
-    way without counting (log 36.F47, 36.F49). The turn count of a call is
-    its test: each change has one that counts the microtask turns to settle
-    against a path with no such step.
+[^r2-try]: Measured 2026-10-06, v1.27, Node 24.21.0 (log s35.204). Sync dispatch built `{ ..., meta: stampMeta(payload) }` inside the depth's try/finally, and every bare dispatch kept a dead meta. Built before the try, the meta went: bare dispatch 0.62-0.71x (7-12 ns). The query took the same shape on 2026-10-24, Node 24.22.1, an Intel i7-8650U: a bare query 0.967-0.971x (2.8-3.1 ns), its dispatch control 1.000 (log 36.F50).
+
+[^r3]: The `signal` slot read no cost on a bare sync dispatch: 0.999x, MDE 0.1% (log 36.F56). [performance.md, "Two doorways"](./performance.md#two-doorways-general-bus-vs-fast-lane).
+
+[^r4]: The composable dispatch thunk, removed: 0.915-0.934x, 2.7-3.9 ns. A filter's `patterns.some(p => matchesPattern(p, action))`, removed: 0.979-0.986x, 4.6-6.6 ns, on a chain of four scoped plugins and a listener. The plugin chain's `next` per level was kept for correctness, at 13.5% on "3 plugins + 1 listener" (v1.12.0). It went with the chain in 1.32 (log 36.108). Log s35.44, s35.53.
+
+[^r4-replacer]: `keyText` built its replacer per call, with a context for the parameter it read (log 36.36).
+
+[^r5]: Passing the method and calling it with `.call` gained nothing, for a reason not yet settled (see Open). Log s35.44.
+
+[^r6]: `warnUnwired`'s build-flag guard, checked on every composable creation, cost creation 7-9%. The module-level `const` copy broke the fold in a Vite build: +609 B brotli on the vapor-sfc demo. Log s35.44.
+
+[^r7]: Making it shape-stable was measured and gained nothing ([decisions.md, 2026-10-13](./decisions.md)).
+
+[^r8]: [performance.md, "Philosophy"](./performance.md#philosophy).
+
+A rule added after rule 18 takes the next number, so a cited number never moves.
+
+19. **Test `typeof` where it is compared.** Write `typeof x === 'string'` at each test, never
+    one `typeof` kept in a variable and compared later. V8 compiles the first to an inline type
+    check. The second calls its `Typeof` builtin, unless the values seen were all numbers, all
+    strings or all functions. `Number.isFinite` needs no such care: TurboFan inlines it.[^r19]
+20. **No async frame, `.then` or thenable resolve on an async hot path that does not need one.**
+    Each is a promise and a microtask job per call. An `async` function allocates its promise and
+    resumes its frame. `.then` allocates the promise it returns. An `async` function that returns
+    a promise resolves its own with a thenable, which queues two jobs (ECMAScript 27.2.1.3.2).
+    Run the work in a plain function, and hand off only when a value is a thenable. Each change
+    has a test that counts the microtask turns to settle, against a path with no such
+    step.[^r20]
+
+[^r19]: Measured 2026-10-14, Node 24.21.0, 10 processes: `commandKey` over string and number targets read 0.765x, 1.1 ns per key (row `key_primitives`, log 36.36). Over numbers only it read 0.999, as V8 speculates (row `primitive_cache`). Source: V8 13.6 as Node 24.21.0 ships it, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: interpreter/bytecode-generator.cc 7415-7474, compiler/bytecode-graph-builder.cc 3520-3570, compiler/js-type-hint-lowering.cc 419-437, maglev/maglev-graph-builder.cc 8000-8030, compiler/turboshaft/graph-builder.cc 2055-2056, compiler/js-call-reducer.cc 7841.
+
+[^r20]: Measured 2026-10-24, Node 24.22.1, an Intel i7-8650U, each against the commit before it. After-hooks in a plain loop: an async dispatch with two hooks 0.894x (61 ns, log 36.F45). The retry's success read with no `.then`: a local async operation 0.970x (71 ns, log 36.F46). `_postJson` with no `async`: a sent command 0.951x (203 ns, log 36.F48). A sync handler outside an async frame, and a composable with no `.then` on a bus that cannot reject, leaned the same way without counting (log 36.F47, 36.F49).
 
 ## Measuring
 
-9. **Measure the real path.** An isolated, deterministic loop is
-   constant-folded: V8 removes work with no observable effect and the ratio is
-   garbage. Run the change through the real dispatch path.
-   (`tests/signal-shallow-ab.test.ts`. [performance.md, "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36))
-10. **Interleave, and control the harness.** Alternate the two arms round by
-    round in one process and compare medians. Run the same build against
-    itself, in both load orders, and count only a difference beyond that
-    band. Two byte-identical copies once read up to 1.425x apart.
-    (`tests/clock-source-ab.test.ts`, `tests/vue-version-ab.test.ts`.
-    [performance.md, the note under "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36))
-11. **Use the real plugins' shape.** One function at every plugin keeps a
-    call site near-monomorphic and understates the cost. Measure with distinct
-    functions: the chain's boundary read 0.886-0.909x sync with distinct
-    plugins and about 1.00x with one (log 30.10). The bench's
-    `dispatch.sync.parts3` and `dispatch.async.parts3` rows install three
-    different parts.
-12. **A change only moves the paths that run it.** Diff the two arms and
-    attribute a movement only to a timed path that executes the changed code.
-    Each arm is its own copy of every function. So an edit elsewhere can move
-    an untouched loop a few percent, and the same-bundle control cannot show
-    it. The signature is a sign that flips between workloads on the same
-    untouched code. In one process per comparison, a change to `warnUnwired`
-    only read 0.93-0.98x on one workload and 1.05x on another. Replicated over
-    10 processes (rule 16) the same untouched path read 1.000. Which mechanism
-    moved it is a hypothesis (see Open). ([performance.md, "Reading an A/B"](./performance.md#reading-an-ab-what-a-change-can-and-cannot-move), log s35.44)
-13. **An isolated win is a lead. A mixed workload and the bench decide.**
-    One call site with one shape is monomorphic, and an app is not. Confirm on
-    a mixed workload: both callers of a shared helper, several actions, sync
-    and async bus, hits and misses. Then run `npm run bench` against the
-    previous version. The filter loop read no effect with one one-pattern
-    plugin (0.994), and 0.979-0.986x on four different plugins and a listener
-    (log s35.53). A mixed workload can also fail as an instrument, and then it
-    decides nothing. Both composables interleaved over a Vue graph spread its
-    own control up to 1.36x across processes. (`stampMeta` and `handleMissing`
-    in `src/command-bus.ts` record the same trap. Log s35.44)
-14. **Report the saving in ns, not only the ratio.** A change saves a time per
-    call, and the ratio depends on what surrounds it. The filter loop saved
-    about 12 ns per dispatch with five patterns alone (109-125 ns). That row is
-    a lead: its short-call control was too wide to count. In a four-plugin
-    chain with a listener it saved 4.6-6.6 ns (303-341 ns). (log s35.44,
-    s35.53)
-15. **A ratio between two libraries is a host fact.** The bench's in-run
-    peer ratios moved with no code change. The fast lane's fan-out against
-    mitt read 1.79-1.92 over 5 runs, where the docs stamped 2.33 from an
-    earlier run (log s35.56). A one-name micro-loop also flatters a peer keyed
-    by a plain object. It is ahead on one repeated name, and half our speed
-    over four varying names (log s35.57). Compare this library with itself,
-    version against version, on one host. Read a peer ratio as a band for that
-    host and Node version. The docs print it that way. `npm run bench:bands`
-    stamps a peer ratio as the min-max over N runs, with the Node and peer
-    versions, and an own ratio as the median (`tests/bench-ratios.test.ts`).
-    (log s35.44, s35.69)
-16. **The process is the unit of replication.** Both arms in one process share
-    one heap, one GC schedule and one tier-up timeline: a single draw, however
-    many rounds run. The method:
+9. **Measure the real path.** V8 constant-folds an isolated, deterministic loop: it removes work
+   with no observable effect, and the ratio is garbage. Run the change through the real dispatch
+   path.[^r9]
+10. **Interleave, and control the harness.** Alternate the two arms round by round in one
+    process and compare medians. Run the same build against itself, in both load orders, and
+    count only a difference beyond that band.[^r10]
+11. **Use the real plugins' shape.** One function at every plugin keeps a call site
+    near-monomorphic and understates the cost. Measure with distinct functions. The bench's
+    `dispatch.sync.parts3` and `dispatch.async.parts3` rows install three different
+    parts.[^r11]
+12. **A change only moves the paths that run it.** Diff the two arms, and attribute a movement
+    only to a timed path that executes the changed code. Each arm is its own copy of every
+    function, so an edit elsewhere can move an untouched loop a few percent, and the same-bundle
+    control cannot show it. The signature is a sign that flips between workloads on the same
+    untouched code.[^r12] Which mechanism moves it is a hypothesis (see Open).
+13. **An isolated win is a lead. A mixed workload and the bench decide.** One call site with one
+    shape is monomorphic, and an app is not. Confirm on a mixed workload: both callers of a
+    shared helper, several actions, sync and async bus, hits and misses. Then run `npm run bench`
+    against the previous version.[^r13] A mixed workload can also fail as an instrument, and then
+    it decides nothing.[^r13-fail]
+14. **Report the saving in ns, not only the ratio.** A change saves a time per call, and the
+    ratio depends on what surrounds it.[^r14]
+15. **A ratio between two libraries is a host fact.** The bench's in-run peer ratios move with no
+    code change, and a one-name micro-loop flatters a peer keyed by a plain object.[^r15] Compare
+    this library with itself, version against version, on one host. Read a peer ratio as a band
+    for that host and Node version, which is how the docs print it. `npm run bench:bands` stamps
+    a peer ratio as the min-max over N runs, with the Node and peer versions, and an own ratio as
+    the median (`tests/bench-ratios.test.ts`).
+16. **The process is the unit of replication.** Both arms in one process share one heap, one GC
+    schedule and one tier-up timeline: a single draw, however many rounds run. The method:
     - Measure over K processes (10), each with a random load order.
-    - Give each arm its own timing loop (`new Function`), so the harness call
-      site never sees both arms.
-    - Fix the young generation, and run a minor gc before every timed call
-      (rule 18).
-    - Summarize each arm by its 20th percentile over 40 rounds. Take the
-      median log-ratio across processes, its bootstrap 95% interval and an
-      exact sign-flip test.
-    - Take the minimum detectable effect (MDE) from the A/A control's robust
-      spread (1.4826 x MAD).
-    - Pin n per function from a WARM call, never under the extra flags, so one
-      n serves every flag set. A claim holds at two call lengths (n and 4n) or
-      names its n.
+    - Give each arm its own timing loop (`new Function`), so the harness call site never sees
+      both arms.
+    - Fix the young generation, and run a minor gc before every timed call (rule 18).
+    - Summarize each arm by its 20th percentile over 40 rounds. Take the median log-ratio across
+      processes, its bootstrap 95% interval and an exact sign-flip test.
+    - Take the minimum detectable effect (MDE) from the A/A control's robust spread
+      (1.4826 x MAD).
+    - Pin n per function from a WARM call, never under the extra flags, so one n serves every
+      flag set. A claim holds at two call lengths (n and 4n), or names its n.
 
     Count a function only when all of these hold:
-    - its own control is within 3% (2 x spread) AND centred within 1.5% of 1.
-      A 0.953 control with a 1.3% spread passed a spread-only gate (log
-      s35.48).
-    - wall minus main-thread CPU at the 20th percentile round is under 1%
-      (descheduling).
-    - the interval excludes 1, the effect beats the MDE, and both load orders
-      agree.
+    - its own control is within 3% (2 x spread) AND centred within 1.5% of 1.[^r16-centred]
+    - wall minus main-thread CPU at the 20th percentile round is under 1% (descheduling).
+    - the interval excludes 1, the effect beats the MDE, and both load orders agree.
 
-    Report ns beside the ratio. Measured: controls of 0.2-1.4% on dispatch
-    paths, and the single-process 1.05x of rule 12 gone (1.000). Wider
-    controls stay wide (creation 2.7-4.0% with the minor gc), and the gate then
-    says "no result". The tool is `npm run ab -- <distA> <distB> <workload>`
-    (`scripts/ab/`, its gates pinned by `tests/ab-tool.test.ts`, each seeded
-    red). The arms come from `npm run ab:dists`, and the workloads live in
-    `scripts/ab/workloads/`. CI runs it on every push to main and every pull
-    request against it, base against head (`perf-ab`, `npm run ab:ci`). With
-    no base commit to build, it skips with a notice. A counted "slower" fails the
-    build, and so does a run in which no control passed. (log s35.44, s35.48,
-    s35.50, s35.59)
-17. **Measure a session, not a moment, on a shared Mac.** `npm run ab:session`
-    demotes the user's other busy processes to background QoS for the session
-    (`taskpolicy -b -p`, undone with `-B`). That keeps them on the efficiency
-    cores while their work goes on. It never demotes the measuring shell's
-    ancestry, whose children would inherit it. Keep the machine awake
-    (`caffeinate -i`), on AC power. The machine need not be quiet: no load
-    ceiling refuses a session, and each row judges its own validity (rule 16's
-    gates). Under the user's normal work (load 3.3, Time Machine running) the
-    controls read 0.3-0.7%, and D2 0.855 against 0.864 measured quieter (log
-    s35.49). A load that saturates every core is untested. A root process
-    (Time Machine's `backupd`) cannot be demoted. And the owner says "go": a
-    measurement does not start on this side's initiative. (log s35.44, s35.49,
-    decisions 2026-10-01)
-18. **A minor gc before a timed call, never a full one.** A full `gc()`
-    evicts the timing loop's OSR code. So every timed call recompiled it (a
-    Maglev OSR, 0.7 ms, then a TurboFan OSR, 1.5 ms, on the compiler threads).
-    Its first part ran in lower tiers, on dispatch as on creation
-    (`--trace-osr`). That compile and the sweeping after the collection were
-    nearly all the background CPU. `gc({ type: 'minor' })` (a scavenge, Node
-    24) leaves the code alone: no compile, no deopt, other-thread CPU about 0.
-    It removed the flag dependence (D2 0.864 default, 0.876
-    `--single-threaded-gc`, against 0.859 / 0.925 with the full gc). It kept
-    the ratio flat over call length (0.864-0.878 at 10k-80k iterations).
-    (log s35.48)
+    Report ns beside the ratio. Wider controls stay wide, and the gate then says "no
+    result".[^r16-measured]
+
+    - The tool is `npm run ab -- <distA> <distB> <workload>` (`scripts/ab/`, its gates pinned by
+      `tests/ab-tool.test.ts`, each seeded red).
+    - The arms come from `npm run ab:dists`, and the workloads live in `scripts/ab/workloads/`.
+    - CI runs it on every push to main and every pull request against it, base against head
+      (`perf-ab`, `npm run ab:ci`). With no base commit to build, it skips with a notice.
+    - A counted "slower" fails the build, and so does a run in which no control passed.
+17. **Measure a session, not a moment, on a shared Mac.** `npm run ab:session` demotes the user's
+    other busy processes to background QoS for the session (`taskpolicy -b -p`, undone with
+    `-B`). That keeps them on the efficiency cores while their work goes on. It never demotes the
+    measuring shell's ancestry, whose children would inherit it. Keep the machine awake
+    (`caffeinate -i`), on AC power.
+    - The machine need not be quiet. No load ceiling refuses a session, and each row judges its
+      own validity (rule 16's gates).[^r17-load]
+    - A load that saturates every core is untested.
+    - A root process (Time Machine's `backupd`) cannot be demoted.
+    - The owner says "go": a measurement does not start on this side's initiative.[^r17]
+18. **A minor gc before a timed call, never a full one.** A full `gc()` evicts the timing loop's
+    OSR code, so every timed call recompiles it. `gc({ type: 'minor' })` (a scavenge, Node 24)
+    leaves the code alone: no compile, no deopt, other-thread CPU about 0.[^r18]
+
+[^r9]: `tests/signal-shallow-ab.test.ts`. [performance.md, "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36).
+
+[^r10]: Two byte-identical copies once read up to 1.425x apart. `tests/clock-source-ab.test.ts`, `tests/vue-version-ab.test.ts`, and [performance.md, the note under "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36).
+
+[^r11]: The chain's boundary read 0.886-0.909x sync with distinct plugins, and about 1.00x with one (log 30.10).
+
+[^r12]: In one process per comparison, a change to `warnUnwired` only read 0.93-0.98x on one workload and 1.05x on another. Replicated over 10 processes (rule 16), the same untouched path read 1.000. [performance.md, "Reading an A/B"](./performance.md#reading-an-ab-what-a-change-can-and-cannot-move), log s35.44.
+
+[^r13]: The filter loop read no effect with one one-pattern plugin (0.994), and 0.979-0.986x on four different plugins and a listener (log s35.53).
+
+[^r13-fail]: Both composables interleaved over a Vue graph spread its own control up to 1.36x across processes. `stampMeta` and `handleMissing` in `src/command-bus.ts` record the same trap. Log s35.44.
+
+[^r14]: The filter loop saved about 12 ns per dispatch with five patterns alone (109-125 ns). That row is a lead: its short-call control was too wide to count. In a four-plugin chain with a listener it saved 4.6-6.6 ns (303-341 ns). Log s35.44, s35.53.
+
+[^r15]: The fast lane's fan-out against mitt read 1.79-1.92 over 5 runs, where the docs had stamped 2.33 from an earlier run (log s35.56). A peer keyed by a plain object is ahead on one repeated name, and half this library's speed over four varying names (log s35.57). Log s35.44, s35.69.
+
+[^r16-centred]: A 0.953 control with a 1.3% spread passed a spread-only gate (log s35.48).
+
+[^r16-measured]: Measured: controls of 0.2-1.4% on dispatch paths, and the single-process 1.05x of rule 12 gone (1.000). Creation controls stay at 2.7-4.0% with the minor gc. Log s35.44, s35.48, s35.50, s35.59.
+
+[^r17-load]: Under the user's normal work (load 3.3, Time Machine running) the controls read 0.3-0.7%, and D2 read 0.855 against 0.864 measured quieter (log s35.49).
+
+[^r17]: Log s35.44, s35.49, decisions 2026-10-01.
+
+[^r18]: The full gc forced a Maglev OSR (0.7 ms), then a TurboFan OSR (1.5 ms), on the compiler threads, and each call's first part ran in lower tiers, on dispatch as on creation (`--trace-osr`). That compile and the sweeping after the collection were nearly all the background CPU. The minor gc removed the flag dependence: D2 read 0.864 default and 0.876 `--single-threaded-gc`, against 0.859 / 0.925 with the full gc. It kept the ratio flat over call length: 0.864-0.878 at 10k-80k iterations. Log s35.48.
 
 ## Open: not yet settled
 
-From V8's design or an outside review, not measured here yet. Each becomes a
-rule when it is measured and recorded.
+From V8's design or an outside review, not measured here yet. Each becomes a rule when it is
+measured and recorded.
 
-- **CPU time beside wall time.** SETTLED for the tool (log s35.48). Wall
-  decides, and main-thread CPU is a validity gate (rule 16). Other-thread CPU
-  is printed as a diagnostic, and with the minor gc of rule 18 it is about 0.
-  The record that led there, kept: why they disagreed (log s35.45).
-  `process.cpuUsage()` counts every thread, and V8's GC and compiler threads
-  add CPU per timed call. On dispatch that is about 1.4 ms, equal in both
-  arms. On creation it is 2.5x the main thread's own CPU, and there it
-  differed by arm (360 / 323 ns per iteration, its A/A control 4%), not
-  settled. On dispatch that constant dilutes the process-CPU ratio toward 1.
-  On D2, (B + other) / (A + other) from the per-arm medians predicts the
-  measured CPU ratio within 0.002 under four flag sets. Main-thread CPU
-  (`process.threadCpuUsage()`) equals wall within 0.5% in every job, so
-  descheduling plays no part at the 20th percentile. The V-e creation gap
-  (0.969 / 0.997) has a CI that includes 1. An outside reading (log s35.47)
-  is that there the two clocks measure different things: the main thread's
-  work, and a recompile per call that the harness's forced `gc()` causes. That
-  reading is to verify. Still open: whether the harness should report CPU at
-  all, and in which form.
-- **`--single-threaded`.** Measured (log s35.45). It moves the background
-  work onto the main thread (creation 128 -> 442 ns per iteration) and makes
-  the three clocks agree exactly. It also changes the effect measured (D2
-  0.859 under default flags, 0.927 under it, n pinned). A browser runs V8's
-  background threads, so it is a diagnostic, not the measuring mode.
-- **Call length changes a ratio.** Settled as a harness effect (log s35.48).
-  D2's ratio moves with n only under `--single-threaded` with the full gc
-  (1.034 at 10k down to 0.928 at 40k). There the paired B - A fit gives the
-  Map arm a fixed +0.28 ms per call and -18 ns per iteration. Under default
-  flags it is flat (full gc 0.858-0.875, minor gc 0.864-0.878). What the
-  fixed cost is under `--single-threaded` (sweeping or compiling moved onto
-  the main thread) is not traced. Fit the PAIRED difference: absolute ns
-  drift 10-20% between runs, and a fit of them gave noise.
-- **Half of D2's gain needs background GC.** Withdrawn as a property of D2
-  (log s35.48): it was the forced full gc's. With a minor gc per call D2
-  reads 0.864 default and 0.876 `--single-threaded-gc` (that job's control
-  2.2% wide: a lead). With the full gc: 0.859 / 0.925 (log s35.45).
-- **D2's table young or old.** The `started` Map is old in a workload that
-  builds it at import (`%InYoungGeneration`, log s35.48). Whether a young
-  table changes D2 is not measured: the workload that rebuilt it per call
-  failed its own A/A control.
-- **Idle inside a session.** A 20 ms idle wait before each call slowed
-  dispatch and widened the controls in one session (log s35.45). It did
-  neither in another (log s35.48), so a busy spin in its place could not be
-  compared. The tool neither waits nor spins.
-- **Classify a gain.** One that disappears under `--no-opt --no-maglev` is an
-  optimizer gain (inlining, escape analysis), and fragile across Node majors.
-  One that survives is less work. `--trace-opt` and `--trace-turbo-inlining`
-  diffed per arm are the evidence for rule 12's mechanism and for why rule 5's
-  `.call` variant gained nothing.
-- **Bytecode size and inlining.** Inlining is budgeted in bytecode bytes, and
-  a hot function past the budget stops being inlined. To measure on
-  `runDispatch` and the runners before it becomes a rule. One measured case,
-  2026-10-06, v1.27, Node 24.21.0 (log s35.204). Item 2 shrank
-  `_syncDispatchInner` from 699 to 225 bytecode bytes, under the 460 budget.
-  It then inlined into its caller inside the depth's try/finally, and bare
-  dispatch read 5 ns slower. The cause was rule 2's half-built literal, not
-  the inlining. Inlining also helped: inside the caller the bus state `s` is
-  a constant (the closure's `const` slot). Its arrays, maps and lengths
-  fold, where the standalone function loads each. The handler's shape
-  decides a row. Where the handler inlines too, a dead Command and meta can
-  go. Where it is called, they stay either way. So one action through a site
-  read 2-3 ns slower after item 2, and two actions 3 ns faster (one process
-  each, leads). A bare workload is the first shape, an app with listeners
-  the second.
-- **Flags as the control for a mechanism.** A flag that turns one optimizer
-  decision off shows whether it is the cause, with no code change. On the case above (2026-10-06, v1.27):
-  `--max-inlined-bytecode-size=224` put b15293e back at 845a610's time, so
-  the inlining decision was the mechanism. `--no-turbo-escape` cost the
-  out-of-line arm more than the inlined one, so escape analysis was what the
-  out-of-line arm kept. Read the direction only, in one process.
-- **Seeing what V8 kept.** `--trace-turbo` writes Turbolizer JSON per
-  optimized function. It holds the allocations left after escape analysis,
-  and the merge (Phi) that makes one escape. `--print-opt-code
-  --code-comments` shows what a kept object costs: the bump allocation, the
-  field stores, the write barriers. That is how rule 2's dead meta was found
-  (log s35.204).
-- **A double field is a box.** `meta.ts` holds `Date.now()`, above the small
-  integer range. So every live meta carries a 16-byte HeapNumber beside its
-  own 88 bytes (2026-10-06, v1.27, read off the printed code). Its cost per
-  dispatch is not measured. Another representation would change a public
-  field.
-- **try/catch placement.** `tryCatchHandler` keeps a `try` in a small
-  function of its own ("so callers stay optimizable", `src/command-bus.ts`).
-  The cost of the other shape is not measured here.
-- **Build it the way a consumer does.** Measure a production build of the
-  built `dist/` (browser resolution, Vue's esm-bundler build, production
-  defines), not Node's CommonJS Vue and not a hand-edited `dist`. Used for
-  every A/B since the 1.26 evaluation, where the other harness read a false
-  1.2x. To be committed as a test and recorded.
-- **The replacer form of JSON.stringify.** Read 2026-10-14 in V8 13.6, as
-  Node 24.21.0 ships it. JSON.stringify calls a replacer from C++ once per
-  value, and allocates a holder object per call. `Object.create(null)` and a
-  `{ __proto__: null }` literal both get a dictionary map. JSON.stringify
-  serializes a dictionary-mode object on its slow path, which collects its
-  keys into a list and then looks each one up. V8's newer fast JSON.stringify
-  runs only with no replacer and no indent, behind a flag off by default in
-  13.6. `keyTextFor` pays each of these: a C++ call per value, a holder per
-  key and one `dict()` per object level. Not measured: the next lead for
-  `commandKey`'s object path. (Under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/:
-  json/json-stringifier.cc 547-551, 726-752, 950-954, 1317-1334, 1401-1429
-  and 3466-3470, builtins/builtins-object-gen.cc 1269-1276,
-  runtime/runtime-literals.cc 382-387, flags/flag-definitions.h 758.)
+- **CPU time beside wall time.** Settled for the tool (log s35.48): wall decides, and main-thread
+  CPU is a validity gate (rule 16). Other-thread CPU is printed as a diagnostic, and with the
+  minor gc of rule 18 it is about 0. Still open: whether the harness should report CPU at all,
+  and in which form.[^cpu]
+- **`--single-threaded`.** It moves the background work onto the main thread and makes the three
+  clocks agree exactly, but it changes the effect measured. A browser runs V8's background
+  threads, so it is a diagnostic, not the measuring mode.[^single]
+- **Call length changes a ratio.** Settled as a harness effect (log s35.48). D2's ratio moves
+  with n only under `--single-threaded` with the full gc. Under default flags it is flat. What
+  the fixed cost under `--single-threaded` is (sweeping or compiling moved onto the main thread)
+  is not traced.[^length]
+- **Half of D2's gain needs background GC.** Withdrawn as a property of D2 (log s35.48): it was
+  the forced full gc's.[^d2-gc]
+- **D2's table young or old.** The `started` Map is old in a workload that builds it at import
+  (`%InYoungGeneration`, log s35.48). Whether a young table changes D2 is not measured: the
+  workload that rebuilt it per call failed its own A/A control.
+- **Idle inside a session.** A 20 ms idle wait before each call slowed dispatch and widened the
+  controls in one session (log s35.45), and did neither in another (log s35.48). So a busy spin
+  in its place could not be compared. The tool neither waits nor spins.
+- **Classify a gain.** A gain that disappears under `--no-opt --no-maglev` is an optimizer gain
+  (inlining, escape analysis), fragile across Node majors. One that survives is less work.
+  `--trace-opt` and `--trace-turbo-inlining`, diffed per arm, are the evidence for rule 12's
+  mechanism and for why rule 5's `.call` variant gained nothing.
+- **Bytecode size and inlining.** Inlining is budgeted in bytecode bytes, and a hot function
+  past the budget stops being inlined. To measure on `runDispatch` and the runners before it
+  becomes a rule. One case is measured.[^inlining]
+- **Flags as the control for a mechanism.** A flag that turns one optimizer decision off shows
+  whether it is the cause, with no code change. Read the direction only, in one
+  process.[^flags]
+- **Seeing what V8 kept.** `--trace-turbo` writes Turbolizer JSON per optimized function. It
+  holds the allocations left after escape analysis, and the merge (Phi) that makes one escape.
+  `--print-opt-code --code-comments` shows what a kept object costs: the bump allocation, the
+  field stores, the write barriers. That is how rule 2's dead meta was found (log s35.204).
+- **A double field is a box.** `meta.ts` holds `Date.now()`, above the small integer range. So
+  every live meta carries a 16-byte HeapNumber beside its own 88 bytes.[^box] Its cost per
+  dispatch is not measured. Another representation would change a public field.
+- **try/catch placement.** `tryCatchHandler` keeps a `try` in a small function of its own ("so
+  callers stay optimizable", `src/command-bus.ts`). The cost of the other shape is not measured
+  here.
+- **Build it the way a consumer does.** Measure a production build of the built `dist/`
+  (browser resolution, Vue's esm-bundler build, production defines), not Node's CommonJS Vue and
+  not a hand-edited `dist`. To be committed as a test and recorded.[^consumer-build]
+- **The replacer form of JSON.stringify.** `JSON.stringify` calls a replacer from C++ once per
+  value and allocates a holder object per call. `keyTextFor` pays each of these: a C++ call per
+  value, a holder per key and one `dict()` per object level. Not measured: the next lead for
+  `commandKey`'s object path.[^json]
+
+[^consumer-build]: Every A/B has been built this way since the 1.26 evaluation, where a harness on Node's CommonJS Vue read a false 1.2x.
+
+[^cpu]: The record that led there (log s35.45). `process.cpuUsage()` counts every thread, and V8's GC and compiler threads add CPU per timed call. On dispatch that is about 1.4 ms, equal in both arms. On creation it is 2.5x the main thread's own CPU, and there it differed by arm (360 / 323 ns per iteration, its A/A control 4%), not settled. On dispatch that constant dilutes the process-CPU ratio toward 1. On D2, (B + other) / (A + other) from the per-arm medians predicts the measured CPU ratio within 0.002 under four flag sets. Main-thread CPU (`process.threadCpuUsage()`) equals wall within 0.5% in every job, so descheduling plays no part at the 20th percentile. The V-e creation gap (0.969 / 0.997) has a CI that includes 1. An outside reading (log s35.47) is that there the two clocks measure different things: the main thread's work, and a recompile per call that the harness's forced `gc()` causes. That reading is to verify.
+
+[^single]: Log s35.45. Creation went from 128 to 442 ns per iteration. D2 read 0.859 under default flags and 0.927 under it, n pinned.
+
+[^length]: D2 read 1.034 at 10k down to 0.928 at 40k under `--single-threaded` with the full gc. There the paired B - A fit gives the Map arm a fixed +0.28 ms per call and -18 ns per iteration. Under default flags: full gc 0.858-0.875, minor gc 0.864-0.878. Fit the PAIRED difference: absolute ns drift 10-20% between runs, and a fit of them gave noise.
+
+[^d2-gc]: With a minor gc per call D2 reads 0.864 default and 0.876 `--single-threaded-gc` (that job's control 2.2% wide: a lead). With the full gc: 0.859 / 0.925 (log s35.45).
+
+[^inlining]: 2026-10-06, v1.27, Node 24.21.0 (log s35.204). Item 2 shrank `_syncDispatchInner` from 699 to 225 bytecode bytes, under the 460 budget. It then inlined into its caller inside the depth's try/finally, and bare dispatch read 5 ns slower. The cause was rule 2's half-built literal, not the inlining. Inlining also helped: inside the caller the bus state `s` is a constant (the closure's `const` slot), so its arrays, maps and lengths fold, where the standalone function loads each. The handler's shape decides a row. Where the handler inlines too, a dead Command and meta can go. Where it is called, they stay either way. So one action through a site read 2-3 ns slower after item 2, and two actions 3 ns faster (one process each, leads). A bare workload is the first shape, an app with listeners the second.
+
+[^flags]: On the inlining case above (2026-10-06, v1.27): `--max-inlined-bytecode-size=224` put b15293e back at 845a610's time, so the inlining decision was the mechanism. `--no-turbo-escape` cost the out-of-line arm more than the inlined one, so escape analysis was what the out-of-line arm kept.
+
+[^box]: 2026-10-06, v1.27, read off the printed code.
+
+[^json]: Read 2026-10-14 in V8 13.6, as Node 24.21.0 ships it. `Object.create(null)` and a `{ __proto__: null }` literal both get a dictionary map. `JSON.stringify` serializes a dictionary-mode object on its slow path, which collects its keys into a list and then looks each one up. V8's newer fast `JSON.stringify` runs only with no replacer and no indent, behind a flag off by default in 13.6. Source, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: json/json-stringifier.cc 547-551, 726-752, 950-954, 1317-1334, 1401-1429 and 3466-3470, builtins/builtins-object-gen.cc 1269-1276, runtime/runtime-literals.cc 382-387, flags/flag-definitions.h 758.

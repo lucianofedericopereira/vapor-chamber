@@ -58,7 +58,7 @@ reached. A display bound before its store is a development warning
 
 ## Run
 
-Needs **Node 24.5.0 or later**, the library's floor. Astro 7.4's own floor,
+It needs **Node 24.5.0 or later**, the library's floor. Astro 7.4's own floor,
 22.23.4, is below it.
 
 ```bash
@@ -67,7 +67,7 @@ npm install
 npm run dev
 ```
 
-Astro's dev toolbar will report **"No islands detected"**. That is intended:
+Astro's dev toolbar reports **"No islands detected"**. That is intended:
 this page ships no framework component and no `client:*` directive, just static
 HTML plus one plain `<script>` module holding the bus and the stores. The
 toolbar's audit only knows how to look for islands.
@@ -79,7 +79,7 @@ library's shared live region (`announce()`), so a screen reader user hears what
 a sighted one sees change. Then press "Details": that toggle is the `ui` store's
 `open` field, while the text inside it reads the cart store.
 
-The example links to the repo's working tree via `file:../..`, so it always runs
+The example links to the repo's working tree through `file:../..`, so it always runs
 against the latest library code. The `predev` and `prebuild` hooks build the
 library's `dist/` on demand.
 

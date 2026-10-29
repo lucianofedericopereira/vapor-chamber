@@ -1,7 +1,7 @@
 # Sprinkled-JS demo
 
-Minimal runnable example of the **sprinkled-JS** pattern - server-rendered
-HTML with vapor-chamber's IIFE bundle dispatching commands to a backend
+A minimal runnable example of the **sprinkled-JS** pattern: server-rendered
+HTML, with vapor-chamber's IIFE bundle dispatching commands to a backend
 over HTTP. No Vue, no Vite, no build step.
 
 This is the canonical shape for Laravel Blade, Rails, Django, .NET MVC,
@@ -17,14 +17,14 @@ WordPress, or any other server-rendered framework.
 ## Run
 
 First, build the library once so the IIFE bundle exists (this demo has no
-package.json of its own - `index.html` loads `../../dist/vapor-chamber-core.iife.min.js`):
+package.json of its own: `index.html` loads `../../dist/vapor-chamber-core.iife.min.js`):
 
 ```bash
 # repo root: creates dist/
 npm install
 ```
 
-Then one process - the mock backend serves the page too:
+Then one process, since the mock backend serves the page too:
 
 ```bash
 cd examples/sprinkled-blade
@@ -51,7 +51,7 @@ preflight (`Content-Type: application/json` is not CORS-safelisted), which is
 why the backend's `Access-Control-Allow-Headers` must list `Content-Type`, and
 `Idempotency-Key` for a keyed command.
 
-Click "Add to cart" - you should see:
+Click "Add to cart". You should see:
 
 - The cart counter updating
 - A telemetry log line per dispatch
@@ -63,7 +63,7 @@ the button turns red, the failure is announced and the error line shows it.
 
 ## What this demo proves
 
-- IIFE bundle works without a bundler - pure `<script>` tag.
+- The IIFE bundle works without a bundler, from a plain `<script>` tag.
 - The page is markup. `bindCommands` dispatches each `data-vc-command`, marks
   the button `aria-disabled` while it is in flight and announces a failure.
   `bindDisplay` writes the count from a store (`data-vc-text="cart.summary"`).
@@ -96,5 +96,5 @@ the button turns red, the failure is announced and the error line shows it.
 | Static `<script>` from `dist/`                  | `<script src="{{ asset('vendor/vapor-chamber/iife.min.js') }}">` | `javascript_include_tag` | `{% static 'vapor-chamber/iife.min.js' %}` |
 
 For a complete Laravel backend, see
-[`../laravel-backend/`](../laravel-backend/) - drop-in PHP files for the
+[`../laravel-backend/`](../laravel-backend/): drop-in PHP files for the
 controller, action classes, config, and routes.

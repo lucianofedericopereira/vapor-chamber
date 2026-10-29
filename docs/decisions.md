@@ -1,17 +1,17 @@
 # Decision log
 
-Append-only, dated, past tense by construction. One row per stage transition,
-never per activity. This file records what was decided and where the evidence
-lives; it never describes current behaviour, so it cannot drift and must never
-be patched. Current truth lives in exactly three places: the code, the tests,
-and the stamped docs. Anything else here is history.
+Append-only, dated, and past tense by construction. One row per stage transition, never per
+activity. This file records what was decided and where the evidence lives. It never describes
+current behaviour, so it cannot drift and must never be patched. Current truth lives in exactly
+three places: the code, the tests and the stamped docs. Anything else here is history.
 
-The workflow this file belongs to (adopted 2026-08-28): proposals carry their
-judgment half as a paragraph in the relevant planning doc and their measurable
-half as acceptance assertions, armed at spike stage; promotion renames the
-acceptance file into the permanent suite; agent reports and audit verdicts
-travel in commit messages; retired documents are deleted and retrieved through
-git history, not kept live to rot.
+The workflow this file belongs to, adopted 2026-08-28:
+
+- A proposal carries its judgment half as a paragraph in the relevant planning doc, and its
+  measurable half as acceptance assertions, armed at spike stage.
+- Promotion renames the acceptance file into the permanent suite.
+- Agent reports and audit verdicts travel in commit messages.
+- Retired documents are deleted and retrieved through git history, not kept live to rot.
 
 | date | decision | evidence / where |
 | --- | --- | --- |

@@ -179,7 +179,7 @@ async function measure(dir: string, name: string, contents: string) {
   // The ENTRY chunk is what the app loads at startup, which is the cost this
   // guard is about. The router arms also emit one lazy chunk: the router
   // imports `makeBladeComponent` on demand, the first time a blade row renders
-  // (README, router section), and no row here is a blade row. esbuild without
+  // (manual chapter 6, "Pick an outlet"), and no row here is a blade row. esbuild without
   // code splitting inlined that chunk into the one file, so the esbuild-era
   // numbers carried it; the rolldown numbers the limits are set from do not.
   // Anything else - a second entry, or a chunk split off the STATIC graph -
@@ -324,7 +324,7 @@ describe('Vapor outlet - size', () => {
     );
 
     // Publish the measurement so the DOCS can stamp it instead of quoting it.
-    // The saving appears in the ROADMAP, README, router.md and the whitepaper,
+    // The saving appears in the ROADMAP, router.md, manual chapter 6 and the whitepaper,
     // and it moves whenever anything on either side of the A/B changes - which
     // is how five copies of "20.03" came to be wrong at once. Same channel and
     // merge semantics as scripts/test-counts-reporter.mjs: docs/metrics.json is

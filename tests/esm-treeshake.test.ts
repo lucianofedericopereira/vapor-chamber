@@ -298,7 +298,7 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // 6_300 leaves headroom for queued features. The esbuild ledger above is
       // history: it tracked the old esbuild-no-define number, retired here.
       // Ceiling 6_300 -> 6_310: dispose() settles waiting request()s and the
-      // sync request() honours its caller's signal (CHANGELOG v1.20.0). The
+      // sync request() honours its caller's signal (v1.20.0). The
       // queued features had used the headroom (6,240 on the base). Measured
       // on this consumer, one build each:
       //   6_240  base
@@ -330,8 +330,7 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // 6_363 after v1.24.0's RFC 9457 problem documents (+7 against the
       // published v1.23.0, one build each: the `+json` test, `detail` in
       // responseError, the wider Accept). Ceiling unchanged, 17 B of headroom.
-      // Ceiling 6_380 -> 6_280 (Unreleased, Phase 0 of the failures plan,
-      // CHANGELOG v1.25.0). The fixes first measured 6_413
+      // Ceiling 6_380 -> 6_280 (v1.25.0). The fixes first measured 6_413
       // (register()'s ownership-checked cleanup, the catalogue's severity on
       // the throttled and aborted refusals, the Idempotency-Key as a
       // Structured Field String), over the old ceiling. Not raised: advice

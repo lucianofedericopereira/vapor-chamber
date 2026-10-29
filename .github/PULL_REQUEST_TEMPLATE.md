@@ -45,4 +45,4 @@ when a path that runs it reads faster and none reads slower.
 ## CHANGELOG entry
 
 <!-- Drop a one-paragraph entry under the Unreleased / next-version heading
-     in CHANGELOG.md. Mention the user-visible effect, not the implementation. -->
+     in CHANGELOG.md. Name the effect a user sees, not the mechanism. -->

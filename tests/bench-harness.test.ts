@@ -2,10 +2,8 @@
  * Bench-harness integrity.
  *
  * A bench that does not execute the code named in its label is worse than no
- * bench: it produces a number, the number is stable, and it gets quoted. The
- * whitepaper's rc.6 row quotes two figures from the `origin-marker paths` group
- * in `tests/perf.bench.ts` and concludes NEUTRAL. Both benches drove the
- * history like this:
+ * bench: it produces a number, the number is stable, and it gets quoted.
+ * Both benches drove the history like this:
  *
  *     const bus = createCommandBus();
  *     const history = useCommandHistory({}, bus);   // <- second argument

@@ -1,14 +1,13 @@
 # Migrating from mitt
 
-[mitt](https://github.com/developit/mitt) is a tiny event emitter (<!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli, measured beside our own rows in [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)).
-vapor-chamber is a command bus with results, plugins, hooks, transports, and
-more. They solve different problems. If you're outgrowing mitt because you've
-started building a command bus on top of it, this guide is the path.
+[mitt](https://github.com/developit/mitt) is a tiny event emitter: <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli, measured beside this
+library's own rows in [BUNDLE-SIZES.md](../BUNDLE-SIZES.md). vapor-chamber is a command bus with
+results, plugins, hooks, transports and more. The two solve different problems. If you are
+outgrowing mitt because you started building a command bus on top of it, this guide is the path.
 
-If your mitt usage is purely pub/sub event broadcast (no return values, no
-plugins, no async dispatching), **stay on mitt** or use vapor-chamber's
-[fast lane](../performance.md). Both are smaller and faster than the
-general-purpose bus.
+If your mitt usage is pure pub/sub broadcast (no return values, no plugins, no async dispatch),
+**stay on mitt**, or use vapor-chamber's [fast lane](../performance.md). Both are smaller and
+faster than the general-purpose bus.
 
 ---
 
@@ -36,9 +35,9 @@ vapor-chamber listeners receive `(cmd, result)`:
 bus.on('cartAdd', (cmd, result) => console.log(cmd.target.id));
 ```
 
-The data your mitt code passed as `payload` lands on `cmd.target`. The
-second argument, `result`, is `{ ok, value, error }`, for listeners that
-need to know whether the dispatch succeeded.
+The data your mitt code passed as `payload` lands on `cmd.target`. The second argument,
+`result`, is `{ ok, value, error }`, for listeners that need to know whether the dispatch
+succeeded.
 
 For a drop-in mitt-shaped wrapper:
 ```ts
@@ -62,8 +61,8 @@ bus.on('cart*', (cmd) => {});       // prefix wildcard - mitt doesn't have this
 
 ## Beyond what mitt does
 
-You probably reached for vapor-chamber because you needed something mitt
-lacks. Here is the extra surface:
+You probably reached for vapor-chamber because you needed something mitt lacks. Here is the
+extra surface:
 
 ```ts
 // Results - handlers return values; consumers know if dispatch succeeded
@@ -99,13 +98,12 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB brotli**, a couple
-of orders of magnitude more. That difference pays for the extras above. For
-always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
-(generated, CI-verified fresh) and prefer it over any figure quoted in prose.
+**<!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB brotli**, a couple of orders of magnitude more. That difference pays for the
+extras above. For always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
+(generated, CI-verified fresh), and prefer it over any figure quoted in prose.
 
-If you only need pub/sub and don't want to pay for those features,
-**don't migrate**: stay on mitt or use vapor-chamber's fast lane:
+If you need only pub/sub and do not want to pay for those features, **do not migrate**. Stay on
+mitt, or use vapor-chamber's fast lane:
 
 ```ts
 // vapor-chamber/fast-lane - mitt's shape, and faster than mitt on fan-out,
@@ -116,13 +114,9 @@ lane.on('cartAdd', (item) => addToCart(item));
 lane.emit('cartAdd', { id: 42 });
 ```
 
-On the three-listener fan-out both libraries are built for, the fast lane
-measures **<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x
-mitt**, and the general bus's `emit`
-**<!-- vc:benchEmitVsMittFanout -->1.57-1.94<!-- /vc:benchEmitVsMittFanout -->x**.
-Each is the range over several runs on one host
-(<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
-libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
-15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
-them. Nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)
-for the removal-mode trade-off.
+On the three-listener fan-out both libraries are built for, the fast lane measures
+**<!-- vc:benchFastLaneVsMitt -->2.13-2.52<!-- /vc:benchFastLaneVsMitt -->x mitt**, and the general bus's `emit`
+**<!-- vc:benchEmitVsMittFanout -->1.57-1.94<!-- /vc:benchEmitVsMittFanout -->x**.[^bands] See [from-event-emitter.md](./from-event-emitter.md) for the
+removal-mode trade-off.
+
+[^bands]: Each is the range over several runs on one host (<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.22.1, vitest 5.0.5, Vue 3.6.0-rc.13, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule 15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes them. Nobody types them here.

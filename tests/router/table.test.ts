@@ -310,7 +310,7 @@ describe('cyclic parent chains', () => {
 });
 
 describe('the rest of the dev-only table checks, in production (DEV=false)', () => {
-  // docs/router.md, "Dev-trusts-generator": table validation runs in dev only,
+  // docs/router.md, "Dev trusts the generator": table validation runs in dev only,
   // and production trusts the generated rows. The two checks above have their
   // production arm pinned (unknown parent, cyclic chain); these are the other
   // two, so the statement holds for every check, not for some.

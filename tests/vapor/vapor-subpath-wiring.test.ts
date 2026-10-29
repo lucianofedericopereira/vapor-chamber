@@ -21,10 +21,7 @@
  *
  *   2. The consumer-facing contract: `createVaporChamberApp` mounts a real
  *      Vapor app with NO `configureVue()` call anywhere in user code. That one
- *      line is what this entry removes, and it is the thing a reader of the
- *      README will actually check.
- *
- * Note the deliberate absence of `configureVue` in this file. Every other Vapor
+ *      manual chapter 1, the entry to import from this file. Every other Vapor
  * fixture in this repo calls it (see `tests/keepalive-input-scope-fixture.test.ts`,
  * which must, because it hands the chamber a dist it imported itself). If that
  * call ever becomes necessary here, the subpath has stopped doing its job.

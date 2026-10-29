@@ -351,7 +351,7 @@ const BUDGETS = {
   // single site, not the bytes). The ledger's own cost is its options object,
   // change callback and signal mirroring, which outweighed the lines it removed.
   //
-  // Unreleased, Phase 0 of the failures plan (CHANGELOG v1.25.0), and all three
+  // Unreleased, Phase 0 of the failures plan ((v1.25.0)), and all three
   // budgets follow it DOWN. The fixes cost, measured one at a time on the core
   // IIFE: the Idempotency-Key as a Structured Field String +116 / +48 (one
   // regex pass was bigger, 6,479 on the ESM consumer, dropped), register()'s
@@ -396,7 +396,7 @@ const BUDGETS = {
   // `?? undefined` at each site went), and the redirect's "no onRedirect
   // handler" advice DEV-only (contract rule 5): -91 / -32 core.
   //
-  // Unreleased, retries back to what 1.24 shipped (CHANGELOG v1.25.0):
+  // Unreleased, retries back to what 1.24 shipped ((v1.25.0)):
   // re-sent unless a 4xx verdict, an abort, a depth bound or a plugin's own
   // throw (the owner check pulls ownerOf into the IIFEs), a declared
   // `Retry-After` honoured, 5xx retried again by the HTTP client, and

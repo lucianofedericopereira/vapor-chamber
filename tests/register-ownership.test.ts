@@ -6,7 +6,7 @@
  * the framework produces: KeepAlive with a max sets up the new page and THEN
  * evicts the old one, whose cleanup would delete the new page's handler while
  * it is on screen (measured on rc.9: `register B -> dispose A`, dispatch ->
- * ok: false). CHANGELOG v1.25.0.
+ * ok: false). (v1.25.0)
  */
 import { describe, expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';

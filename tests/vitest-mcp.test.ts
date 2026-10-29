@@ -1,6 +1,6 @@
 /**
  * `mcpClient` and the tool-result matchers from `vapor-chamber/vitest/pure`
- * (CHANGELOG v1.21.0): test an MCP surface the way an agent reaches it, through a
+ * (v1.21.0): test an MCP surface the way an agent reaches it, through a
  * real `createMcpHandler`, without writing JSON-RPC envelopes by hand.
  */
 import { describe, expect, it } from 'vitest';

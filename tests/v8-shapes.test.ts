@@ -2,8 +2,7 @@
  * V8 alignment: every CommandResult the library hands back shares ONE hidden
  * class - `okResult`/`errResult`'s `{ ok, value, error }`.
  *
- * docs/performance.md promised this ("one hidden class for both, monomorphic
- * property access at every consumer site") while ~30 sites outside the bus
+ * while ~30 sites outside the bus
  * built their own literal: `{ ok: false, error }` (two fields),
  * `{ ok: true, value }` (two fields), and `{ ok: false, error, value }` (three
  * fields, another order). Each is a different map, so a `result.ok` site that

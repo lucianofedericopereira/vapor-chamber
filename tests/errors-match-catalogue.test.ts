@@ -3,7 +3,7 @@
  * each carries a catalogued code, and the owner in that code is the one the
  * wiring minted it for. Before the factory, every site filled code, emitter and
  * severity by hand and drifted from the catalogue (validator() refused with no
- * code at all). CHANGELOG v1.25.0 and docs/contract.md 5.
+ * code at all). (v1.25.0) and docs/contract.md 5.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * `stubGlobal` and `stubEnv` from `vapor-chamber/vitest/pure`: stubs that
- * `using` restores at the end of the block (CHANGELOG v1.21.0).
+ * `using` restores at the end of the block (v1.21.0).
  *
  * Vitest's own `vi.stubGlobal` / `vi.stubEnv` return nothing disposable, and
  * its `unstubGlobals` / `unstubEnvs` restore at the START of the next test,
