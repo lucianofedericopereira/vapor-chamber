@@ -31,7 +31,8 @@ rules and steps, so each action has one place to read and one place to test.
 
 ## What's in the can
 
-| | |
+|  |  |
+|--|--|
 | **Core** (the bus) | dispatch, query and emit, plugin parts, wildcard listeners. Framework-agnostic, no Vue import, **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli** |
 | **Vue composables** | `useCommand`, shared state, `defineVaporCommand`, full Vapor wrappers |
 | **Router** (opt-in) | URL-addressed reads for Vue 3.6 over a server catch-all, with route tables and loaders as data |
