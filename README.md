@@ -31,14 +31,14 @@ rules and steps, so each action has one place to read and one place to test.
 
 ## What's in the can
 
-|  |  |
-|--|--|
-| **Core** (the bus) | dispatch, query and emit, plugin parts, wildcard listeners. Framework-agnostic, no Vue import, **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli** |
-| **Vue composables** | `useCommand`, shared state, `defineVaporCommand`, full Vapor wrappers |
-| **Router** (opt-in) | URL-addressed reads for Vue 3.6 over a server catch-all, with route tables and loaders as data |
-| **Plugins** (opt-in) | logger, validator, history (undo/redo), idempotent, auth guard. Retry is the async bus's own. Pacing (debounce, throttle) is the sender's: `pace()` |
-| **Transports** (opt-in) | `httpTransport` (with `batch`), WebSocket, SSE, Laravel Echo/Reverb |
-| **Extras** (opt-in) | SSR by the stores' states, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
+| Module | Type | Features & Capabilities |
+| :--- | :--- | :--- |
+| **Core (The Bus)** | Core | Dispatch, query and emit, plugin parts, wildcard listeners. Framework-agnostic, no Vue import, 6.1 KB brotli. |
+| **Vue Composables** | Core | `useCommand`, shared state, `defineVaporCommand`, full Vapor wrappers. |
+| **Router** | Opt-in | URL-addressed reads for Vue 3.6 over a server catch-all, with route tables and loaders as data. |
+| **Plugins** | Opt-in | Logger, validator, history (undo/redo), idempotent, auth guard. (Retry belongs to the async bus; pacing/debounce/throttle belongs to the sender via `pace()`). |
+| **Transports** | Opt-in | `httpTransport` (with batch), WebSocket, SSE, Laravel Echo/Reverb. |
+| **Extras** | Opt-in | SSR by stores' states, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox. |
 
 - **Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->:** signals, `onScopeDispose`,
   `getCurrentScope`, alien-signals internals. The [CHANGELOG](CHANGELOG.md) tracks each release.
