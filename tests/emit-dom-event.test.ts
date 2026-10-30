@@ -1,27 +1,17 @@
 /**
- * emitDOMEvent - bridges Vue's component emit() to a real DOM CustomEvent
- * so host pages can subscribe with addEventListener on the widget tag.
- *
- * Pattern adapted from vue-custom-element's `customEmit` helper. Vue's
- * `emit` goes through Vue's component event system - these tests verify
- * the DOM-event path that escapes that system.
- *
- * The real function (src/widget.ts), the one both IIFEs and the root export.
+ * emitDOMEvent (src/widget.ts): a component's emit() as a real DOM CustomEvent on the widget tag.
+ * Why: Vue's emit stays inside Vue's event system, and a host page subscribes with addEventListener.
+ * Shows: name and detail arrive; the return reports preventDefault; bubbles and composed by default, overridable; no CustomEvent or no element is a no-op.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { emitDOMEvent } from '../src/widget';
 
-// Set up a minimal DOM. Vitest's default node env doesn't include the DOM,
-// so we use happy-dom-equivalent shims via the `Window` available when run
-// with `environment: 'happy-dom'`. For this lib we can use the basic
-// CustomEvent + EventTarget polyfill that Node 22 ships natively.
+// Node's own EventTarget and CustomEvent stand in for an element: no DOM environment is needed.
 describe('emitDOMEvent', () => {
   let host: Element;
 
   beforeEach(() => {
-    // Use Node's built-in EventTarget - works as a stand-in for an Element
-    // for dispatching events. CustomEvent is also available natively.
     host = new EventTarget() as unknown as Element;
   });
 
@@ -65,9 +55,7 @@ describe('emitDOMEvent', () => {
     emitDOMEvent(host, 'any', null);
     emitDOMEvent(host, 'any', undefined);
 
-    // The CustomEvent spec coerces undefined detail to null - both null and
-    // undefined arrive as null on the event object. This is browser behavior,
-    // not vapor-chamber semantics.
+    // CustomEvent coerces an undefined detail to null: platform behaviour, not ours.
     expect(captured).toEqual([42, 'string', [1, 2, 3], { nested: { value: true } }, null, null]);
   });
 

@@ -1,4 +1,8 @@
-/** A plugin's rules run only on the actions its scope covers, as its facts and work steps do. The long note is at the end. */
+/**
+ * A plugin's authorize and validate rules run only on the actions its scope (`actions` or `actionFilter`) covers.
+ * Why: if rules ignored the scope, a gate scoped to one action would refuse every action, unlike the plugin's facts and work steps.
+ * Shows: on the sync, async and test buses, a refusing rule blocks only its own action, and an `actionFilter` is asked once per action.
+ */
 import { describe, expect, it } from 'vitest';
 import { type BaseBus, type CommandResult, type PluginParts, createAsyncCommandBus, createCommandBus, _errResult as err } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
@@ -39,9 +43,3 @@ describe.each(BUSES)('rule scope on the %s bus', (_name, make) => {
     });
   }
 });
-
-// PluginParts says `actions` are the only actions the bus runs a plugin on,
-// and `actionFilter` is asked once per action. Facts (`_scoped`) and work
-// steps (`_stepsOf`) followed both; rules (`_rulesOf`) asked every part on
-// every action, so a gate scoped to one action refused all of them. Each
-// case runs on the three buses, since the test bus shares `_rulesOf`.

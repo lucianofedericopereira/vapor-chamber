@@ -1,4 +1,9 @@
-/** Redo of a store step writes the state it recorded, not a second run of the reducer (log s35.158). Rationale at the end. */
+/**
+ * Redo of a store step writes the state the step recorded instead of running the reducer again.
+ * Why: a reducer that mints a value (an id, a time) would bring the item back with a new one on redo, giving it a new key and remounting its row.
+ * Shows: redo restores the same state object, does not call the reducer, and works for $reset; listeners still hear the action with origin redo; the reducer runs only when history did not record the change.
+ * See: log s35.158.
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -88,17 +93,3 @@ describe('redo of a store step', () => {
     todos.$dispose();
   });
 });
-
-/*
- * Before this, redo re-dispatched the action (`ledger.ts`, origin 'redo') and
- * the handler ran the reducer again. A reducer that mints a value (an id, a
- * time) brought the item back with a new one: a new key, a remounted row
- * (log s35.158; the repo's own Vue todo example until s35.149).
- *
- * Now the redo is still the same command, so plugins, listeners, persist and
- * devtools hear what they heard. Inside the store's handler, when the step
- * being redone is the last one undone and the state is still the one that
- * undo restored, the handler writes the state the step recorded (Memento).
- * If anything moved the state since the undo, the precondition fails and the
- * reducer runs, as before.
- */

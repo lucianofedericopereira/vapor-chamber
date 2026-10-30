@@ -1,4 +1,9 @@
-// setCommandBus() replacing a fallback bus already handed out warns in DEV; the normal paths stay quiet.
+/**
+ * setCommandBus() replacing a fallback bus that getCommandBus() already handed out warns once in DEV; the normal paths stay quiet.
+ * Why: code that called getCommandBus() before the replacement would keep the old bus, splitting dispatches and listeners across two buses with no error; a warning on the HMR shim or the vitest setup file would be noise.
+ * Shows: the warning fires once for a different bus, and not when the bus is set before any get, set again unchanged, or set after a reset; the vitest setup file swaps its bus without warning while the package build does warn.
+ * See: log s35.73, src/shared-bus.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { getCommandBus, resetCommandBus, setCommandBus } from '../src/shared-bus';
@@ -60,13 +65,11 @@ describe('shared bus: replacing the fallback', () => {
 });
 
 describe('shared bus: the vitest setup file swaps quietly', () => {
-  // A plain function, not vi.spyOn: `restoreMocks` restores a spy before the
-  // next test, and the setup file's beforeEach runs before that test.
+  // A plain function, not vi.spyOn: restoreMocks would restore a spy before the setup file's beforeEach runs for the next test.
   const original = console.warn;
   const seen: string[] = [];
 
-  // The setup file installs its bus through the package (dist), so the
-  // fallback is left on the package's own shared bus.
+  // The setup file installs its bus through the package (dist), so the fallback must be left on the package's own shared bus.
   it('leaves a fallback bus behind', async () => {
     const vc = await import('vapor-chamber');
     vc.resetCommandBus();
@@ -89,14 +92,3 @@ describe('shared bus: the vitest setup file swaps quietly', () => {
     vc.resetCommandBus();
   });
 });
-
-// Decision 7 of the 1.26 list. The fallback stays: a sync app calls
-// getCommandBus() and gets a bus, which is every sync app's normal path. The
-// mistake is setCommandBus() AFTER that bus was handed out: everything that
-// already called getCommandBus() keeps the old bus, so dispatches and
-// listeners are split between two buses with no error anywhere. The warning
-// fires only then, only in DEV (src/dev.ts folds it out of the IIFEs), once.
-// The two normal replacements stay quiet: the HMR shim (src/vite-hmr.ts)
-// restores the SAME bus object on reload, and the vitest setup file
-// (src/vitest.ts) resets before it installs each test's bus. The last pair of
-// tests runs inside this repository's own setup file to pin that.

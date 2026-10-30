@@ -1,4 +1,9 @@
-/** A store applies a bridged action's answer, opt-in, through `RegisterOptions.answer` (log s35.184). Rationale at the end. */
+/**
+ * A store applies a bridged action's answer, opt-in, through `RegisterOptions.answer`.
+ * Why: a bridge replaces the handler of the actions it forwards, so without `answer` the store's reducer never runs and the store never changes though the dispatch is ok with the server's state as its value.
+ * Shows: with `answer` the state and the result are the server's answer (single and batched), persist saves it, a rollback rebase keeps it without re-running the reducer, and history records the step but cannot undo it; without `answer`, on a local action or on a failed one, the state is untouched.
+ * See: log s35.184
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { type Command, createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -133,16 +138,3 @@ describe('controls', () => {
     cart.$dispose();
   });
 });
-
-/*
- * A bridge replaces the handler of the actions it forwards, so a store's
- * reducer never ran for them and the store never changed, though the dispatch
- * was `ok` with the server's state as its value (probe p-d3, plan entry D3).
- * TanStack Query, Apollo and Pinia Colada all write a mutation's answer into
- * local state through code the app declares. The store's `answer` is that
- * code, opt-in. The bus calls `RegisterOptions.answer` at the transport's
- * level, inside the chain, so a plugin outside the transport sees the written
- * state, and the store's own persist saves it. The write is a step of the same command: history records it
- * once and cannot undo it (R9), and a rollback rebase keeps the server's
- * state as it keeps a tab's state. Log s35.184.
- */

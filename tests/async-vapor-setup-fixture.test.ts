@@ -1,35 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `useCommand()` after a top-level `await` in a COMPILED
- * `<script setup vapor>`, mounted under a real `<Suspense>`, vue@3.6.0-rc.8
- * (65819bf, "render async setups from a settled hydration pass", #15433;
- * commit 20 of the rc.8 range - and e9515f1, commit 11, which registers the
- * async setup with the NEAREST Suspense).
- *
- * WHY THIS FILE EXISTS. `useVaporAsyncCommand`'s docs show exactly this
- * pattern - an awaiting `<script setup vapor>` under `<Suspense>` - and no
- * test mounted it. Everything after the `await` runs in a continuation, where
- * a composable only works if Vue has restored the component instance AND its
- * scope: `tryAutoCleanup` registers on `getCurrentScope()`, and the KeepAlive
- * guard asks `hasInjectionContext()`. rc.8 compiles such a setup into an
- * `async setup()` that uses runtime-core's `withAsyncContext` and returns the
- * template as a render closure run once setup has settled; runtime-vapor's own
- * `withAsyncContext` is gone. Read at source, runtime-core's `restore()` sets
- * the instance and its scope, so the cleanup should arm after the await - and
- * if the app is unmounted DURING the await, the stopped scope is restored,
- * `onScopeDispose` appends to it without an active check, and `reset()` runs
- * the cleanups a microtask later. This file checks both instead of trusting
- * the reading.
- *
- * The component is compiled here, at test time, by the real compiler
- * (`vue/compiler-sfc`, `inlineTemplate`), so the fixture follows whatever the
- * installed compiler emits rather than a hand copy of it. The output is
- * evaluated in memory: its only module syntax is named `import { ... } from`
- * lines and one `export default`, and `evaluate()` binds each import to an
- * injected module object (the with-vapor build for `vue`, this repo's chamber
- * for the composable) and throws on anything it cannot map. No temp file: the
- * module runner will not import one from outside the project root, and a copy
- * inside it would be one more thing to clean up.
+ * FIXTURE: `useCommand()` after a top-level `await` in a compiled `<script setup vapor>`, under a real `<Suspense>`.
+ * Why: `useVaporAsyncCommand`'s docs show this pattern; after the await a composable works only if Vue restored the instance and its scope.
+ * Shows: it compiles to an async setup with a render closure; cleanup arms after the await, nothing is left if unmounted during it, nested-block awaits too.
+ * See: vuejs/core 65819bf (#15433), e9515f1, 54097087 (#15465).
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -65,7 +39,7 @@ on('ping', () => { state.fired.push('async'); });
 </script>
 <template><span>async</span></template>`;
 
-/** The same contract, with the awaits inside a nested block - see the note at the end. */
+/** The same contract, with the awaits inside a nested block. */
 const SFC_NESTED = `<script setup vapor>
 import { useCommand } from 'vc:chamber';
 import { state } from 'vc:state';
@@ -79,13 +53,14 @@ on('ping', () => { state.fired.push('nested'); });
 </script>
 <template><span>nested</span></template>`;
 
+/** Compiled by the real compiler at test time, so the fixture follows what the installed compiler emits. */
 function compile(source = SFC, filename = 'Async.vue') {
   const { descriptor } = parse(source, { filename });
   const { content } = compileScript(descriptor, { id: 'vc-async-setup', inlineTemplate: true });
   return { descriptor, content };
 }
 
-/** Run compiled SFC output with its named imports bound to `modules`. */
+/** Run compiled SFC output in memory, imports bound to `modules`; no temp file, the runner will not import one from outside the root. */
 function evaluate(content: string, modules: Record<string, object>): unknown {
   const body = content
     .replace(/^import \{([^}]*)\} from '([^']+)';?[ \t]*$/gm, (_line, names: string, spec: string) => {
@@ -181,8 +156,7 @@ describe('useCommand() after await in a compiled <script setup vapor> under Susp
     expect(state.fired).toEqual([]);
   });
 
-  // The same contract with the awaits inside a nested block. Passes on rc.8
-  // too - see the note at the end; this is coverage, not a fails-before.
+  // Coverage of an ordinary shape the top-level case does not exercise, not a fails-before.
   it('arms cleanup after an await inside a nested block', async () => {
     const { content } = compile(SFC_NESTED, 'AsyncNested.vue');
     expect(content).toMatch('async setup(');
@@ -205,37 +179,3 @@ describe('useCommand() after await in a compiled <script setup vapor> under Susp
     expect(state.fired).toEqual([]);
   });
 });
-
-/**
- * WHY THE NESTED-BLOCK CASE EXISTS, and what it is NOT.
- *
- * Vue 3.6.0-rc.9 `54097087` ("restore await scope when leaving nested blocks",
- * #15465) changed one word in compiler-sfc's top-level-await walker:
- * `exit(node)` became `leave(node)`. estree-walker's hook is `leave`, so the
- * handler had never run and the `scope.pop()` inside it was dead code - the
- * scope stack only ever grew. That stack decides whether an emitted `await`
- * sequence is prefixed with a defensive `;`.
- *
- * IT IS NOT A FAILS-BEFORE, and the first version of this note claimed it was.
- * Measured directly, rc.8's and rc.9's `compileScript` on this exact SFC differ
- * by one character - rc.9 emits `;(` where rc.8 emits `(`:
- *
- *     11 | if (true) {
- *     12 |   if (false) {}
- *     13 |   ;(                        <- rc.9; rc.8 has `(`
- *     14 |   ([__temp,__restore] = _withAsyncContext(() => Promise.resolve(1))),
- *
- * A BlockStatement cannot absorb a following `(` as a call, so rc.8's output is
- * valid JavaScript here and its `setup()` resolves. Across six await shapes
- * tried (top level, upstream's own #15465 repro, after a sibling block, inside
- * a `for`, inside a `switch` case, and a nested block followed by top-level
- * awaits) the emitted text differs in three and BOTH compilers produce working
- * output in all six. No shape was found where rc.8 throws and rc.9 does not.
- *
- * So this case is COVERAGE, not evidence of an rc.9 improvement: it pins that
- * the documented contract - `useVaporAsyncCommand` / `useCommand` called after
- * an `await` arm their cleanup on the restored scope - holds when the awaits
- * sit inside a nested block, which is an ordinary thing for a consumer to
- * write and which the top-level case above does not exercise. It passes on
- * rc.8 and on rc.9.
- */

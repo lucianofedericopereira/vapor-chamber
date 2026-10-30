@@ -1,4 +1,9 @@
-/** `undo: true` on a store: its actions undo through `history`, as commands. Rationale at the end. */
+/**
+ * `undo: true` on a store registers an inverse (`<action>$undo`) for each action, so `history` undoes and redoes them as commands.
+ * Why: a store with no registered inverse could not be undone through history; the undo must also be a write that persist saves, must not be recorded as a new step, and must refuse to go past a change history did not record.
+ * Shows: undo and redo walk one action at a time and for $reset; persist saves the undone state; listeners hear `<action>$undo` and the redo with their origins; stores on one bus undo only their own state; the async bus, a refused restore, canUndo, the 256-step limit and $dispose behave as stated; a store without undo registers no inverse and history's undo leaves its state.
+ * See: log s35.112, log s35.113.
+ */
 import { describe, expect, it } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -242,8 +247,3 @@ describe('a store without undo (the default): as before', () => {
     store.$dispose();
   });
 });
-
-/*
- * Handoff finding 1: the store registered no inverse, so history could not undo
- * its actions. Log s35.112 and s35.113.
- */

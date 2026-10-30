@@ -1,4 +1,9 @@
-/** The idempotency key on the wire: an opaque id per request, an app's key as given; collapsing stays local. Rationale at the end. */
+/**
+ * The Idempotency-Key sent on the wire by idempotent(), the outbox and the retry.
+ * Why: the key travels as a header that proxies and logs keep, so a library-minted key must be an opaque per-request id, never command content; a re-send must reuse it and an app's own key must go out as given.
+ * Shows: single and batched requests carry the dispatch id, a retry reuses it, local collapsing is unchanged, app keys are percent-encoded only when needed, and the outbox record key wins over idempotent().
+ * See: draft-ietf-httpapi-idempotency-key-header-07 2.2, log 36.48.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,19 +181,3 @@ describe("the retry: an action declared 'idempotent'", () => {
     expect(got.map((g) => g.key)).toEqual([`"${ids[0]}"`, `"${ids[0]}"`]);
   });
 });
-
-/*
- * draft-ietf-httpapi-idempotency-key-header-07 2.2: the key is unique per
- * request, "MUST NOT be reused with another request with a different request
- * payload", and "It is RECOMMENDED that a UUID [RFC4122] or a similar random
- * identifier be used". A retry reuses it, a new request gets a new one. The
- * key is a header, which proxies and access logs keep. So no library key
- * carries command content: idempotent() sends the dispatch's id and keeps
- * its content key local, for the in-flight join and the `ttl` memory. The
- * outbox sends its record's id, the same on every replay and after a reload.
- * A key an app declares (idempotent's or the outbox's `key`) is sent as
- * given, percent-encoded outside the unreserved set. The outbox's record key
- * wins whatever idempotent's priority: since 1.32 step 4i a replay is sent at
- * the work step and passes no plugin. The server's fingerprint of the
- * payload (422 `key_reused`) is what makes an opaque key safe. Log 36.48.
- */

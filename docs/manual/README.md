@@ -1,6 +1,6 @@
 # vapor-chamber manual
 
-How to do things with vapor-chamber <!-- vc:version -->1.34.0<!-- /vc:version -->, aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->. Each
+How to do things with vapor-chamber <!-- vc:version -->1.35.0<!-- /vc:version -->, aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->. Each
 chapter covers one area, with the steps in the order you need them. Read chapters 1 and 2 first.
 The rest stand alone.
 

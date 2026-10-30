@@ -1,14 +1,7 @@
 /**
- * Supplemental coverage for src/http.ts - the paths http-coverage.test.ts and
- * http-errors.test.ts leave open:
- *
- *  - postCommand: `silent` stamped on a PERMANENT failure re-thrown from the
- *    catch - the 4xx path, distinct from the already-covered `throw
- *    failed` stamp at 348.
- *  - clientRequest: pre-attempt user abort, 401 session expiry,
- *    and a mid-flight user abort surfacing as AbortError.
- *  - createHttpClient: response-interceptor `onRejected` on a failed request
- *, which only runs on the rejection branch.
+ * postCommand and createHttpClient on permanent failures, aborts, 401 and rejected responses.
+ * Why: a permanent 4xx that burned the retry budget or lost the silent flag, an aborted caller that still sent or retried, a 401 that did not signal session expiry, or a rejection that skipped the response interceptor would each break error handling for callers. Also the only file reaching the already-aborted signal arm and a response interceptor's onRejected on failure, so the 100% floor needs it.
+ * Shows: postCommand stamps silent on a 422 only when asked and sends it once; an already-aborted signal sends nothing; the signal is checked again before each retry; a 401 calls onSessionExpired once; a mid-flight abort rejects as transport:aborted:request without retrying; onRejected runs with the error and the request still rejects; silent is stamped on a rejected error.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { postCommand, createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -43,10 +36,6 @@ afterEach(() => {
   invalidateCsrfCache();
 });
 
-// ---------------------------------------------------------------------------
-// postCommand - silent on the permanent-failure re-throw
-// ---------------------------------------------------------------------------
-
 describe('postCommand - silent on permanent failures', () => {
   it('stamps silent on a 422 re-thrown from the catch and does not retry it', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
@@ -68,10 +57,6 @@ describe('postCommand - silent on permanent failures', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// clientRequest - abort and session-expiry paths
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - abort and session expiry', () => {
   it('throws AbortError before issuing a request when the signal is already aborted', async () => {
     const ac = new AbortController();
@@ -86,15 +71,12 @@ describe('createHttpClient - abort and session expiry', () => {
     const ac = new AbortController();
     (globalThis.fetch as any).mockImplementation(async () => {
       ac.abort(); // trip the signal while attempt 0 is in flight
-      // 429 + `retry-after: 0` keeps the retry sleep at zero: the signal was
-      // already aborted when sleepMs attached its listener, so the sleep runs
-      // to completion and only the pre-attempt guard stops attempt 1.
+      // retry-after: 0 keeps the sleep at zero, so only the pre-attempt guard can stop attempt 1.
       return mockResponse(429, { error: 'slow down' }, { 'content-type': 'application/json', 'retry-after': '0' });
     });
 
     const http = createHttpClient();
     await expect(http.get('/api/data', { retry: { maxAttempts: 3 }, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
-    // Attempt 0 ran; the pre-attempt guard stopped attempt 1.
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
@@ -119,10 +101,6 @@ describe('createHttpClient - abort and session expiry', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// createHttpClient - response interceptor onRejected
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - response interceptor onRejected', () => {
   it('runs onRejected with the error and still rejects', async () => {

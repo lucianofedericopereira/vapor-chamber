@@ -1,12 +1,8 @@
 /**
- * IIFE bundle smoke test - locks the audience-based variant contract.
- *
- * Variants reflect deployment shapes (sprinkled JS / widget / kitchen-sink),
- * not Vue feature axes. Drift = silent bloat or silent narrowing, both bad.
- *
- * Variant contents are not under semver before v2.0 - see ROADMAP.md.
- *
- * Fails when dist/ hasn't been built (tests/require-dist.ts).
+ * The built IIFE bundles (core, elements, full) and the API each puts on window.VaporChamber.
+ * Why: a variant that gains or loses an export silently bloats or narrows what a script-tag page can call, and an API nested under the global would throw "is not a function" in the browser.
+ * Shows: each bundle exposes its API directly on the global, the exact present and absent names per variant, configureVue only where a Vapor wrapper ships, and sizes ordered core <= elements <= full.
+ * See: tests/require-dist.ts, ROADMAP.md.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -24,14 +20,7 @@ const variants = {
 
 requireDist(Object.values(variants).every(f => existsSync(dist(f))));
 
-/**
- * Load a variant exactly the way a <script> tag does: whatever ends up on the
- * global IS the API. No unwrapping - an earlier version of this helper fell
- * back through `outer.default ?? outer.VaporChamber ?? outer`, which happily
- * passed while the shipped global was really `{ VaporChamber, default }` and
- * every documented call site (`VaporChamber.connect(...)`) threw
- * "is not a function" in the browser.
- */
+/** Loads a variant as a <script> tag does; the global is the API, so nothing is unwrapped. */
 function loadNamespace(file: string): Record<string, unknown> {
   const src = readFileSync(dist(file), 'utf8');
   const sandbox: any = {};
@@ -42,7 +31,6 @@ function loadNamespace(file: string): Record<string, unknown> {
   return ns as Record<string, unknown>;
 }
 
-// Helper: assert a list of names are functions / undefined on the namespace.
 function assertPresent(ns: Record<string, unknown>, names: string[]) {
   for (const n of names) {
     expect(typeof ns[n], `expected ${n} to be a function on the namespace`).toBe('function');
@@ -55,24 +43,16 @@ function assertAbsent(ns: Record<string, unknown>, names: string[]) {
 }
 
 describe('IIFE variants - audience-based contracts', () => {
-  // ---------------------------------------------------------------------
-  // The global shape itself, before any per-variant contract: a <script>
-  // user calls VaporChamber.connect(), not VaporChamber.VaporChamber.connect
-  // and not VaporChamber.default.connect.
-  // ---------------------------------------------------------------------
   describe.each(Object.entries(variants))('%s: global shape', (_name, file) => {
     it('puts the API directly on window.VaporChamber, never nested', () => {
       const ns = loadNamespace(file);
       expect(typeof ns.createCommandBus).toBe('function');
       expect(typeof ns.connect).toBe('function');
-      expect(ns.VaporChamber).toBeUndefined(); // no self-nesting
-      expect(ns.default).toBeUndefined(); // no module-namespace wrapper
+      expect(ns.VaporChamber).toBeUndefined();
+      expect(ns.default).toBeUndefined();
     });
   });
 
-  // -------------------------------------------------------------------------
-  // CORE - sprinkled JS (Blade / Rails / Django). Bus + HTTP + light plugins.
-  // -------------------------------------------------------------------------
   describe('core: dispatch over HTTP for sprinkled-JS sites', () => {
     it('exposes bus, createApp, connect, httpTransport, light plugins', () => {
       const ns = loadNamespace(variants.core);
@@ -98,9 +78,6 @@ describe('IIFE variants - audience-based contracts', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // ELEMENTS - embeddable widgets. Core + custom-element surface.
-  // -------------------------------------------------------------------------
   describe('elements: embeddable widgets via custom elements', () => {
     it('exposes everything CORE does, plus defineVaporCustomElement + defineWidget + emitDOMEvent', () => {
       const ns = loadNamespace(variants.elements);
@@ -126,26 +103,17 @@ describe('IIFE variants - audience-based contracts', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // FULL - kitchen sink for SPAs that grew big.
-  // -------------------------------------------------------------------------
   describe('full: kitchen sink for SPAs', () => {
     it('exposes the union of all variants plus realtime transports + heavy plugins + Vapor', () => {
       const ns = loadNamespace(variants.full);
       assertPresent(ns, [
-        // bus + convenience
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect', 'mount',
-        // transports
         'httpTransport', 'wsTransport', 'sse',
-        // all plugins
         'logger', 'validator', 'history',
         'authGuard', 'createChannel', 'pace', 'bindCommands', 'bindDisplay',
-        // the store, with its persist
         'defineChamberStore', 'saveTo', 'Accepted',
-        // widget surface
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
-        // full Vapor surface
         'defineVaporComponent', 'defineVaporAsyncComponent',
         'defineVaporCommand', 'useCommand', 'useVaporAsyncCommand',
         'createVaporChamberApp',
@@ -153,24 +121,7 @@ describe('IIFE variants - audience-based contracts', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // The escape hatch has to be reachable by the audience that needs it.
-  //
-  // A variant that ships a Vapor wrapper ships its failure path too: the
-  // wrapper returns `null` when Vapor is undetected and `vueDetectionHint()`
-  // says "Pass it: configureVue(Vue)." That hint is deliberately NOT dev-gated,
-  // precisely because the audience most likely to hit it is the no-bundler
-  // <script>-tag page - which only ever runs a production IIFE.
-  //
-  // It was unreachable there. `configureVue` was on no variant's namespace, so
-  // the one remedy the library prints for that audience threw
-  // "VaporChamber.configureVue is not a function" - found by actually loading
-  // the elements bundle in a browser, not by reading it.
-  //
-  // And on that page it is the ONLY channel: Vue publishes Vapor as
-  // `esm-browser` only (there is no `vue.runtime-with-vapor.global.js`), and the
-  // runtime probe's bare `import('vue')` cannot resolve in a browser.
-  // -------------------------------------------------------------------------
+  // The Vapor hint "Pass it: configureVue(Vue)" is not dev-gated and a no-bundler page runs only a production IIFE, so configureVue must be on every variant that ships a Vapor wrapper.
   describe.each([
     ['elements', variants.elements],
     ['full', variants.full],
@@ -186,9 +137,6 @@ describe('IIFE variants - audience-based contracts', () => {
     assertAbsent(loadNamespace(variants.core), ['configureVue']);
   });
 
-  // -------------------------------------------------------------------------
-  // Size monotonicity - guards against accidental bloat.
-  // -------------------------------------------------------------------------
   it('size order is core ≤ elements ≤ full', () => {
     const sz = (k: keyof typeof variants) => statSync(dist(variants[k])).size;
     expect(sz('core')).toBeLessThanOrEqual(sz('elements'));

@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** A read answers plain JSON: the routes table is the bare payload, a failure a non-2xx problem. Log s35.115. */
+/**
+ * A routes read answers plain JSON: the table is the bare payload and a failure is a non-2xx problem.
+ * Why: if an envelope such as `{ state }` or a 2xx `{ problem }` were accepted, a server answering off-protocol would load a wrong or empty table silently; if a non-2xx lost its client error, the cause of a failed routes load would be unreadable.
+ * Shows: readRoutesPayload returns the bare payload and rejects both envelopes as router:unexpected:routes; a `{ url }` table with a `{ state }` answer fails start() the same way; a non-2xx fails as router:failed:routes with the client error as cause; an inline `{ state }` is router:unexpected:routes.
+ * See: log s35.115
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { readRoutesPayload } from '@router/index';

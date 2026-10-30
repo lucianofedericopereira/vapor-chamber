@@ -1,8 +1,7 @@
 /**
- * FormBus's accessibility facts, wired to real elements in a real engine: an
- * input bound to form.aria(field) and a message element with form.errorId(field)
- * must read, to assistive technology, as an invalid textbox described by the
- * server's message (WCAG 3.3.1, 4.1.2). Playwright's role engine is the reader.
+ * FormBus's accessibility facts on real elements: an input bound to form.aria(field), a message with form.errorId(field).
+ * Why: assistive technology must read an invalid textbox described by the server's message (WCAG 3.3.1, 4.1.2); Playwright's role engine is the reader.
+ * Shows: no aria-invalid before an error; a server error makes the field invalid and described by its message; editing the field clears it.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';

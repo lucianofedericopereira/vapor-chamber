@@ -124,11 +124,9 @@ export function createResponseCache(): ResponseCache {
 
     invalidate(matches) {
       for (const r of reads) if (matches(r.url)) r.stale = true;
-      const keysToDelete: string[] = [];
       // Matched on the entry's URL, never a parse of its key: the key also
       // holds the request's headers (tests/http-cache-headers.test.ts).
-      for (const [key, entry] of entries) if (matches(entry.url)) keysToDelete.push(key);
-      for (const key of keysToDelete) entries.delete(key);
+      for (const [key, entry] of entries) if (matches(entry.url)) entries.delete(key);
       // A read made after this must not join one already on the wire, which
       // may answer from before. Its callers keep their promise; only the
       // joining stops. Matched on the read's URL: the dedupe key also holds

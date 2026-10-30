@@ -1,7 +1,7 @@
 /**
- * Tier-1 branch mop-up - cheap, pure-logic branches reachable with plain calls
- * (no fetch/WS/storage mocks). Targets the leftover ternary/condition sides in
- * buildFullUrl, validateFields, and the Standard Schema validator.
+ * Pure-logic branches reachable with plain calls: buildFullUrl's baseURL join, schemaValidator's field kinds, the Standard Schema validator.
+ * Why: each is an input an app can send, and no other test reaches it; a relative path read as absolute sends the request elsewhere.
+ * Shows: baseURL joins with or without slashes, absolute URLs kept in any case, 'any' and 'array' fields, payload and both fields, object-keyed issue paths, unmapped actions pass.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -24,10 +24,7 @@ describe('branch mop-up - buildFullUrl', () => {
     expect(buildFullUrl('http://other.test/x', 'http://api.test')).toBe('http://other.test/x');
   });
 
-  // "absolute" was decided by startsWith('http'), which is also true of a
-  // RELATIVE path whose first segment happens to begin with those four
-  // letters. Two different failures fell out of the same test, and the second
-  // one is the loud half of a bug whose quiet half is worse.
+  // startsWith('http') is also true of a relative path such as 'httpbin/get'.
   it('treats a relative path beginning with "http" as relative, not absolute', () => {
     expect(buildFullUrl('httpbin/get', 'https://api.test')).toBe('https://api.test/httpbin/get');
     expect(buildFullUrl('http-logs', 'https://api.test')).toBe('https://api.test/http-logs');
@@ -70,8 +67,7 @@ function failingObjectPath(): StandardSchemaV1 {
     '~standard': {
       version: 1,
       vendor: 'fake',
-      // Path mixes an object segment ({ key }) and a primitive - covers both
-      // sides of describe()'s path mapping (plugins-schema.ts:99).
+      // An object segment ({ key }) and a primitive: both sides of describe()'s path mapping.
       validate: () => ({ issues: [{ message: 'bad', path: [{ key: 'field' }, 'sub'] }] }),
     },
   };

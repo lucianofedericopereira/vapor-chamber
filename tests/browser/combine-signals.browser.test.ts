@@ -1,4 +1,9 @@
-/** In Chromium: the helper's fallback matches the native `AbortSignal.any`, and a bridge's scope cancels its request without it (log 36.13). Note at the end. */
+/**
+ * In Chromium: `_combineSignals`' fallback matches the native `AbortSignal.any`, and a bridge's scope cancels its request without it.
+ * Why: the IIFEs target browsers, so the case a browser user meets runs in that engine; the DOM spec reports the first signal to abort.
+ * Shows: native and fallback both report the first to abort; disposing the scope cancels a request when the bridge has its own signal, with and without AbortSignal.any.
+ * See: log 36.13, tests/combine-signals.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../../src/command-bus';
 import { httpTransport } from '../../src/transports';
@@ -10,7 +15,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** b aborts, then a, and nobody reads the result in between: the reason it reports. */
+/** b aborts, then a, with no read between (Node's native then reports the first input, not the spec's): the reason it reports. */
 function reasonAfterTwoAborts(): unknown {
   const a = new AbortController();
   const b = new AbortController();
@@ -48,12 +53,3 @@ describe.each([['without AbortSignal.any', true], ['native (control)', false]])(
     expect([r.ok, (r.error as { code?: string })?.code, sent[0].aborted]).toEqual([false, 'core:aborted:dispatch', true]);
   });
 });
-
-/*
- * The Node suite (tests/combine-signals.test.ts) holds every case; this file
- * runs the one a browser user meets, in the engine the IIFEs target. The
- * reason case reads nothing between the two aborts on purpose: Node 24.21's
- * native result then reports the first INPUT's reason, where the DOM spec
- * aborts it at once with the first to abort. Chromium follows the spec, and
- * the fallback matches it.
- */

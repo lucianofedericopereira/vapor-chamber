@@ -1,4 +1,9 @@
-/** Two abort signals combine as `AbortSignal.any` does, with or without it, at every site (log 36.13, F1). Rationale at the end. */
+/**
+ * Two abort signals combine as `AbortSignal.any` does, with or without it, at every site: the helper, httpTransport, batches, supersede.
+ * Why: the IIFEs target browsers without `AbortSignal.any`, where a site that drops one signal cannot cancel; the bus reads the aborting input's reason.
+ * Shows: in both modes the first to abort wins with its reason; scope and bridge signals cancel requests and batches; supersede honours the caller; no listener outlives a request.
+ * See: log 36.13 F1, scripts/build.mjs.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Accepted } from '../src/accepted';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -33,7 +38,7 @@ function backend(ms = 300, batched = false) {
 const code = (r: { ok: boolean; value?: unknown; error?: unknown }) => (r.ok ? r.value : (r.error as { code?: string }).code);
 const later = (fn: () => void, ms = 5) => setTimeout(fn, ms);
 
-// The same cases in both modes: `native` is the control, green before and after the fix.
+// The same cases in both modes; `native` is the control.
 describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (control)', false]])('%s', (_name, fallback) => {
   const mode = () => { if (fallback) delete (AbortSignal as { any?: unknown }).any; };
 
@@ -51,6 +56,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
       expect([both.aborted, both.reason]).toEqual([true, ra]);
     });
 
+    // Read between the two aborts: Node's native result, read only after both, reports the first input's reason, not the spec's.
     it('the first input to abort aborts the result, with its reason', () => {
       mode();
       const a = new AbortController();
@@ -175,6 +181,7 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
     });
   });
 
+  // A bridge's signal and its scope are combined once for the bridge's life; per-request listeners must all go.
   describe('no listener left behind', () => {
     /** Live 'abort' listeners on one signal: added minus removed. */
     function live(signal: AbortSignal) {
@@ -234,30 +241,3 @@ describe.each([['without AbortSignal.any', true], ['native AbortSignal.any (cont
     });
   });
 });
-
-/*
- * F1 of the complexity review (.probes, log 36.13). "Combine two abort
- * signals" was written at seven sites with two behaviours. Where
- * `AbortSignal.any` is missing (Chrome before 116, Firefox before 124, Safari
- * before 17.4: every target the IIFEs are built for, scripts/build.mjs), five
- * sites kept one signal and dropped the other: the bridges' scope, the
- * bridge's signal under a dispatch signal, a batch's own controller under a
- * bridge signal, and supersede's caller signal. The sixth, http.ts's
- * combineSignals, combined both but missed an input already aborted and
- * aborted with no reason, where the native carries the aborting input's
- * reason (the bus reads it: abortedResult, _isCancel). Now one helper,
- * `_combineSignals`, with the native's semantics, at every site.
- *
- * Every case runs twice: with `AbortSignal.any` deleted (the fallback), and
- * with it present, the control, which passes before and after the fix. The
- * listener counts read added minus removed `abort` listeners on the one
- * signal that outlives a request; their positive control is a build with the
- * `detach` at a site removed, which turns them red (log 36.13). A
- * bridge-lifetime pair (the bridge's signal and its scope) is combined once
- * and never detached: its listeners live as long as the bridge.
- *
- * "The first input to abort" reads the result between the two aborts. Node
- * 24.21's own `AbortSignal.any` result, with no listener and not read until
- * both inputs aborted, reports the first INPUT's reason (b then a aborted:
- * a's), where the DOM spec aborts it with b's at once (probe, log 36.13).
- */

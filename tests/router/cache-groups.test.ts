@@ -1,4 +1,9 @@
-/** The router's loader data follows the server's cache groups; a 304 keeps the snapshot (step 3g). Rationale at the end. */
+/**
+ * The router's loader data follows the server's cache groups, a 304 keeps the snapshot, and revalidateRoutes listens to a bus.
+ * Why: a write that names a group must refresh exactly the current records whose reads carried it, past every cache, and stop on dispose; a stale read answered 304 must not re-render; an action matching two patterns must refresh both targets.
+ * Shows: against a real node:http server, a POST naming "cart" refetches /cart only (isRevalidating true meanwhile, second fetch with cache 'no-cache'); an unknown group, no matched route and a disposed router refresh nothing; dispose aborts a refresh in flight; a newer refresh supersedes an older one; a 304 keeps the same snapshot object, a changed read gives a new one; revalidateRoutes refreshes both pattern targets, stops after the returned off() and refreshes an Accepted only when its done is ok.
+ * See: log 36.53, RFC 9875
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -228,19 +233,3 @@ describe('revalidateRoutes on a bus, a listener of settled results', () => {
     router.dispose();
   });
 });
-
-/*
- * The server declares which reads a write made stale (RFC 9875, record revision 15):
- * a loader read's `Cache-Groups` reaches the router through `LoaderContext.cacheGroups`
- * (fetchLoaders reports it), and the router listens to its client's invalidated groups
- * (`onInvalidateGroup`). The router imports no bus: the client is the lane (revision 23
- * item 3). A refresh reads past the client's LRU and, with `cacheMode: 'no-cache'`, past
- * the browser's fresh copy, which can answer with a 304 the browser turns into its body.
- *
- * Decision B: a stale loader read refreshed with its ETag and answered 304 resolves to
- * the same data object, and the router writes no snapshot for it, so nothing re-renders.
- *
- * revalidateRoutes keeps its map and its call. It listens to the bus with one `on` per
- * pattern, the bus's matcher deciding; an action two patterns match refreshes both
- * targets. An `Accepted` refreshes on its `done`.
- */

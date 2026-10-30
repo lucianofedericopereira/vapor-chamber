@@ -1,4 +1,12 @@
-/** A form's commands and history's trigger actions run locally under a '*' transport: the library's own state changes. Rationale at the end. */
+/**
+ * A form's commands and history's `undoAction` / `redoAction` run locally under a '*' transport.
+ * Why: they are the library's own state changes, so if the bus sent them to the server the form's
+ * state would never change and history would never press undo, with no signal. The library declares
+ * them local once, at its own registration (`_asLibrary`), and an app action under '*' is still sent.
+ * Shows: form set/touch/setErrors/submit/reset and history undo/redo change local state and post
+ * nothing, the test bus behaves the same, and once the library registration ends (dispose or
+ * `bus.clear()`) an app handler of that name is sent.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';
@@ -92,13 +100,3 @@ describe("a '*' transport and the library's own commands", () => {
     expect(posted).toEqual(['historyUndo']);
   });
 });
-
-/*
- * A form's commands (`<id>Set`, `<id>Touch`, `<id>Reset`, `<id>Validate`,
- * `<id>Errors`) and history's `undoAction` / `redoAction` are the library's
- * own local state changes, named by the app. With a transport for every
- * action ('*') the bus sent them to the server: the form's state never
- * changed and history never pressed undo, with no signal. The library declares
- * them local once, at its own registration (`_asLibrary`), and the action's
- * record then has no transport. An app action under '*' is still sent.
- */

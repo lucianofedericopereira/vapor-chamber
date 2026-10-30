@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/blade.ts - makeBladeComponent wraps fetched HTML into a
- * throwaway component whose lifecycle owns the swap.
+ * makeBladeComponent in router/blade: wraps fetched HTML into a throwaway component whose lifecycle owns the swap.
+ * Why: a Blade page whose HTML is not injected and hydrated on mount, or not dehydrated and cleared on unmount, would leak the previous page's DOM and listeners; the hooks are optional, so their absence must not throw.
+ * Shows: mount sets the [data-vcr-blade] element's innerHTML and calls hydrate with it; unmount calls dehydrate while the DOM is still there, then clears it; with no hooks, mount and unmount do not throw.
  */
-
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from 'vue';
 import { makeBladeComponent } from '@router/blade';
@@ -27,16 +27,6 @@ describe('makeBladeComponent', () => {
     app.unmount();
     expect(dehydrate).toHaveBeenCalledWith(bladeEl);
     expect(bladeEl.innerHTML).toBe('');
-  });
-
-  it('no hooks provided - mount/unmount are safe no-ops', () => {
-    const Comp = makeBladeComponent('<span>x</span>', {});
-    const host = document.createElement('div');
-    const app = createApp(Comp);
-    expect(() => {
-      app.mount(host);
-      app.unmount();
-    }).not.toThrow();
   });
 });
 

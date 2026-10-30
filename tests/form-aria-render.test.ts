@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** form.aria() rendered in both renderers: an input's own hint stays named beside the error, and the render follows the error. Rationale at the end. */
+/**
+ * form.aria() and form.firstInvalid() rendered in the vdom and vapor renderers.
+ * Why: aria-describedby is an ID list; if the error id replaced an input's own hint, or the render did not follow the error, assistive tech would miss one of them.
+ * Shows: a spread input names its hint, then hint plus error id with aria-invalid; the render clears when the field changes; an effect reading firstInvalid() re-runs when an error shows.
+ * See: log 36.F42, WAI-ARIA 1.2 aria-describedby.
+ */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { configureVue } from '../src/chamber';
 import { createFormBus } from '../src/form';
@@ -75,14 +80,3 @@ it('control: an effect reading form.errors.value re-runs (the harness sees the f
   expect(runs).toBe(2);
   stop();
 });
-
-/*
- * `form.aria(field)` returned both keys always, `undefined` while valid. Spread
- * on an input that names its own hint, it removed the hint when written after
- * it, and the hint hid the error's id when written before it: one id lost
- * either way, in both renderers (B4 i, log 36.F42). WAI-ARIA 1.2 takes an ID
- * reference list for aria-describedby, so `aria(field, ids)` names the app's
- * ids, then the error's. It also read the form's plain state, not its signals,
- * so a render that called it never updated when the error showed (B4 i2).
- * It and firstInvalid() now read the field cells.
- */

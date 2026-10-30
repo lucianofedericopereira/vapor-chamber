@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** A sent answer that is an `Accepted` (a 202) applies to the stores when its `done` settles. Rationale at the end. */
+/**
+ * A sent answer that is an `Accepted` (a 202) applies to the stores when its `done` settles.
+ * Why: an `Accepted` is not the final state; applied at once, the store holds the `Accepted` and never the job's result.
+ * Shows: answer and declared stores land with done; a failed job writes nothing, a throwing answer fails done; nothing to apply follows nothing.
+ * See: log 36.F28, src/accepted.ts.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { type Command, type CommandResult, createAsyncCommandBus } from '../src/command-bus';
@@ -110,22 +115,3 @@ describe('controls', () => {
     cart.$dispose();
   });
 });
-
-/*
- * A 202 with a Location answers the dispatch an `Accepted`: the job goes on,
- * and `done` settles with what the status monitor ends on (src/accepted.ts).
- * The transport marked the command when it read the 202 (`answerOf`), so the
- * bus handed the store's `answer` the `Accepted` itself: the store held it
- * as its state, and the job's final state never reached it. The 202's
- * declared `stores` were written before the job was done.
- *
- * An `Accepted` is not the final state. The bus applies the action's `answer`
- * and the declared stores when `done` settles ok, with `done`'s value, as
- * cache groups invalidate (src/command-bus.ts, declareGroups). The dispatch
- * answers an `Accepted` whose `done` settles once they are written, so a
- * throwing `answer` fails `done`, as it fails a 200's dispatch. With nothing
- * to apply (no `answer` for the action, no store on the bus) the transport's
- * `Accepted` is handed on as it is, and nothing is followed until the app
- * reads `done`. An outbox hold is not marked: its replay is its own command,
- * answered once. Log 36.F28.
- */

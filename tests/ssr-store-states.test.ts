@@ -1,4 +1,9 @@
-/** SSR by the stores' states: the server reads them, the client seeds its stores, no replay. Rationale at the end. */
+/**
+ * SSR by the stores' states: storeStates reads the stores a request wrote, seedStores gives them to the client's stores, no replay.
+ * Why: a client that replayed server commands would end on a different state (a minted id, a clock), and a store the server never wrote would overwrite the client's saved state on every load.
+ * Shows: the page holds each written store by id and one request's page is its own; a store created before or after the seed starts from the server state, which wins over a persisted one; an unwritten store is left out of the page.
+ * See: log s36.64, s36.65, docs/store.md
+ */
 import { describe, expect, it } from 'vitest';
 import { _pushed } from '../src/applied-remotely';
 import { createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
@@ -122,16 +127,3 @@ describe('SSR by the stores states', () => {
     expect(storeStates(bus)).toEqual({});
   });
 });
-
-/*
- * Plan 1.32 4g. The SSR plugin recorded every command the server ran, and the
- * client replayed them: a reducer that minted an id or read a clock ended on a
- * different state in the browser (docs/store.md, "Loading state from the server"), and
- * the recorder sat on every server dispatch. Now the page carries the states:
- * `storeStates(bus)` reads each store on the request's bus, `seedStores(bus,
- * states)` gives them to the client's stores. A store already there takes its
- * state through its own write (a step, saved by persist, kept for an async
- * read's replay, so the server's state wins over a saved one); for an id with
- * no store yet the state waits in the bus's store registry, where the store's
- * creation already looks, and a server's push for that id updates it.
- */

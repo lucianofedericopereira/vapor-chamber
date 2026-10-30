@@ -1,3 +1,9 @@
+/**
+ * src/chamber.ts composables on the shared bus: getCommandBus, useCommand, signal(), useCommandHistory, useCommandGroup, useCommandError, useCommandQuery.
+ * Why: this is the Vue surface every app calls; signal() is a shallow ref because state is only ever replaced whole, and a deep ref proxies every write.
+ * Shows: one replaceable shared bus; dispatch, pending, failures as results; shallow signals still react; history records, undoes, redoes, filters, caps, disposes; groups prefix; errors and queries captured.
+ * See: docs/performance.md, tests/chamber-gaps.test.ts.
+ */
 import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getCommandBus,
@@ -123,11 +129,7 @@ describe('signal() factory - shallow reactivity', () => {
     resetCommandBus();
   });
 
-  // Regression guard: the library auto-wires Vue's shallowRef (not ref) because
-  // it only ever replaces signal values wholesale. Reverting to ref() would
-  // reintroduce the per-write deep-Proxy (toReactive) cost on object/array state
-  // (measurably slower on an array state written per dispatch, docs/performance.md).
-  // These assertions fail if signal() goes back to a deep ref.
+  // These fail if signal() goes back to a deep ref.
   it('returns a SHALLOW Vue ref once Vue is detected', async () => {
     await waitForVueDetection();
     const s = signal({ nested: { n: 1 } });
@@ -264,9 +266,7 @@ describe('useCommandHistory', () => {
     bus.register('testAction', () => 'done');
     const { past, future, undo, redo } = useCommandHistory();
 
-    // A PRIMITIVE payload has nowhere to stamp `__origin: 'redo'`, so the
-    // one-shot `expectedRedo` identity fallback is what stops the replayed
-    // dispatch from being recorded as a brand-new command.
+    // A primitive payload cannot be marked, so the one-shot identity match stops the replay being recorded again.
     bus.dispatch('testAction', { id: 1 }, 'primitive-payload' as never);
     expect(past.value).toHaveLength(1);
 
@@ -359,10 +359,6 @@ describe('useCommandHistory', () => {
     expect(past.value.length).toBe(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// useCommandGroup
-// ---------------------------------------------------------------------------
 
 describe('useCommandGroup', () => {
   beforeEach(() => resetCommandBus());
@@ -474,10 +470,6 @@ describe('useCommandGroup', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// useCommandError
-// ---------------------------------------------------------------------------
-
 describe('useCommandError', () => {
   beforeEach(() => resetCommandBus());
 
@@ -530,10 +522,6 @@ describe('useCommandError', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// useCommand async loading fix
-// ---------------------------------------------------------------------------
-
 describe('useCommand async pending', () => {
   beforeEach(() => resetCommandBus());
 
@@ -578,10 +566,6 @@ describe('useCommand async pending', () => {
     expect(result.error?.message).toBe('async boom');
   });
 });
-
-// ---------------------------------------------------------------------------
-// useCommandQuery
-// ---------------------------------------------------------------------------
 
 describe('useCommandQuery', () => {
   beforeEach(() => resetCommandBus());
@@ -633,10 +617,6 @@ describe('useCommandQuery', () => {
   });
 
 });
-
-// ---------------------------------------------------------------------------
-// useCommandHistory - undo/redo with registered undo handler
-// ---------------------------------------------------------------------------
 
 describe('useCommandHistory - undo handler execution', () => {
   beforeEach(() => { setCommandBus(createCommandBus()); });

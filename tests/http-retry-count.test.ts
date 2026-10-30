@@ -1,4 +1,9 @@
-// The HTTP `retry.maxAttempts` follows the count rule (src/bounds.ts countOption). See the note at the end of this file.
+/**
+ * The HTTP `retry.maxAttempts` follows the bus's count rule (countOption(maxAttempts, 3, 1)).
+ * Why: a negative, NaN or fractional count must never leave the retry loop without a BusError; a count below 1 would send nothing and hand the caller a raw Error.
+ * Shows: below 1 sends once, NaN takes the default of 3 attempts, 2.5 is truncated to 2, each ending in a remote: BusError on a 503; a count of 2 re-sends once; retry false on a 200 sends once.
+ * See: src/bounds.ts, log 36.17, log 36.50
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusError } from '../src/failure';
 import { createHttpClient, postCommand } from '../src/http';
@@ -67,22 +72,3 @@ describe('HTTP retry.maxAttempts: a value the count rule normalizes', () => {
     expect(r.sent).toBe(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Why this file exists
-// ---------------------------------------------------------------------------
-//
-// Found while collapsing http.ts runWithRetry (log 36.17, F12): the line after
-// its loop, `throw new Error('unreachable')`, was reachable. The client's
-// `retry` and postCommand's went to the loop unchecked, while every other
-// count in src goes through countOption. A negative or NaN `retry` failed the
-// loop's first test, so nothing was sent and the caller got a raw
-// `Error('unreachable')`, not a BusError. A fractional one (1.5) made its
-// last re-send and then fell out of the loop the same way. Red before: the
-// five cases above; the two controls passed.
-//
-// Step 3d of plan 1.32 (log 36.50): the count became the bus's bound,
-// `retry: { maxAttempts }` (attempts in total, at least 1, default 3), read
-// by the same rule as the bus's (`countOption(maxAttempts, 3, 1)`). The cases
-// keep their shapes: below 1 sends once, NaN takes the default, a fraction is
-// truncated.

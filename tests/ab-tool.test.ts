@@ -1,4 +1,9 @@
-// The A/B tool's verdicts on synthetic replicates, and one real run of it.
+/**
+ * The A/B tool's verdicts on synthetic replicates, and one real run of it (scripts/ab).
+ * Why: the verdicts decide whether a speed claim is made; each refusal seeds its one defect, so a loosened gate turns red.
+ * Shows: seeded effects found, A/A finds nothing; wide or off-centre controls, off-CPU time, load-order sign refused; smoke checks shape, not speed.
+ * See: log s35.48.
+ */
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -165,12 +170,3 @@ describe('ab tool: smoke', () => {
     }
   });
 });
-
-// Why synthetic replicates: the verdict logic is what decides whether a speed
-// claim is made, and a timing run cannot be seeded. Each refusal test seeds the
-// one defect it names (a wide control, an off-centre control, off-CPU time,
-// load-order dependence) under an effect large enough that only the gate can
-// stop it, so a gate removed or loosened turns that test red. The off-centre
-// case is the one log s35.48 found: an A/A control of 0.953 with a 1.3% spread
-// passed a gate that checked the spread only. The smoke test asserts shape, not
-// speed: two processes per phase and four rounds measure nothing.

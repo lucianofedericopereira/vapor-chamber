@@ -1,11 +1,8 @@
 /**
- * Tests for router/composables.ts - useRouter/useRoute/useQueryParam/
- * useRouteData/useRouteError/useMenu/useBreadcrumbs/onBeforeLeave.
- *
- * Composables read through inject(ROUTER_KEY), so each call runs inside an app
- * context via app.runWithContext() - no component mount needed.
+ * The router composables: useRouter, useRoute, useQueryParam, useRouteData, useRouteError, useMenu, useBreadcrumbs, onBeforeLeave and usePagination.
+ * Why: components read router state through these; a wrong default, a ref that does not unwrap or track the URL, a pager that goes out of range, or a leave guard that is not released would break the page or the navigation.
+ * Shows: useRouter throws router:missing:router without a provider; useRoute and useQueryParam track the URL and write back through it (default, push, replace, clear); useRouteData is undefined with no data or before the first navigation; useRouteError reads and clears lastError; onBeforeLeave refuses only on false and is released by scope stop or off(); usePagination reads the plain and { data, meta } envelopes, derives and clamps bounds, pushes history for a custom key unless the route declares replace, and builds pageRange with elisions; useMenu's array survives a query commit.
  */
-
 import { describe, expect, it, vi } from 'vitest';
 import { computed, createApp, effectScope, isRef, unref } from 'vue';
 import { isRouterError } from '@router/errors';
@@ -44,7 +41,7 @@ function makeRouter() {
   });
 }
 
-/** Run a composable inside an app context so inject(ROUTER_KEY) resolves. */
+/** Run a composable inside an app context so inject(ROUTER_KEY) resolves; no component mount needed. */
 function withRouter<T>(router: ReturnType<typeof makeRouter>, fn: () => T): T {
   const app = createApp({});
   app.provide(ROUTER_KEY, router);
@@ -65,8 +62,6 @@ describe('router composables', () => {
     } catch (error) {
       caught = error;
     }
-    // Was a bare Error - the only failure in this router a handler could not
-    // switch on. The message is unchanged; the code is new.
     expect(isRouterError(caught, 'router:missing:router')).toBe(true);
   });
 
@@ -122,17 +117,12 @@ describe('router composables', () => {
   });
 
   it('useRouteData is undefined before the first navigation resolves', async () => {
-    // `name ? data.get(name) : undefined` - the else arm. Until isReady()
-    // settles, `location.matched` is EMPTY, so there is no leaf record to name
-    // and the lookup must be skipped rather than called with undefined. This
-    // is the real shape for any component whose setup() runs during the very
-    // first navigation.
+    // Until isReady() settles, location.matched is empty: no leaf record to name, so the lookup is skipped.
     const router = makeRouter();
     expect(router.currentRoute.value.location.matched).toEqual([]);
 
     expect(withRouter(router, () => useRouteData()).value).toBeUndefined();
 
-    // Once a route is matched the same composable starts resolving a name.
     await router.isReady();
     expect(router.currentRoute.value.location.matched.length).toBeGreaterThan(0);
     router.dispose();
@@ -147,6 +137,19 @@ describe('router composables', () => {
     expect((latestError.value as Error).message).toBe('boom');
     clear();
     expect(latestError.value).toBeNull();
+  });
+
+  it('useMenu keeps its array across a query commit and rebuilds on a path', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/list');
+    const menu = withRouter(router, () => useMenu());
+    const before = menu.value;
+    await router.push('/list?q=a');
+    expect(router.currentRoute.value.location.query.q).toBe('a');
+    expect(menu.value).toBe(before);
+    await router.push('/');
+    expect(menu.value).not.toBe(before);
   });
 
   it('useMenu and useBreadcrumbs project the table', async () => {
@@ -188,8 +191,7 @@ describe('useQueryParam is a real ref', () => {
     await router.isReady();
     withRouter(router, () => {
       const page = useQueryParam<number>('page');
-      // A real ref, so Vue unwraps it in templates like useRoute/useRouteData/
-      // useMenu (a plain object with a `value` accessor would need `.value`).
+      // A plain object with a `value` accessor would not unwrap in templates.
       expect(isRef(page)).toBe(true);
       expect(unref(page)).toBe(page.value);
       expect(typeof page.push).toBe('function');
@@ -305,7 +307,7 @@ describe('usePagination', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(router.currentRoute.value.location.query.page).toBe('3');
 
-    p.prev(); // 4 -> 3
+    p.prev(); // 3 -> 2
     await new Promise((r) => setTimeout(r, 20));
     expect(router.currentRoute.value.location.query.page).toBe('2');
 
@@ -319,9 +321,6 @@ describe('usePagination', () => {
     router.dispose();
   });
 
-  // Item 26: the push convention lives in `resolveQueryHistory`, keyed on the
-  // literal string 'page' - so a custom key silently lost the history half of
-  // usePagination's documented promise.
   it('a custom key still pushes, so Back steps through pages', async () => {
     const CUSTOM: RouteRecord[] = [
       { name: 'home', path: '/', component: 'List' },
@@ -351,7 +350,6 @@ describe('usePagination', () => {
 
     router.back();
     await new Promise((r) => setTimeout(r, 20));
-    // Was '1' - both writes had been replaceState, so Back skipped the trail.
     expect(router.currentRoute.value.location.query.p).toBe('2');
     router.dispose();
   });
@@ -460,10 +458,6 @@ describe('usePagination', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// usePagination - remaining fallback branches (rev: coverage push)
-// ---------------------------------------------------------------------------
-
 describe('usePagination - extractor fallbacks and pageRange elisions', () => {
   const PAGED: RouteRecord[] = [
     {
@@ -542,10 +536,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
   });
 
   it('pageRange elides only the near side when current sits near the END', async () => {
-    // The mirror of the test above, and the `if (end < last - 1)` FALSE arm:
-    // with the window butting against the last page there is no right-hand
-    // elision to add. Only the near-start case was covered, so the symmetry
-    // this function is built around was asserted on one side only.
+    // The mirror of the near-start case: a window against the last page has no right-hand elision.
     const router = pagedRouter({ items: [], total: 500, per_page: 10, last_page: 50 });
     await router.isReady();
     await router.push('/items?page=49');
@@ -562,19 +553,14 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
   });
 
   it('treats page=0 as page 1 rather than falling off the bottom', async () => {
-    // `Number(page.value) || 1` - the `|| 1` arm. `?page=abc` does NOT reach
-    // it (the int caster substitutes the declared default 1, which is truthy);
-    // a declared-but-zero value does, and 0 is exactly what an off-by-one
-    // caller or a 0-indexed backend sends.
+    // Zero parses as a valid int (a 0-indexed backend sends it), so the clamp handles it.
     const router = pagedRouter({ items: [], total: 30, per_page: 10, last_page: 3 });
     await router.isReady();
     await router.push('/items?page=0');
     withRouter(router, () => {
       const p = usePagination();
-      // `page` is the raw query ref and reports what the URL said...
-      expect(p.page.value).toBe(0);
-      // ...but every DERIVED bound runs off the clamped `current`, so a 0 in
-      // the URL behaves as page 1 instead of producing an empty pager.
+      expect(p.page.value).toBe(0); // the raw query value
+      // Derived bounds run off the clamped current page, so 0 behaves as page 1.
       expect(p.hasPrev.value).toBe(false);
       expect(p.hasNext.value).toBe(true);
       expect(p.pageRange.value).toEqual([1, 2, 3]);
@@ -587,10 +573,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
   });
 
   it('treats an uncastable page value as page 1 rather than NaN', async () => {
-    // `Number(page.value) || 1`. The `page` query is declared `type: 'int'`,
-    // but castParam falls back to the RAW STRING when a segment will not
-    // parse - so `?page=abc` reaches the composable as 'abc'. Without the
-    // `|| 1`, `current` becomes NaN and every derived bound goes with it.
+    // An int query that does not parse decodes to the declared default 1.
     const router = pagedRouter({ items: [], total: 30, per_page: 10, last_page: 3 });
     await router.isReady();
     await router.push('/items?page=abc');
@@ -604,15 +587,9 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// onBeforeLeave / useRouteData - the arms the happy-path tests skip
-// ---------------------------------------------------------------------------
-
 describe('onBeforeLeave - allowing arms', () => {
   it('lets navigation through when the guard returns anything but false', async () => {
-    // The existing guard test always refuses, so `verdict === false ? false :
-    // undefined` only ever produced `false`. A guard that returns nothing (the
-    // common "just observe" shape) must NOT be read as a refusal.
+    // A guard that returns nothing (just observes) is not a refusal.
     const router = makeRouter();
     await router.isReady();
 
@@ -636,10 +613,7 @@ describe('onBeforeLeave - allowing arms', () => {
   });
 
   it('returns a working off() when called outside any effect scope', async () => {
-    // `if (getCurrentScope())` FALSE arm. Every existing caller runs inside
-    // effectScope().run(), so the no-scope path - a guard registered from
-    // plain module or setup-less code - had no coverage. There is nothing to
-    // auto-dispose it, so the returned off() is the only way back.
+    // With no effect scope nothing auto-disposes the guard, so the returned off() is the only way to remove it.
     const router = makeRouter();
     await router.isReady();
 

@@ -1,4 +1,9 @@
-/** routerFacts emits a fact after a navigation commits or fails, never a command. The long note is at the end. */
+/**
+ * routerFacts emits a fact after a navigation commits or fails, and never dispatches a command.
+ * Why: if a navigation were a dispatched command, the bus's guards and hooks would gate it; if no fact were emitted, bus plugins, listeners and DevTools could not see navigations.
+ * Shows: routerNavigated carries to and from with no meta and no dispatch; routerFailed carries the error and target; a refusal and a query-only change emit nothing; the stop, and stopping a Vue scope, end both subscriptions; without routerFacts nothing is emitted.
+ * See: log s35.215
+ */
 import { describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus } from '../../src/command-bus';
@@ -28,7 +33,7 @@ describe('routerFacts', () => {
       ['routerNavigated', '/', '/'],
       ['routerNavigated', '/', '/list'],
     ]);
-    // Facts, not commands: no meta, and no dispatch reached the hooks.
+    // Facts carry no meta and reach no dispatch hook.
     expect(heard.every((h) => h.meta === undefined)).toBe(true);
     expect(commands).toEqual([]);
   });
@@ -85,12 +90,3 @@ describe('routerFacts', () => {
     expect(heard).toEqual([]);
   });
 });
-
-/*
- * Log s35.215. A navigation is not a command, so the
- * bus's plugins, listeners and DevTools never saw one. routerFacts emits a fact
- * (bus.emit) from the router's own commit hook (afterEach) and failure hook
- * (onError). It never dispatches: the router's guards stay the gate, and a
- * refusal or a superseded navigation is an answer, not a failure, so it emits
- * nothing. The listener here is a real bus's `on('router*')`.
- */

@@ -1,22 +1,11 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - provide/inject on a real Vapor app, vue@3.6.0-rc.2.
+ * provide/inject on a real Vapor app, loaded from the with-vapor browser build of `vue`.
+ * Why: composables read the router through `app.provide` and nested outlets through component `provide()`, so a Vapor runtime that dropped either would leave them without a router or depth.
+ * Shows: a component injects the app-level value and its child injects the component-level value, in one mounted Vapor app.
+ * See: vuejs/core#13687
  *
- * Two things this router depends on, MEASURED here rather than inferred:
- *   - app.provide -> inject   backs every composable (composables.ts useRouter)
- *   - provide() -> inject     backs nested outlets (outlet.ts OUTLET_DEPTH_KEY)
- *
- * The roadmap (vuejs/core#13687) listed "Provide/Inject System" unchecked when
- * this fixture was written, and now lists it checked. The measurements are
- * what they always were; only the framing changed. Note the rule cuts both
- * ways and this file is the reason it can be applied honestly: an unchecked
- * box never meant missing, and a checked one does not mean working.
- *
- * Everything is imported from the single with-vapor browser build on purpose.
- * In Node, Vapor ships as a separate dist file (see chamber.ts §probeVue: the
- * bare `vue` has none here), and two separately-imported Vue dists are two disconnected
- * reactivity instances - mixing `vue` and the with-vapor build in one test would
- * silently measure nothing.
+ * Everything comes from the single with-vapor build: two separately imported Vue dists are two disconnected reactivity instances.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -61,8 +50,6 @@ describe('provide/inject on a vapor app', () => {
     app.provide(APP_KEY, 'app-level OK');
     app.mount(document.createElement('div'));
 
-    // MEASURED on 3.6.0-rc.2: both resolve. Upstream now agrees (the roadmap
-    // box is checked), but the assertion - not the box - is why we rely on it.
     expect(appLevel).toBe('app-level OK');
     expect(componentLevel).toBe('component-level OK');
   });

@@ -1,4 +1,9 @@
-/** Every built-in plugin behaves the same wherever it is installed: on a command the transport sends, or on a local handler. The long note is at the end. */
+/**
+ * Each built-in plugin on a command the bus's transport sends and on one a local handler runs.
+ * Why: if a plugin behaved differently depending on whether the work is a POST or a local handler, an app's refusal, cache, rollback or log would change with how an action is wired.
+ * Shows: for each plugin, one outcome an app sees (a request not sent, an entry recorded, a refusal, a rollback run) is identical in both arrangements.
+ * See: log s36.43, s36.45
+ */
 import { existsSync, writeFileSync } from 'node:fs';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { type AsyncCommandBus, type CommandResult, createAsyncCommandBus } from '../src/command-bus';
@@ -36,8 +41,7 @@ function world(arrangement: Arrangement, install: (bus: AsyncCommandBus, w: Worl
   });
   const bus = createAsyncCommandBus({ retry: false, transport: arrangement === 'sent' ? httpTransport({ endpoint: '/vc' }) : undefined });
   const w: World = { bus, work: () => work, peak: () => peak, failing: (on) => { fail = on; } };
-  // Each action has its undo; `save` takes the options a row declares. Sent,
-  // an action has no handler (`null`), unless `optimistic` makes it the change shown.
+  // Each action has an undo; `save` takes the row's options. Sent, an action has no handler (`null`) unless `optimistic` shows the change.
   for (const action of ['save', 'load', 'search']) {
     const opts = { undo: () => { undone++; }, ...(action === 'save' ? saveOptions : {}) };
     const handler = async (cmd: { signal?: AbortSignal }) => busy(() => { if (fail) throw new Error('down'); return 'ok'; }, cmd.signal);
@@ -177,18 +181,3 @@ describe('every built-in plugin behaves the same wherever it is installed', () =
     });
   }
 });
-
-/*
- * The goal of the work after the 1.32 reset (handoff-streams.md, RESET note),
- * written as a test so no plan, prompt or agent can redefine it: a plugin
- * behaves the same wherever it is installed. Each case states what the plugin
- * is for as one value an app sees (a request not sent, an entry recorded, a
- * refusal, a rollback run) and checks it on a command the bus's transport
- * sends and on one a local handler runs. Step 1 of .probes/plan-1.32.md wrote
- * three arrangements: the plugin installed before the bridge, after it, and on
- * a local handler, each row `it.fails` while "after the bridge" differed.
- * Step 3a declares the transport at the bus. It is the work, inside every
- * plugin, so "after" no longer exists and every row is `it`. History (4h) and
- * the outbox (4i) are no longer plugins: history records after the chain and
- * the outbox holds at the work step, so they have no install position.
- */

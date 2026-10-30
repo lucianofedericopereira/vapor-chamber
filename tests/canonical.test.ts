@@ -1,16 +1,13 @@
 /**
- * canonical() - RFC 8785 (JCS) against the RFC's own examples; keyTextFor, the runtime key.
- *
- * The cases are the RFC's: the 3.2.2 sample and its 3.2.3 output, the 3.2.4
- * UTF-8 bytes, the 3.2.3 sorting data, and Appendix B's number table, each
- * IEEE 754 value built from its hex. The refusals are 3.2.2.2 (lone
- * surrogates) and 3.2.2.3 (NaN, Infinity). keyTextFor writes the runtime key text: it
- * lists integer-like keys first and writes a lone surrogate escaped (src/canonical.ts).
- * Characters beyond ASCII are built from their code units (ASCII-only files).
+ * canonical(): RFC 8785 (JCS) against the RFC's own examples; keyTextFor, the runtime key text.
+ * Why: JCS output is only worth having if it matches the RFC exactly; the runtime key needs one text per value, even for what JCS refuses.
+ * Shows: the 3.2.2 sample, its 3.2.4 bytes, 3.2.3 sorting and Appendix B numbers; the 3.2.2.2 and 3.2.2.3 refusals; keyTextFor's integer-first keys and escaped surrogates.
+ * See: RFC 8785, src/canonical.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { canonical, keyTextFor } from '../src/canonical';
 
+// Characters beyond ASCII are built from their code units: the files are ASCII only.
 const ch = (...units: number[]): string => String.fromCharCode(...units);
 const U = '\\' + 'u'; // a JSON \u escape, written out as text
 const EURO = ch(0x20ac);

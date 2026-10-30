@@ -1,4 +1,9 @@
-/** createTestBus().dispatchBatch runs the real bus's batch rule: transactional rolls back, continueOnError continues (log s35.176). Rationale at the end. */
+/**
+ * createTestBus().dispatchBatch and the real bus's dispatchBatch, run against the same handlers.
+ * Why: a test double that ignores `transactional` or `continueOnError` would leave a batch applied in tests that the real bus rolls back.
+ * Shows: on both buses a transactional batch rolls back what ran, continueOnError runs every command, and with no option the batch stops at the first failure.
+ * See: log s35.176
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
@@ -34,12 +39,3 @@ describe('dispatchBatch, on the double and the bus alike', () => {
     });
   }
 });
-
-/*
- * testing.ts's own rule: a test double must not diverge from the bus it
- * doubles. Its dispatchBatch ignored `transactional` and `continueOnError`:
- * a transactional batch whose second command failed left the first applied
- * on the TestBus (`[1, null]`) and rolled back on the real bus (`[0, 1]`)
- * (audit T2, probe L3). Both now call the one batch rule, `_syncBatch` in
- * command-bus.ts, so there is no copy to drift. Log s35.176.
- */

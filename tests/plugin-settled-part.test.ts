@@ -1,4 +1,9 @@
-/** A plugin's `settled` part: the bus places it on the settled result, never in the chain. The long note is at the end. */
+/**
+ * A plugin's `settled` part (logger, schemaLogger) on the sync, async and test buses.
+ * Why: an observer must hear every settled outcome, a rule's refusal included, wherever it is installed; a plugin object that declares no part the bus places would silently do nothing.
+ * Shows: the logger logs a refusal, a success and a query once each, stops after its remover runs, logs a throwing part without changing the dispatch result, runs only on its `actions` scope, and `use()` refuses an object with no placed part.
+ * See: log s36.98.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type BaseBus } from '../src/command-bus';
 import { logger } from '../src/plugins-core';
@@ -87,14 +92,3 @@ describe.each(BUSES)('a settled part on the %s bus', (_name, make) => {
     expect(() => bus.use({ id: 'empty' } as never)).toThrow(expect.objectContaining({ code: 'core:invalid:plugin' }));
   });
 });
-
-/*
- * Plan 1.32 step 7a (.probes/step-7-pickup.md). An observer reads the settled
- * result (plan 3, the Listeners row), so `logger` and `schemaLogger` are parts
- * objects: `use()` places their `settled` part where `onAfter` hooks run, and
- * no chain level holds them. They hear every outcome a hook hears, a
- * before-hook's cancel included, in any install order
- * (tests/same-in-any-order.test.ts). The control rows show the scenario works.
- * A parts object that declares no part the bus places is refused, as a
- * transport is: `use()`'s rule is a function, or an object with a placed part.
- */

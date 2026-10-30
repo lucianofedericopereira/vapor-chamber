@@ -40,6 +40,23 @@ export async function compileVapor(v: VaporApi, source: string): Promise<Compile
 }
 
 /**
+ * The component a Vapor SFC compiles to, for a fixture that hydrates. An SFC
+ * also carries `__multiRoot` when its template has several roots: compileScript
+ * stamps it, and a component without it does not claim the server's `<!--[-->`,
+ * so hydration recreates its first root (Vue 3.6.0-rc.14 #16052).
+ */
+export async function compileVaporComponent(v: VaporApi, source: string, ctx: unknown): Promise<unknown> {
+  const { multiRoot } = (await import('vue/compiler-sfc')).compileTemplate({
+    source,
+    filename: 'T.vue',
+    id: 'vc-fixture',
+    vapor: true,
+  });
+  const { render } = await compileVapor(v, source);
+  return v.defineVaporComponent({ __multiRoot: multiRoot, setup: () => render(ctx) });
+}
+
+/**
  * The generated module source alone, for a fixture that binds it somewhere
  * this file cannot run (see tests/bind-vapor.ts). `isProd` is the compiler's
  * own production switch, as a production SFC build sets it.

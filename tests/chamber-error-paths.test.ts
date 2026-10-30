@@ -1,7 +1,7 @@
 /**
- * Covers the error/async branches in chamber.ts composables that the happy-path
- * tests miss: runDispatch (sync-throw + async success/error), useSharedCommandState
- * error recording, and undo/redo handler error handling.
+ * chamber.ts composables on their failure paths: useCommand, useSharedCommandState, useCommandHistory.
+ * Why: a failing or throwing dispatch must end as a failed result or a recorded error, never a stuck pending flag or an exception out of undo/redo.
+ * Shows: a sync throw and an async failure are failed results with nothing pending; the shared state records both; a throwing undo or redo is caught.
  */
 import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import {

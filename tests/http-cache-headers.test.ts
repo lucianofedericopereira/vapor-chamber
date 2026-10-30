@@ -1,12 +1,7 @@
 /**
- * The HTTP client's cache keys a response by the request headers too.
- *
- * The dedupe key already held the request's headers - they change the answer
- * (Authorization, Accept-Language) - but the cache key was the URL alone. One
- * client whose headers changed (a sign-in as another user, a language switch)
- * was served the earlier answer: one user's `/me` to another, Italian copy for
- * an English request. The cache key now holds the headers as the dedupe key
- * does, and invalidation still matches by URL.
+ * The HTTP client's cache and in-flight dedupe key a response by the request headers as well as the URL.
+ * Why: headers such as Authorization and Accept-Language change the answer, so a key on the URL alone would serve one user's /me to another or Italian copy to an English request.
+ * Shows: different Authorization or Accept-Language values fetch separately, the same headers hit the cache, header order and case do not matter (cache and in-flight), and a write to the URL drops every header variant.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';

@@ -1,5 +1,8 @@
 /**
- * Tests for the schema layer: toTools, schemaLogger, synthesize, createSchemaCommandBus
+ * Schema layer: toTools, schemaLogger, schemaValidator, synthesize, describeSchema, createSchemaCommandBus.
+ * Why: a wrong tool definition, or a validator that lets a malformed LLM call through, would hand handlers bad data.
+ * Shows: tool definitions match the schema, bad target/payload shapes are rejected before the handler, validate: false skips the check, retry metadata follows the retry rule; an action with no fields asks for no validate step.
+ * See: src/schema.ts, src/tool-schema.ts
  */
 
 import { describe, expect, vi } from 'vitest';
@@ -34,10 +37,6 @@ const cartSchema: BusSchema = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// toTools
-// ---------------------------------------------------------------------------
-
 describe('toAnthropicTools', () => {
   it('converts schema to Anthropic tool definitions', () => {
     const tools = toAnthropicTools(cartSchema);
@@ -46,7 +45,7 @@ describe('toAnthropicTools', () => {
     expect(tools[0].name).toBe('cartAdd');
     expect(tools[0].description).toBe('Add item to cart');
     expect(tools[0].input_schema.type).toBe('object');
-    // Typed fields are required, as busToMcpTools says them (tool-schema.ts).
+    // Typed fields are required, as in the MCP tool schema.
     expect(tools[0].input_schema.properties.target).toEqual({
       type: 'object', properties: { id: { type: 'number' } }, required: ['id'],
     });
@@ -94,10 +93,6 @@ describe('toTools provider switch', () => {
     expect(tools[0]).toHaveProperty('function');
   });
 });
-
-// ---------------------------------------------------------------------------
-// schemaLogger
-// ---------------------------------------------------------------------------
 
 describe('schemaLogger', () => {
   it('logs action with description', ({ bus }) => {
@@ -152,12 +147,8 @@ describe('schemaLogger', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// synthesize - mocked LLM
-// ---------------------------------------------------------------------------
-
 describe('synthesize', () => {
-  /** Helper: create an adapter that returns a specific tool call */
+  // Adapter that returns one fixed tool call, standing in for the LLM.
   function makeAdapter(toolName: string, input: Record<string, any>) {
     return vi.fn(async (_tools: AnthropicTool[], _text: string) => ({ name: toolName, input }));
   }
@@ -203,17 +194,12 @@ describe('synthesize', () => {
   });
 
   it('returns error when adapter returns invalid result', async ({ bus }) => {
-    // Adapter returns a tool name that doesn't exist - dispatch will fail
     const adapter = vi.fn(async () => ({ name: 'nonExistent', input: {} }));
 
     const result = await synthesize(cartSchema, bus, 'tell me a joke', { adapter });
     expect(result).toFailWith('core:missing:handler');
   });
 });
-
-// ---------------------------------------------------------------------------
-// createSchemaCommandBus
-// ---------------------------------------------------------------------------
 
 describe('createSchemaCommandBus', () => {
   it('exposes toTools() on the bus', () => {
@@ -258,10 +244,6 @@ describe('createSchemaCommandBus', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createAsyncSchemaCommandBus
-// ---------------------------------------------------------------------------
-
 describe('createAsyncSchemaCommandBus', () => {
   it('dispatch is async', async () => {
     const bus = createAsyncSchemaCommandBus(cartSchema);
@@ -295,10 +277,6 @@ describe('createAsyncSchemaCommandBus', () => {
     expect(bus.getSchema()).toHaveProperty('cartAdd');
   });
 });
-
-// ---------------------------------------------------------------------------
-// schemaValidator
-// ---------------------------------------------------------------------------
 
 describe('schemaValidator', () => {
   it('passes command when fields match schema', ({ bus }) => {
@@ -345,12 +323,7 @@ describe('schemaValidator', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // Item 32a: both guards were `typeof x === 'object'`, so a non-object value
-  // bypassed the whole block and reached the handler malformed. Required-ness
-  // was enforced only for callers who already passed an object - and the
-  // caller class this gate exists for (an LLM, via the MCP layer's raw
-  // `args?.payload`) is exactly the one that sends a string where an object
-  // belongs.
+  // A non-object target/payload must fail, not skip the check: an LLM caller sends a string where an object belongs.
   describe('non-object target/payload (item 32a)', () => {
     const cases: Array<[string, unknown]> = [
       ['null', null],
@@ -384,9 +357,7 @@ describe('schemaValidator', () => {
     }
 
     it('an ABSENT payload still passes when the schema declares one', ({ bus }) => {
-      // undefined is not "the wrong shape", it is "not provided" - and the MCP
-      // tool schema only requires `payload` for actions that declare one, so
-      // this stays the documented skip.
+      // undefined means "not provided", not a wrong shape, so it is skipped.
       bus.use(schemaValidator(cartSchema));
       bus.register('cartClear', () => 'ok');
 
@@ -394,8 +365,6 @@ describe('schemaValidator', () => {
     });
   });
 
-  // Item 32b: `'object'` was excluded from BOTH the array branch and the
-  // typeof branch, so it was presence-checked only.
   describe("'object' fields are type-checked (item 32b)", () => {
     const searchSchema: BusSchema = {
       search: { target: { q: 'string' }, payload: { filters: 'object' } },
@@ -437,10 +406,6 @@ describe('schemaValidator', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// describeSchema
-// ---------------------------------------------------------------------------
-
 describe('describeSchema', () => {
   it('produces a plain-text summary', () => {
     const text = describeSchema(cartSchema);
@@ -463,10 +428,6 @@ describe('describeSchema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// fromToolCall
-// ---------------------------------------------------------------------------
-
 describe('fromToolCall (sync bus)', () => {
   it('dispatches from a tool_use block', () => {
     const bus = createSchemaCommandBus(cartSchema);
@@ -488,12 +449,10 @@ describe('fromToolCall (sync bus)', () => {
     const bus = createSchemaCommandBus(cartSchema);
     bus.register('cartClear', () => 'cleared');
 
-    // With auto-validation enabled, missing required 'force' field is rejected
     const invalid = bus.fromToolCall({ name: 'cartClear' });
     expect(invalid.ok).toBe(false);
     expect(invalid.error?.message).toContain('force');
 
-    // Valid call with required field
     const valid = bus.fromToolCall({ name: 'cartClear', input: { target: { force: true } } });
     expect(valid).toSucceedWith('cleared');
   });
@@ -513,10 +472,6 @@ describe('fromToolCall (async bus)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Auto-validation (#8)
-// ---------------------------------------------------------------------------
-
 describe('createSchemaCommandBus auto-validation', () => {
   const schema: BusSchema = {
     cartAdd: {
@@ -530,7 +485,6 @@ describe('createSchemaCommandBus auto-validation', () => {
     const bus = createSchemaCommandBus(schema);
     bus.register('cartAdd', (cmd) => cmd.target.id);
 
-    // Pass string instead of number for id
     const result = bus.dispatch('cartAdd', { id: 'not-a-number' as any }, { qty: 1 });
     expect(result.ok).toBe(false);
     expect(result.error?.message).toContain('Validation failed');
@@ -559,7 +513,6 @@ describe('createSchemaCommandBus auto-validation', () => {
     const bus = createSchemaCommandBus(schema, { validate: false });
     bus.register('cartAdd', (cmd) => cmd.target.id);
 
-    // Invalid type but should pass through (no validator installed)
     const result = bus.dispatch('cartAdd', { id: 'not-a-number' as any }, { qty: 1 });
     expect(result).toSucceedWith('not-a-number');
   });
@@ -591,10 +544,6 @@ describe('createAsyncSchemaCommandBus auto-validation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// ERROR_CODE_REGISTRY retry metadata
-// ---------------------------------------------------------------------------
-
 describe('ERROR_CODE_REGISTRY retry metadata', () => {
   const CATEGORIES = ['general', 'network', 'validation', 'internal', 'logic'];
 
@@ -610,7 +559,7 @@ describe('ERROR_CODE_REGISTRY retry metadata', () => {
       const owner = e.code.slice(0, e.code.indexOf(':'));
       const transient = retryClass(_failures(owner)(e.code.slice(owner.length + 1) as FailCode, '')) === 'transient';
       expect(e.retryable, e.code).toBe(transient);
-      // Every condition but a transport's own timeout reads as RETRYABLE_CONDITIONS says.
+      // Except a transport timeout, the condition alone decides via RETRYABLE_CONDITIONS.
       if (!e.code.startsWith('transport:timeout:')) expect(e.retryable, e.code).toBe(RETRYABLE_CONDITIONS.has(e.code.split(':')[1]));
     }
   });
@@ -620,5 +569,29 @@ describe('ERROR_CODE_REGISTRY retry metadata', () => {
     expect(isRetryableCode('pace:limited:dispatch')).toBe(true);
     expect(isRetryableCode('core:exceeded:depth')).toBe(false);
     expect(isRetryableCode('NOT_A_CODE')).toBeUndefined();
+  });
+});
+
+describe('schemaValidator: a side with nothing to check', () => {
+  it('asks for no step when the action declares no fields, and for one when it does', () => {
+    const v = schemaValidator({
+      none: { description: 'x' },
+      emptied: { description: 'x', target: {}, payload: {} },
+      fielded: { description: 'x', target: { id: 'number' } },
+      paid: { description: 'x', payload: { n: 'number' } },
+    });
+    expect(v.validate?.('none')).toBeUndefined();
+    expect(v.validate?.('emptied')).toBeUndefined();
+    expect(v.validate?.('unknown')).toBeUndefined();
+    expect(v.validate?.('fielded')).toBeTypeOf('function');
+    expect(v.validate?.('paid')).toBeTypeOf('function');
+  });
+
+  it('an action with only a payload leaves the target alone and checks the payload', () => {
+    const bus = createSchemaCommandBus({ paid: { description: 'x', payload: { n: 'number' } } });
+    bus.register('paid', () => 'ok');
+    expect(bus.dispatch('paid', 'any target', { n: 1 }).ok).toBe(true);
+    expect(bus.dispatch('paid', 'any target', { n: 'one' } as never).ok).toBe(false);
+    expect(bus.dispatch('paid', 'any target').ok).toBe(true);
   });
 });

@@ -1,63 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `useCommand()` in an element-nested child across REAL Vue HMR
- * rerenders, vue@3.6.0-rc.6.
- *
- * WHY THIS FILE EXISTS. rc.6's `9ab65a1` ("own each dev render generation with
- * a render scope for HMR") replaces the `instance.renderEffects` array
- * `hmrRerender` stopped one effect at a time with a fresh per-render
- * `EffectScope` owning everything a dev render generation creates. Upstream's
- * own regression for it is titled "rerender should tear down element-nested
- * child components": a child mounted INSIDE an element, rather than returned as
- * the parent's block, is not reachable from the block graph `hmrRerender` walks,
- * so before rc.6 nothing stopped it - it was detached from the DOM and left
- * running.
- *
- * That is not an internal detail here, because a leaked Vapor instance is a
- * leaked `setup()` scope, and `useCommand()` hangs its cleanup on exactly that
- * scope (`tryAutoCleanup` -> `onScopeDispose`). So the question is a library
- * question: after a parent hot-reloads, does the old generation's subscription
- * go away, or does it outlive the component that made it?
- *
- * WHAT MEASURING IT FOUND - and the asymmetry is the point. `useCommand()`
- * hands out two kinds of subscription and the leak reaches only one of them:
- *
- *   register()  keyed. `s.handlers` is a Map and `register` overwrites by action
- *               (command-bus.ts §register), so generation N+1's handler simply
- *               replaces generation N's. Measured identical on rc.5 and rc.6: a
- *               dispatch after the reload runs the NEWEST generation's handler.
- *               Self-healing by data structure, not by teardown.
- *   on()        appended. Listeners live in an array, so nothing overwrites
- *               anything and every leaked generation stays subscribed. Measured
- *               on rc.5: after two hot reloads, ONE dispatch fires the listener
- *               THREE times - once per generation ever rendered. Duplicate side
- *               effects that grow linearly with how long the dev session has
- *               been running, in exactly the composable this library tells
- *               component authors to use.
- *
- * rc.6 disposes each superseded generation, so the fan-out is gone. No change
- * on our side: `tryAutoCleanup` was always registering the right cleanup on the
- * right scope, and Vue simply began stopping that scope. This file exists so
- * that stays true - it is the assertion that breaks first if the ownership
- * regresses.
- *
- * Everything is imported from the single with-vapor browser build and the
- * chamber is pointed at that same module object via `configureVue()`; two
- * separately-imported Vue dists are two disconnected reactivity instances
- * (chamber.ts §probeVue), so skipping that would silently measure nothing.
- *
- * ORDER OF THE TWO VUE COPIES. Every Vue dev build writes
- * `globalThis.__VUE_HMR_RUNTIME__` when it evaluates, and the HMR record map
- * is private to the copy. The chamber's async probe loads bare `vue` (here
- * @vue/runtime-core's cjs build), and the suite's setup does not await it.
- * Under full-suite load it landed after the with-vapor import, so the test
- * drove the other copy's runtime: no mounted instance, `setups` 1 (log
- * s35.124 and s35.202). A copy evaluated after with-vapor reproduces exactly
- * that. `waitForVueDetection()` first fixes the order.
- *
- * VERIFIED AGAINST THE PRE-FIX CODE, which is the standard this repo holds
- * fixtures to: on vue@3.6.0-rc.5 this file fails - `disposals` stays 0 and the
- * fan-out assertion sees `['gen1','gen2','gen3']` instead of `['gen3']`.
+ * `useCommand()` in an element-nested child across real Vue HMR rerenders.
+ * Why: a hot-reloaded parent that leaves its old child generations running would keep their on() listeners subscribed, so one dispatch fires duplicate side effects that grow with the length of the dev session.
+ * Shows: each superseded generation is disposed (not merely detached), one dispatch reaches only the newest generation's listener, a handler stays registered, and unmount disposes the last generation.
+ * See: log s35.124, log s35.202, src/chamber.ts (probeVue).
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -79,10 +25,10 @@ describe('useCommand across real HMR rerenders (rc.6)', () => {
   });
 
   it('disposes each superseded generation of an element-nested child', async () => {
-    // The probe's `import('vue')` loads a second Vue that also writes
-    // __VUE_HMR_RUNTIME__. Settled first, the with-vapor build writes last.
+    // Settle the probe's import('vue') first: it loads a second Vue that also writes __VUE_HMR_RUNTIME__, and the with-vapor build must write last.
     await waitForVueDetection();
     const v = await vapor();
+    // One Vue instance for chamber and test; two separately imported dists have disconnected reactivity.
     configureVue(v);
     const hmr = (globalThis as any).__VUE_HMR_RUNTIME__;
     expect(hmr).toBeTruthy();
@@ -110,10 +56,7 @@ describe('useCommand across real HMR rerenders (rc.6)', () => {
     });
 
     const parentId = 'fixture-hmr-render-scope-parent';
-    // Element-nested child: `createComponent(Child)` is inserted INTO the
-    // parent's own element rather than returned as the parent's block, so it is
-    // invisible to the block graph `hmrRerender` walks. A child returned as the
-    // block was already torn down before rc.6; this shape was not.
+    // The child is inserted INTO the parent's element rather than returned as its block, so it is outside the block graph hmrRerender walks.
     const render = (label: string) => () => {
       const el = v.template(`<div>${label}</div>`)() as ParentNode;
       v.insert(v.createComponent(Child), el);
@@ -133,43 +76,29 @@ describe('useCommand across real HMR rerenders (rc.6)', () => {
     bus.dispatch('cartAdd', 'a');
     expect(fired).toEqual(['gen1']);
 
-    // --- two hot reloads ----------------------------------------------------
     hmr.rerender(parentId, render('v2'));
     await v.nextTick();
     hmr.rerender(parentId, render('v3'));
     await v.nextTick();
 
-    // `setups` before the text: the two failure modes need different fixes and
-    // only this order tells them apart. 1 = neither rerender ran; 3 with stale
-    // text = they ran and the DOM did not follow.
+    // Check setups before the text: 1 = neither rerender ran; 3 with stale text = they ran and the DOM did not follow.
     expect(setups).toBe(3);
     expect(host.textContent).toContain('v3');
 
-    // FACT 1 - each superseded generation was DISPOSED, not merely detached.
-    // Before rc.6 an element-nested child was unreachable from the block graph,
-    // so its scope was never stopped and this stayed 0 no matter how many
-    // reloads ran.
+    // Each superseded generation is disposed, not merely detached.
     expect(disposals).toBe(2);
 
-    // FACT 2 - the consequence that actually reaches a consumer, and the one
-    // that breaks first if fact 1 regresses. `on()` listeners are appended to an
-    // array, so nothing overwrites a leaked generation's subscription: a single
-    // dispatch would fan out once per generation ever rendered. On rc.5 this
-    // reads ['gen1','gen2','gen3'].
+    // on() listeners are appended to an array, so a leaked generation would make one dispatch fire once per generation.
     fired.length = 0;
     bus.dispatch('cartAdd', 'b');
     expect(fired).toEqual(['gen3']);
 
-    // FACT 3 - the contrast that explains why this went unnoticed. `register()`
-    // is keyed by action in a Map, so the newest generation's handler always
-    // wins regardless of teardown. That half is self-healing by data structure,
-    // which is why only the listener half above is load-bearing here.
+    // register() is keyed by action, so only the handler's presence is checked here.
     expect(bus.hasHandler('cartAdd')).toBe(true);
 
     app.unmount();
     await v.nextTick();
 
-    // Teardown symmetry: one disposal per generation, none left over.
     expect(disposals).toBe(3);
     host.remove();
   });

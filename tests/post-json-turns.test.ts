@@ -1,4 +1,9 @@
-// A POST through _postJson settles in the turns of a GET through _getJson: no frame of its own. The long note is at the end.
+/**
+ * The microtask turns a POST through `_postJson` takes to settle, against a GET through `_getJson`.
+ * Why: a POST that returned a promise resolved with a thenable would cost every sent command extra turns before it settles; a throw in its body must still reach the caller as a rejection, never a sync throw.
+ * Shows: a POST settles in as many turns as a GET on an instantly answering fetch, the counter sees a slower fetch (control), and a throwing header getter rejects the returned promise without throwing synchronously.
+ * See: log s36.F48, ECMAScript 27.2.1.3.2.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _getJson, _postJson } from '../src/http';
 
@@ -49,11 +54,3 @@ describe('_postJson: no async frame', () => {
     await expect(call).rejects.toThrow('header getter');
   });
 });
-
-// Why: `_postJson` was `async` and returned runWithRetry's promise without an
-// await, so every sent command paid an outer promise resolved with a thenable:
-// ECMAScript 27.2.1.3.2 queues NewPromiseResolveThenableJob and then the
-// `then`, two turns. `_getJson` already had the plain shape. The turn count pins
-// it against `_getJson`, the same loop and fetch. The control keeps the counter
-// honest. The last case pins what `async` gave for free: a throw in the body
-// (a header getter, here) still reaches the caller as a rejection.

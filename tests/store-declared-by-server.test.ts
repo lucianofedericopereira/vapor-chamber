@@ -1,4 +1,9 @@
-/** A server reply declares store states (`stores`, by store id): each named store takes its state, with no client option (log s35.186). Rationale at the end. */
+/**
+ * A server reply declares store states (`stores`, by store id): each named store takes its state, with no client option.
+ * Why: only the server knows whether a reply's `state` is a store's state, so it declares that per reply and the client never guesses; the declared state is written at the transport's level as a step of the command, after the command's own `answer`, ordered by `version`, and store ids are external strings read as own keys only.
+ * Shows: a reply (single or batched) updates each named store; `version` orders declared states; a declared state wins over `answer`; persist saves it and history cannot undo it; a non-object is not written and warns once; a takeover receives; a reply without `stores`, a disposed or cleared store, an unknown id and inherited names write nothing.
+ * See: log s35.186, tests/store-bridged-answer.test.ts
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -136,20 +141,3 @@ describe('controls', () => {
     stock.$dispose();
   });
 });
-
-/*
- * Whether a reply's `state` is a store's state is known by the server, not
- * guessed by the client. Opt-in, opt-out and no option each leave one side
- * guessing (owner, 2026-10-06: "the most correct"). So the server declares it
- * per reply, `stores` keyed by store id, as Livewire returns component
- * snapshots and Turbo Streams name what to replace; the app maps a command's
- * own answer with `answer` (store-bridged-answer.test.ts). Neither: the store is
- * not written. A declared state is written at the transport's level
- * as a step of the command that got the reply, after the command's own
- * answer, ordered by `version`. Store ids are external strings: own keys only
- * (src/dict.ts). Log s35.186.
- *
- * The first block holds every test that fails before the change, 7 (log
- * s35.202: the non-object warning and the takeover sat under "controls"
- * though they assert the new behaviour). The controls pass before and after.
- */

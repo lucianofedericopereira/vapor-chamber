@@ -1,10 +1,8 @@
 /**
- * REPRO - shared AbortController between the navigation lane and the
- * query-refetch lane (src/router/engine.ts:81).
- *
- * A query-only change fired while a PATH navigation is still loading calls
- * `controller?.abort()` (engine.ts:259) and kills the in-flight navigation's
- * loaders.
+ * A query-only change while a path navigation is still loading, and a query refetch in flight beside a navigation.
+ * Why: the latest request must win, or the pending page would commit over the query and lose it; a refetch must not abort the page lane, and isLoading must stay true until the refetch ends.
+ * Shows: a query commit aborts the in-flight loader, the push answers router:aborted:navigation with no onError, and the router stays on products with the query in history; a blocked refetch keeps isLoading true after a full navigation settles, then false once released.
+ * See: log s35.120, tests/router/query-during-navigation.test.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -18,7 +16,7 @@ const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
   { name: 'home', path: '/', parent: 'shell', component: 'Home' },
   {
-    // the page we start ON - has an affected loader, so setQuery triggers a refetch
+    // Start page; its loader is affected by the query, so setQuery refetches.
     name: 'products',
     path: '/products',
     parent: 'shell',
@@ -27,7 +25,7 @@ const ROWS: RouteRecord[] = [
     query: { page: { type: 'int', default: 1 }, name: {} },
   },
   {
-    // the page we navigate TO - slow loader we control
+    // Target page; its loader is gated by the test.
     name: 'remote',
     path: '/remote',
     parent: 'shell',
@@ -38,7 +36,6 @@ const ROWS: RouteRecord[] = [
 
 describe('REPRO: query change during an in-flight navigation', () => {
   it('a query COMMIT supersedes the pending path navigation, on purpose and told (s35.120)', async () => {
-    // gate the /remote loader so the navigation stays in flight
     let releaseRemote!: () => void;
     const remoteGate = new Promise<void>((resolve) => {
       releaseRemote = resolve;
@@ -49,7 +46,7 @@ describe('REPRO: query change during an in-flight navigation', () => {
       prefixes: {
         'rows:': (ref, location) => ({ ref, name: String(location.query.name ?? '') }),
       },
-      // behaves like any real fetch-backed preset: rejects when the signal aborts
+      // Rejects on abort, like a fetch-backed preset.
       url: async (template, _location, _record, signal) =>
         new Promise((resolve, reject) => {
           signal.addEventListener('abort', () => {
@@ -78,22 +75,15 @@ describe('REPRO: query change during an in-flight navigation', () => {
     await router.isReady();
     expect(router.currentRoute.value.location.name).toBe('products');
 
-    // 1. user clicks through to /remote - loaders start, nothing committed yet
     const pending = router.push('/remote');
     await Promise.resolve();
 
-    // 2. user types in the list's search box - query-only change on /products
     router.setQuery({ name: 'abc' });
 
-    // 3. the /remote loader finishes
     releaseRemote();
     const result = await pending;
 
-    // rc.2's bug: the shared controller aborted /remote by accident. The lanes
-    // stay separate; since s35.120 the query COMMIT supersedes the pending
-    // navigation through supersede(), the latest request winning (Router 2's
-    // rule): otherwise /remote committed over the query and lost it. The push
-    // answers aborted:navigation, normal flow, not an onError.
+    // The query commit supersedes the pending navigation; the push answers aborted:navigation, not onError.
     expect(remoteAborted).toBe(true);
     expect(isRouterError(result, 'router:aborted:navigation')).toBe(true);
     expect(router.currentRoute.value.location.name).toBe('products');
@@ -112,7 +102,7 @@ describe('REPRO: query change during an in-flight navigation', () => {
       prefixes: {
         'rows:': async (ref) => {
           rowsCalls++;
-          if (rowsCalls > 1) await rowsGate; // the REFETCH blocks, the initial load does not
+          if (rowsCalls > 1) await rowsGate; // only the refetch blocks
           return { ref };
         },
       },
@@ -131,7 +121,7 @@ describe('REPRO: query change during an in-flight navigation', () => {
     await router.isReady();
     expect(router.isLoading.value).toBe(false);
 
-    // a full navigation settles while the query refetch it triggered is still blocked
+    // The navigation settles while the refetch it triggered stays blocked.
     router.setQuery({ name: 'abc' });
     await router.push('/remote');
 

@@ -1,6 +1,12 @@
-/** One watcher per store feeds sharing and field events; a fast lane with `onError` isolates a throw. Rationale at the end. */
+/**
+ * A store runs at most one watcher for its field events and tab sharing; a fast lane with `onError` isolates a throw.
+ * Why: a store using both field events and sharing would run a second effect per write, and a throwing field listener would stop the fan-out unless the lane reports it to onError.
+ * Shows: a shared store with field subscribers starts one Vue effect, a store with no consumer starts none; on both runtimes each write is sent once per tab and notifies its changed fields, and a late subscriber hears the next write; a lane with onError reports a throw and goes on, and without it the throw reaches the emitter.
+ * See: log s35.125, s36.F30.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Wraps Vue's real effect so the store mounts the real thing while the test counts effects.
 const effects = vi.hoisted(() => ({ count: 0 }));
 vi.mock('vue', async (importOriginal) => {
   const vue = await importOriginal<typeof import('vue')>();
@@ -64,8 +70,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       cart.add(3);
       await quiet(wire.heard);
       expect(fields).toEqual([1, 2]);
-      // Once from the tab that wrote it, once from the tab holding the lock. With
-      // the writer its only other tab, the lock's tab sends back the ids alone.
+      // Each write goes out once from the writer and once from the lock holder, which sends back the ids alone.
       const cmds = wire.heard.filter((m) => m.kind === 'cmd');
       expect(perTab(cmds)).toEqual([2, 2]);
       const full = cmds.filter((m) => 'action' in (m.value as object));
@@ -134,18 +139,3 @@ describe('createFastLane({ onError })', () => {
     expect(() => lane.emit('tick', 1)).toThrow('listener');
   });
 });
-
-/*
- * A store's field events (`$onField`) and its tab sharing (`share`) each
- * started their own watch on the state: a store with both ran two Vue effects
- * (or two core watchers) per write. Plan 1.32 section 4.2 gives each store one
- * watcher feeding everything that follows its writes, so the second effect
- * goes (log 35.125: an effect per write costs about 90 ns). The effect count
- * is read by wrapping Vue's real `effect`, so the store mounts the real thing.
- * The field events ride a fast lane in its live mode with `onError`: a
- * listener's throw goes to the store's log line and the fan-out goes on, the
- * rule `notify` held by hand. The public lane's default still lets a throw
- * reach the emitter (CHANGELOG, the fast lane entry). Since log 36.F30 a
- * shared store sends each write's command from its handler, not from the
- * watcher, so the watcher feeds persist and the field events.
- */

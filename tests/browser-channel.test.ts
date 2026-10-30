@@ -1,6 +1,7 @@
 /**
- * The fallback rule of `npm run test:browser`: system Chrome when Playwright's
- * headless shell is not installed. Pure, so no browser is needed here.
+ * The fallback rule of `npm run test:browser`: system Chrome when Playwright's headless shell is not installed. Pure, no browser runs.
+ * Why: a machine with Chrome but no shell should still run the browser suite; with neither, Playwright should say what to install.
+ * Shows: with the shell, the stock launch; without it but with Chrome, channel chrome and the missing revision; another platform's path or revision does not count.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -1,10 +1,7 @@
 /**
- * createFastLane({ removal: 'snapshot' }) - an unsubscribe removes only its
- * own registration, as in the default live mode.
- *
- * It found its listener by function and removed every copy, so an unsubscribe
- * kept from before `remove()` or `clear()` took out a later registration of
- * the same function, and one of two registrations took out both.
+ * createFastLane({ removal: 'snapshot' }): an unsubscribe removes only its own registration, as in the default live mode.
+ * Why: found by function, a stale unsubscribe would take out a later registration of the same function, and one of two would take out both.
+ * Shows: one kept from before clear() or remove() leaves a later registration alone; one of two registrations removes just one, in both modes.
  */
 import { describe, expect, it } from 'vitest';
 import { createFastLane } from '../src/fast-lane';

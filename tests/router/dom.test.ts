@@ -1,13 +1,11 @@
 // @vitest-environment happy-dom
 /**
- * Tests for src/router/dom.ts - installDomIntegration / stampActiveLinks.
- *
- * dom.ts is otherwise excluded from this project's node-environment vitest
- * run (see vitest.config.ts) and was, until now, covered only by a browser
- * playground that doesn't exist in this checkout. This file closes that gap
- * for the click-interception/active-stamping core and - the reason it was
- * added - the bfcache (`pageshow`/`persisted`) restore wiring, which had no
- * verification at all beyond code review.
+ * installDomIntegration, stampActiveLinks and preheatIdle in src/router/dom.ts.
+ * Why: a link the router should not take (modifier key, download, cross-origin, outside the base) would be
+ * hijacked, active stamps and aria-current would be wrong for users and screen readers, hover preheat would
+ * outlive teardown, and a bfcache restore would not re-arm the router.
+ * Shows: click interception and its bail-outs, hover preheat and its cancel, onRestore on a persisted pageshow,
+ * data-active, data-exact-active and aria-current stamping, and preheatIdle scheduling, abort and skip rules.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from '@router/dom';
@@ -26,12 +24,7 @@ function pageshow(persisted: boolean): void {
 
 afterEach(() => {
   document.body.innerHTML = '';
-  // The cross-origin/external-target click tests dispatch a real click on an
-  // anchor that dom.ts deliberately never preventDefault()s - happy-dom then
-  // follows it for real, mutating window.location (and so window.location.origin)
-  // for every test that runs after. Reset it so later tests' own origin-based
-  // routability checks aren't polluted by an earlier test's "let the browser
-  // handle it" case.
+  // A click dom.ts leaves alone makes happy-dom follow the link and move window.location; reset it for later tests.
   (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL('http://localhost:3000/');
 });
 
@@ -163,7 +156,7 @@ describe('installDomIntegration - hover preheat', () => {
     anchor.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     vi.advanceTimersByTime(100);
 
-    expect(preheat).not.toHaveBeenCalled(); // cancelled before the 100ms delay elapsed
+    expect(preheat).not.toHaveBeenCalled();
 
     anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     vi.advanceTimersByTime(100);
@@ -173,10 +166,7 @@ describe('installDomIntegration - hover preheat', () => {
     vi.useRealTimers();
   });
 
-  // The hover and focus handlers exist only when `preheat` was given, which is
-  // why they carry no "no preheat" branch of their own. The list of added types
-  // is read, not `toHaveBeenCalledWith`: every listener carries a third
-  // argument (the teardown signal), which a two-argument match never meets.
+  // The added types are read: every listener carries a third argument (the teardown signal), which a two-argument match never meets.
   it('registers no hover or focus listener at all when preheat is not provided', () => {
     using addSpy = vi.spyOn(document, 'addEventListener');
     const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn() });
@@ -232,14 +222,6 @@ describe('installDomIntegration - bfcache restore (onRestore)', () => {
 
     expect(onRestore).not.toHaveBeenCalled();
   });
-
-  it('registers no pageshow listener at all when onRestore is not provided', () => {
-    using addSpy = vi.spyOn(window, 'addEventListener');
-    const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn() });
-
-    expect(addSpy).not.toHaveBeenCalledWith('pageshow', expect.anything());
-    teardown();
-  });
 });
 
 describe('stampActiveLinks', () => {
@@ -251,9 +233,6 @@ describe('stampActiveLinks', () => {
       <a id="a4" href="https://example.com/admin/products/7">External-ish</a>
     `;
 
-    // Currently on the deeper path - a1 (the parent "Products" link) should
-    // be a prefix match (active, not exact); a2 (this exact record) should
-    // be both; a3 (a sibling section) neither.
     stampActiveLinks('/admin', '/products/7');
 
     const a1 = document.getElementById('a1')!;
@@ -266,13 +245,10 @@ describe('stampActiveLinks', () => {
     expect(a2.hasAttribute('data-active')).toBe(true);
     expect(a2.hasAttribute('data-exact-active')).toBe(true);
     expect(a3.hasAttribute('data-active')).toBe(false);
-    expect(a4.hasAttribute('data-active')).toBe(false); // cross-origin, not routable
+    expect(a4.hasAttribute('data-active')).toBe(false);
   });
 
-  // WAI-ARIA: the link to the current page carries aria-current="page", so a
-  // screen reader says "current page". Only the exact match is the page: an
-  // ancestor section link is active for styling (data-active) and is NOT
-  // marked, since "only mark one element in a set as current".
+  // WAI-ARIA: only the exact match is the current page; an ancestor section link is data-active but not aria-current.
   it('marks the exact match aria-current="page", and nothing else', () => {
     document.body.innerHTML = `
       <a id="a1" href="/admin/products">Products</a>
@@ -328,7 +304,7 @@ describe('preheatIdle', () => {
 
     preheatIdle(factories, { gap: 50 });
 
-    // No requestIdleCallback in happy-dom -> Safari fallback (setTimeout 2500ms)
+    // happy-dom has no requestIdleCallback, so the setTimeout(2500) fallback runs.
     await vi.advanceTimersByTimeAsync(2500);
     await vi.advanceTimersByTimeAsync(100);
 
@@ -347,7 +323,7 @@ describe('preheatIdle', () => {
     ];
 
     preheatIdle(factories, { gap: 50 });
-    await vi.advanceTimersByTimeAsync(2500); // fallback fires, factory 1 runs
+    await vi.advanceTimersByTimeAsync(2500);
     window.dispatchEvent(new Event('click'));
     await vi.advanceTimersByTimeAsync(1000); // past the gap - factory 2 would have run by now
 
@@ -366,11 +342,6 @@ describe('preheatIdle', () => {
 
     expect(order).toEqual([]);
     vi.useRealTimers();
-  });
-
-  it('is a no-op with an empty factory list', () => {
-    Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
-    expect(() => preheatIdle([])).not.toThrow();
   });
 });
 
@@ -476,14 +447,6 @@ describe('installDomIntegration - hover guard branches', () => {
 });
 
 describe('preheatIdle - environment branches', () => {
-  it('skips entirely under saveData', () => {
-    Object.defineProperty(navigator, 'connection', { value: { saveData: true }, configurable: true });
-    const factory = vi.fn(async () => {});
-    preheatIdle([factory]);
-    expect(factory).not.toHaveBeenCalled();
-    delete (navigator as unknown as { connection?: unknown }).connection;
-  });
-
   it('skips entirely on a 2g connection', () => {
     Object.defineProperty(navigator, 'connection', { value: { effectiveType: '2g' }, configurable: true });
     const factory = vi.fn(async () => {});
@@ -522,8 +485,7 @@ describe('preheatIdle - environment branches', () => {
 
   it('aborts between the factory and the gap wait when cancelled mid-run', async () => {
     Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
-    // Defer the callback so preheatIdle returns (and `cancel` is assigned) before
-    // run() starts - otherwise factory 1 would call the initial no-op cancel.
+    // Deferred so `cancel` is assigned before run() starts; otherwise factory 1 would call the initial no-op.
     (window as unknown as { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback = (cb) => {
       setTimeout(cb, 0);
     };

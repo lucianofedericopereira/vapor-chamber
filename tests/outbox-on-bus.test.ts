@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** The outbox is a bus option: a held command answers an `Accepted`, the flush sends at the work step. The long note is at the end. */
+/**
+ * The outbox as a bus option: a held command answers an `Accepted`, and the flush sends each record through its action's transport at the work step.
+ * Why: if the replay were re-dispatched through the chain, `idempotent` outside the outbox would answer it from memory and nothing would be sent, and plugins and listeners would see replays.
+ * Shows: done settles with the server answer (single and batching transport), a final refusal, a store answer and a local handler's answer; the flush sends once past `idempotent`, a debounced burst is held once, a replay carries an Idempotency-Key and is not heard by listeners; actions outside the scope are sent offline; the stored queue loads first and a stored record refused for good reaches `rejected`; window online/offline events drive hold and flush.
+ * See: log s36.69
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { type CommandResult, createAsyncCommandBus } from '../src/command-bus';
@@ -180,15 +185,3 @@ describe("a replay through a transport that runs the action's local handler", ()
     outbox.dispose();
   });
 });
-
-/*
- * Plan 1.32 step 4i (plan-architecture row 7 and its known item 1). Before, the outbox was a
- * chain plugin: installed by priority, it answered a held command `{ queued, id }`, replayed by
- * re-dispatching through the whole chain (so `idempotent` outside it answered the replay from
- * memory and nothing was sent), and told the app through bus events. Now the bus takes it as an
- * option and wraps the transports of the actions it covers, once per action; a held command
- * answers an `Accepted` whose `done` settles with the replay's result; the flush sends each
- * record through its action's transport at the work step, so no plugin or listener sees a
- * replay, and a store's `answer` still applies. A record from a previous session has no
- * caller, so a final refusal of it goes to `outbox.rejected`.
- */

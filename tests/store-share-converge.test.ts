@@ -1,4 +1,9 @@
-/** Tabs that write a shared store at once end on one state, one their writes can make. Rationale at the end. */
+/**
+ * Tabs that write a shared store at once end on one state, and it is one their writes can make.
+ * Why: a reducer is the app's own function, so tabs end equal only if they run the same commands over the same states; if each tab ran the others' commands as they arrived, two tabs setting one field would swap values and appends would end in two arrangements. One tab, the holder of the store's Web Lock, must run every command and post it on. Equal tabs are not enough, since two tabs that both lost a write are equal.
+ * Shows: after concurrent sets, appends, $reset against add, bursts, coalesced writes and three tabs, every tab holds one state among the interleavings `outcomes` lists; undo in any tab takes back the same step everywhere and stops at a state another tab sent; a lock holder that leaves (pagehide or dispose) is replaced; a tab that opens while others write converges; without Web Locks nothing is shared and development warns once per store.
+ * See: log s36.F30, log s36.F39.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store/core';
@@ -30,7 +35,7 @@ beforeEach(() => {
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 let n = 0;
-/** A channel of its own, and every message on it as a listener that is not a tab reads it. */
+// A channel of its own, and every message on it as a listener that is not a tab reads it.
 function channel(): { name: string; heard: Array<Record<string, unknown>> } {
   const name = `conv-${n++}`;
   const { heard, close } = listen(name);
@@ -38,7 +43,7 @@ function channel(): { name: string; heard: Array<Record<string, unknown>> } {
   return { name, heard };
 }
 
-/** One tab: its own bus, store and history, on the channel `name`. */
+// One tab: its own bus, store and history, on the channel `name`.
 function tab(name: string, opts: { undo?: boolean; coalesce?: boolean } = {}) {
   const bus = createCommandBus();
   const h = history({ bus });
@@ -51,7 +56,7 @@ function tab(name: string, opts: { undo?: boolean; coalesce?: boolean } = {}) {
 }
 type Tab = ReturnType<typeof tab>;
 
-/** Every state the writes can make: each tab's writes kept as that tab made them, the tabs' writes interleaved every way. */
+// Every state the writes can make: each tab's writes kept in its own order, the tabs' writes interleaved every way.
 function outcomes(start: S, tabs: Op[][]): S[] {
   const found: S[] = [];
   const walk = (s: S, at: number[]): void => {
@@ -70,7 +75,7 @@ function outcomes(start: S, tabs: Op[][]): S[] {
   return found;
 }
 
-/** Every tab holds one state, and it is one the writes can make: nothing lost, nothing run twice. */
+// Every tab holds one state, and it is one the writes can make: nothing lost, nothing run twice.
 function expectOne(tabs: Tab[], start: S, writes: Op[][]): S {
   const [first, ...rest] = tabs.map((t) => t.store.state.value);
   for (const s of rest) expect(s).toEqual(first);
@@ -388,28 +393,3 @@ describe('without Web Locks', () => {
     expect(warn.mock.calls.filter((c) => c.some((x) => String(x).includes('store:missing:locks')))).toHaveLength(2);
   });
 });
-
-/*
- * Each tab ran another tab's command as it arrived (log 36.F30). Two tabs that
- * set one field at once each ended on the other's value, two appends ended in
- * two arrangements, and a `$reset` against an add left one tab with the add.
- * A reducer is the app's own function, so tabs end equal only when they run
- * the same commands over the same states: one place has to be the state.
- *
- * That place is the tab the browser grants the store's Web Lock (Web Locks
- * 2.3: an exclusive lock is held by one agent at a time). It runs every tab's
- * command and posts it on, and the other tabs run only what it posts. A write
- * still runs at once in its own tab. Nothing compares a time, a count or a tab
- * id (log 36.F39).
- *
- * Equal tabs are not enough: two tabs that both lost a write are equal.
- * `outcomes` lists every state the writes can make, each tab's own writes kept
- * as that tab made them, and `expectOne` asks the tabs' one state to be among
- * them. Its own control shows it refuses a lost write and a doubled one.
- * `quiet` (tests/tabs-quiet.ts) waits for the channel to carry nothing.
- *
- * An answer is not one of the other tabs' steps. A tab that holds a command
- * under its answer (back from the back-forward cache) and undid it there
- * would leave the others apart, so an undo search stops at a state another
- * tab sent, and the state the undo reached is taken.
- */

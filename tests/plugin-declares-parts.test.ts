@@ -1,4 +1,9 @@
-/** A plugin declares its parts and the bus places them: no part holds `next`. The long note is at the end. */
+/**
+ * A plugin is an object of parts the bus places, and no part holds `next`.
+ * Why: if a plugin could be a function or an empty object, the bus would not know what to place and a plugin could own the flow instead of the bus.
+ * Shows: every built-in plugin is an object declaring exactly its listed parts; sync, async and test buses refuse a function and an object with no part (`core:invalid:plugin`) and accept each part alone; the part types take the command (or the action), never a continuation.
+ * See: log s36.43, s36.108
+ */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { type BaseBus, type PluginParts, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { authGuard, logger, validator } from '../src/plugins-core';
@@ -42,7 +47,6 @@ describe('a plugin declares its parts', () => {
     const code = (f: () => unknown) => { try { f(); return 'no throw'; } catch (e) { return (e as { code?: string }).code; } };
     expect(code(() => bus.use(((_c: unknown, next: () => unknown) => next()) as never))).toBe('core:invalid:plugin');
     expect(code(() => bus.use({ id: 'empty' } as never))).toBe('core:invalid:plugin');
-    // Control: each part alone is a plugin.
     for (const p of PARTS) expect(code(() => bus.use({ [p]: () => undefined } as PluginParts))).toBe('no throw');
   });
 
@@ -53,14 +57,3 @@ describe('a plugin declares its parts', () => {
     expectTypeOf<Parameters<NonNullable<PluginParts['authorize']>>>().toEqualTypeOf<[action: string]>();
   });
 });
-
-/*
- * Plan 1.32 step 1 left one acceptance row for its step 8: "a plugin declares
- * its parts" (log 36.43, its API decided at step 8). Plan 2's one decision is
- * that no extension holds `next`: the bus owns the flow, and each part has
- * the power its purpose needs and nothing more (plan-transport-owned.md
- * revision 20). So every built-in is an object of parts the bus places, and
- * `use()` refuses a function (a chain level) or an object that declares
- * nothing to place. The types say no part is handed a continuation.
- * Step 8d (log 36.108) removed the chain, its runners and `priority`.
- */

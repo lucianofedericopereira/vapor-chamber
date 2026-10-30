@@ -1,4 +1,10 @@
-/** A bus-level listener (`on('*')`, `onAfter`) hears every outcome once, whatever plugins are installed. The long note is at the end. */
+/**
+ * A bus-level listener (`on('*')`, `onAfter`) hears every outcome once, with the result the caller got.
+ * Why: logger, metrics, history's recorder and timing all react through listeners, so an outcome
+ * kind they missed (or heard twice) would go unlogged, unrecorded or double-counted.
+ * Shows: for a success, a handler throw, a plugin refusal, a missing handler, an abort before the
+ * work, and a sent success and failure, both listeners record the same single `action -> code` line.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type AsyncCommandBus, type CommandResult, type Transport, createAsyncCommandBus } from '../src/command-bus';
 import { validator } from '../src/plugins-core';
@@ -44,14 +50,3 @@ describe('a bus-level listener hears every outcome once', () => {
     });
   }
 });
-
-/*
- * Step 1 of .probes/plan-1.32.md. In the new core a listener is how anything
- * reacts to an outcome (logger, metrics, history's recorder, timing), so the
- * contract it relies on is pinned before the core changes: each outcome kind,
- * from the work, from a plugin, from a missing handler, an
- * abort, and over the wire, reaches `on('*')` and `onAfter` exactly once with
- * the result the caller got. Green today: the bus already fans every settle
- * out (syncRunSettling). Step 8e (log 36.109) took `onBefore` out of the public
- * API, and its row with it: a gate is a rule, the plugin's refusal row.
- */

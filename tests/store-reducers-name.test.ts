@@ -1,4 +1,9 @@
-/** A store's map of reducers is `reducers` (log s35.147); no other name is read (log s35.156). */
+/**
+ * A store's map of reducers is the `reducers` option; each key becomes a method and an action named store plus key.
+ * Why: `actions` means an action scope everywhere else in the library, so a store whose reducer map is not `reducers` would not generate its methods and handlers; defining a store must also stay silent.
+ * Shows: `add` on store `cart` returns an ok result, updates state and registers the `cartAdd` handler; defining a store does not call console.warn.
+ * See: log s35.146, log s35.147, log s35.156.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus, type CommandResult } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -20,14 +25,3 @@ describe('reducers', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
-
-/*
- * `actions` is an ActionScope everywhere else in the library (log s35.146):
- * a set of action names. A store's option was a map of functions
- * `(state, target, payload) => nextState`, and its own type was documented
- * "A reducer". Same word, different thing: renamed `reducers`, the word Redux
- * Toolkit's createSlice uses for the same map, whose keys generate the
- * actions as ours do (`add` on store `cart` dispatches `cartAdd`). The rename
- * is clean: no alias, no fallback, no warning; every caller in the repo moved
- * with it (log s35.156).
- */

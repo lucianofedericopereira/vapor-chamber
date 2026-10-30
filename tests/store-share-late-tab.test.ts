@@ -1,4 +1,9 @@
-/** A shared store opened later asks for the current state, so its writes build on it (log s35.164). Rationale at the end. */
+/**
+ * A shared store opened later asks `{ kind: 'ask', tab }` for the current state, and the tab holding the store's Web Lock answers it alone with its state.
+ * Why: a tab opened after another wrote would start from its own first state, so its first write would build on the wrong state. Until the answer comes the asker holds its own writes and runs them again over the answer; a tab alone holds its writes until the lock comes, and peers already in step only answer, so they are not written again.
+ * Shows: a late tab catches up and its write builds on the current state; peers in step see no extra writes when a tab opens; a write made before the answer leaves every tab on one state; the ask and answer messages have the stated shape, the answer is addressed with `to`, and a lone tab sends no `cmd`.
+ * See: log s35.164, log s36.F39.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -14,7 +19,7 @@ beforeEach(() => { vi.stubGlobal('window', {}); });
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); });
 
 let n = 0;
-/** One "tab": its own bus and store, sharing over the channel `name`; `writes` counts its state's changes. */
+// One "tab": its own bus and store, sharing over the channel `name`; `writes` counts its state's changes.
 function tab(name: string) {
   const bus = createCommandBus();
   const cart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }), reducers, share: shareTabs(name) })(bus);
@@ -24,7 +29,7 @@ function tab(name: string) {
   return { cart, writes: () => writes };
 }
 
-/** Every message on the channel `name`, as another tab reads it. */
+// Every message on the channel `name`, as another tab reads it.
 function wire(name: string): Array<Record<string, unknown>> {
   const heard: Array<Record<string, unknown>> = [];
   const ch = new BroadcastChannel(name);
@@ -33,7 +38,7 @@ function wire(name: string): Array<Record<string, unknown>> {
   return heard;
 }
 
-/** Every message on the channels this file's tabs use: `settle` waits until they carry nothing (tests/tabs-quiet.ts). */
+// `settle` waits until the channels this file's tabs use carry nothing (tests/tabs-quiet.ts).
 const net = traffic();
 afterEach(() => net.close());
 const settle = (): Promise<void> => net.settle();
@@ -117,13 +122,3 @@ describe('the ask', () => {
     expect(a.cart.state.value).toEqual({ items: ['milk'] });
   });
 });
-
-/*
- * A tab opened after another wrote started from its own first state, so its
- * first write built on the wrong state (log s35.164). It asks when it opens,
- * `{ kind: 'ask', tab }`, and the tab holding the store's Web Lock answers it
- * alone (`to`) with its state (log 36.F39). Until then the asker holds its own
- * writes, and over the answer it runs them again and sends them. A tab alone
- * holds its writes until the lock comes, and then they are the state. Peers in
- * step only answer, so they are not written again.
- */

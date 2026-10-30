@@ -1,4 +1,9 @@
-/** `$onField` subscribers that subscribe or unsubscribe while a write is delivered, as `bus.on` listeners do. Rationale at the end. */
+/**
+ * `$onField` subscribers that subscribe or unsubscribe while a write is delivered, as `bus.on` listeners do.
+ * Why: a subscriber that unsubscribes itself would shift the next one out of the delivery loop, so a later subscriber or a fieldRef would miss the write.
+ * Shows: on both runtimes a self-unsubscribe skips nobody, a subscriber removed by an earlier one is not called for that write, one added during a write starts with the next write, and a stale unsubscribe after $dispose or re-subscribe changes nothing.
+ * See: src/command-bus.ts (on, fanOutListeners).
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore as defineVue } from '../src/store';
@@ -76,18 +81,3 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
     });
   });
 }
-
-/*
- * `notify` walked a field's subscriber array by
- * index while the unsubscribe spliced that same array: a subscriber that
- * unsubscribed itself during a write shifted the next one into its slot, and
- * the loop stepped past it, so a "once" subscriber made a later subscriber or
- * a `fieldRef` miss that write. The rule is now the bus's own for `bus.on`
- * listeners (src/command-bus.ts, `on` and `fanOutListeners`): an unsubscribe
- * marks its entry off and replaces the field's array with a filtered copy, a
- * write walks the array it read with its length taken at the start, skipping
- * entries marked off. So a subscriber removed during a write is not called
- * after its removal, every other one is called once, and one added during a
- * write starts with the next write (before, it was called for the write that
- * added it, because the loop re-read the length).
- */

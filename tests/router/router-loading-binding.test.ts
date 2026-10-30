@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** The router's loading reaches plain HTML through its facts on the bus: `data-vc-router` follows them, no router import. Rationale at the end. */
+/**
+ * The router's loading and revalidating flags reach plain HTML as bus facts, and `data-vc-router` follows them without importing the router.
+ * Why: a plain-HTML shell around the router's island would show no navigation loading or background refresh, or would keep reacting after unbind, if the flags did not reach the bus.
+ * Shows: routerFacts emits routerLoading true then false around a loader; `data-vc-router="loading"` and `"revalidating"` toggle `vc-loading` with the flag; an unknown flag is unbound, warned in development and silent in production; after unbind and stop nothing is heard.
+ * See: examples/router-demo/index.html
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../../src/command-bus';
 import { bindDisplay } from '../../src/page-bindings';
@@ -122,13 +127,3 @@ describe("the router's loading as facts and a display binding", () => {
     await going;
   });
 });
-
-// Rationale.
-// Plan-router.md: isLoading and isRevalidating in the display bindings (step 6),
-// left out (audit M3) and reopened by the owner 2026-10-21 with a reader: the
-// Blade shell around the router's island (examples/router-demo/index.html)
-// showing navigation loading, and the page refreshing after a write. The
-// bindings import no router: the router's flags reach the bus as facts
-// through routerFacts (routerLoading, routerRevalidating, each { value }),
-// and `data-vc-router` listens to them, setting `vc-loading` as
-// `data-vc-pending` does.

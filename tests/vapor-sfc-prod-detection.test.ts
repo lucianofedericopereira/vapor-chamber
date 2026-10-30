@@ -1,34 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the production-build gap.
- *
- * `tests/vue-detection-real-ordering.test.ts` proved the no-bundler failure and
- * recorded, in a comment, that "the bundler case is genuinely unaffected". That
- * was measured under **vitest**, which is a dev-server-shaped environment: a
- * bare `import('vue')` resolves there. It does not resolve in a *built* bundle.
- *
- * Loading `examples/vapor-sfc/dist/` over plain HTTP showed the consequence:
- * a blank page and an uncaught *"Vue 3.6+ with Vapor mode required. No Vue
- * detected."* - while `vue.runtime-with-vapor` sat bundled inside that same
- * 94 KB file. Dev worked; production did not. Both channels are missing at once:
- *
- *   1. SYNC - reads the owned global slot. Under Vite the only thing that primes
- *      it is `vaporChamberHMR()`'s companion module, and that plugin is
- *      `apply: 'serve'` (deliberately - see `src/vite-hmr.ts`), so a build has
- *      no priming at all.
- *   2. ASYNC - a bare `import('vue')`. A browser cannot resolve a bare specifier
- *      from a built bundle with no import map; it rejects into an empty catch.
- *
- * So `createVaporChamberApp()` at module scope - the shape every example and doc
- * snippet used - was relying on a channel that only exists in dev.
- *
- * What this file pins is the second channel's absence, which is the half the
- * existing suite structurally could not see: vitest resolves `vue`, so the
- * rejection has to be arranged explicitly to reproduce a browser's behaviour.
- * The first channel needs no arrangement - a fresh module registry simply has
- * no global slot, exactly like a built page.
- *
- * Verified to fail against the pre-fix `examples/vapor-sfc/src/main.ts`.
+ * Vue detection in a production bundle, where neither detection channel is available: the owned global slot is unprimed and a bare `import('vue')` does not resolve.
+ * Why: a built page has no priming (`vaporChamberHMR` is `apply: 'serve'`) and a browser cannot resolve a bare specifier without an import map, so `createVaporChamberApp()` would throw "Vue 3.6+ with Vapor mode required" unless the app calls `configureVue()`. Vitest resolves `vue`, so the rejection must be arranged to reproduce a browser.
+ * Shows: with no priming and an unresolvable `vue`, detection stays empty, `createVaporChamberApp({})` throws and the hint names `configureVue(`; after `configureVue()` with the with-vapor namespace Vapor is available synchronously and a real app mounts; when `vue` resolves to the with-vapor build detection succeeds only after waiting; the HMR plugin's `apply` is `'serve'`.
+ * See: tests/vue-detection-real-ordering.test.ts, src/vite-hmr.ts
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -58,29 +33,22 @@ describe('production bundle: both detection channels are absent', () => {
   });
 
   it('REGRESSION: no priming + unresolvable bare import -> createVaporChamberApp throws', async () => {
-    // Channel 1 is empty with no arrangement whatsoever. This is not a stub of
-    // the build - it IS the build's state, because `vaporChamberHMR` never ran.
+    // Sync channel: empty because `vaporChamberHMR` never ran.
     expect((globalThis as Record<string, unknown>).__VAPOR_CHAMBER_VUE__).toBeUndefined();
 
-    // Channel 2, reproduced: the browser's actual behaviour, which vitest
-    // otherwise papers over by resolving the specifier.
     makeBareSpecifierUnresolvable();
     vi.resetModules();
 
     const chamber = await import('../src/chamber');
     const vapor = await import('../src/chamber-vapor');
 
-    // The rejection is swallowed by design (Vue is optional), so waiting on the
-    // probe completes normally and detection is still empty afterwards. That
-    // silence is why the built example failed with no diagnostic of its own.
+    // The rejection is swallowed by design (Vue is optional), so waiting completes and detection stays empty.
     await chamber.waitForVueDetection();
     expect(chamber.isVaporAvailable()).toBe(false);
 
-    // MEASURED: the exact throw the built page produced.
     expect(() => vapor.createVaporChamberApp({})).toThrow(
       /Vue 3\.6\+ with Vapor mode required/,
     );
-    // ...and the hint names the one-line remedy rather than leaving it a mystery.
     expect(chamber.vueDetectionHint()).toMatch(/configureVue\(/);
   });
 
@@ -93,17 +61,13 @@ describe('production bundle: both detection channels are absent', () => {
     await chamber.waitForVueDetection();
     expect(chamber.isVaporAvailable()).toBe(false);
 
-    // The one line `examples/vapor-sfc/src/main.ts` now carries. In the real
-    // example this namespace arrives through the `vite.config.ts` alias, so it
-    // is the same instance the compiled SFCs use - not a second Vue dist.
+    // In an app this namespace arrives through the Vite alias, so it is the instance the compiled SFCs use.
     const vue = (await import(/* @vite-ignore */ WITH_VAPOR)) as unknown as VaporApi;
     chamber.configureVue(vue as unknown as object);
 
-    // Synchronously available, with the async channel still broken.
     expect(chamber.isVaporAvailable()).toBe(true);
     expect(chamber.getVaporAppFn()).toBe(vue.createVaporApp);
 
-    // End to end: a real Vapor app really mounts under these conditions.
     const Comp = vue.defineVaporComponent({
       setup() { return vue.template('<div>mounted</div>', true)(); },
     });
@@ -115,14 +79,7 @@ describe('production bundle: both detection channels are absent', () => {
   });
 
   it('CONTROL: when `vue` resolves to the aliased with-vapor build, detection recovers', async () => {
-    // This is the dev server, and it is the whole reason the bug hid. Vite
-    // serves the alias, so the async channel resolves to a namespace that DOES
-    // carry Vapor - the same alias `examples/vapor-sfc/vite.config.ts` sets.
-    //
-    // Without this control the regression above proves less than it appears to:
-    // an unaliased `vue` has no Vapor either, so it would throw for a second,
-    // unrelated reason. Pinning the aliased case is what isolates "the specifier
-    // cannot resolve" as the actual cause.
+    // Dev-server shape: the alias makes the async channel resolve to a namespace with Vapor. Without this control the failure above could come from an unaliased `vue` having no Vapor.
     vi.doMock('vue', async () => await import(/* @vite-ignore */ WITH_VAPOR));
     vi.resetModules();
 
@@ -131,9 +88,7 @@ describe('production bundle: both detection channels are absent', () => {
 
     expect(chamber.isVaporAvailable()).toBe(true);
 
-    // Still only true one tick late - synchronous module-scope calls remain
-    // unsafe even here, which is why `configureVue()` is the wiring and not
-    // merely a fallback.
+    // A fresh module has not detected yet: detection is async, so only `configureVue()` makes it synchronous.
     vi.resetModules();
     const fresh = await import('../src/chamber');
     expect(fresh.isVaporAvailable()).toBe(false);
@@ -143,9 +98,6 @@ describe('production bundle: both detection channels are absent', () => {
     const { vaporChamberHMR } = await import('../src/vite-hmr');
     const plugin = vaporChamberHMR({ verbose: false }) as unknown as { apply?: string };
 
-    // Pins the causal link rather than the coincidence: if this ever becomes
-    // build-capable, the priming story changes and this fixture should be
-    // revisited alongside it.
     expect(plugin.apply).toBe('serve');
   });
 });

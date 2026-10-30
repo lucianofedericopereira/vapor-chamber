@@ -1,12 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * `stubGlobal` and `stubEnv` from `vapor-chamber/vitest/pure`: stubs that
- * `using` restores at the end of the block (v1.21.0).
- *
- * Vitest's own `vi.stubGlobal` / `vi.stubEnv` return nothing disposable, and
- * its `unstubGlobals` / `unstubEnvs` restore at the START of the next test,
- * after the current test's after-hooks. A stub an `afterEach`
- * depends on has to be gone before that hook runs, and `using` is the moment.
+ * `stubGlobal` and `stubEnv` from `vapor-chamber/vitest/pure`: stubs that `using` restores at the end of the block.
+ * Why: Vitest's own unstubGlobals / unstubEnvs restore at the start of the next test, so an afterEach that needs the real global would see the stub.
+ * Shows: exact restore of descriptors and absent names, the vi.stubGlobal property shape, nested and double disposal, restore after a throw, an afterEach seeing the real document, env set / unset / boolean forms, and a stub made without `using` restored at the next test.
+ * See: src/vitest-pure.ts
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { stubEnv, stubGlobal } from '../src/vitest-pure';

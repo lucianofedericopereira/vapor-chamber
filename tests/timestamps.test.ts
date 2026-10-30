@@ -1,4 +1,9 @@
-/** Every timestamp the library produces, and its form (docs/timestamps.md, log s35.128). */
+/**
+ * The timestamps produced inside the process are epoch milliseconds as integer numbers.
+ * Why: a timestamp in another form (a string, a float, another epoch) would break code that compares or sorts them.
+ * Shows: meta.ts, the metrics plugin's entry timestamp and useCommandError's entry timestamp are integers within a minute of Date.now().
+ * See: docs/timestamps.md, log s35.128
+ */
 import { describe, expect } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';

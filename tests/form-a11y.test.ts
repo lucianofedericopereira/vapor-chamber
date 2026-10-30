@@ -1,16 +1,8 @@
 /**
- * FormBus: errors from outside its rules, and the accessibility facts per field.
- *
- * Most real form errors come from the server, not from client rules. A 422
- * problem carries them as `errors: [{ pointer, detail }]`, the pointer into the
- * envelope the client sent (`/payload/<field>`, RFC 6901): the wire contract's
- * one shape (docs/contract.md 4); the backend localizes the
- * messages and converts its own field map to pointers. So what to say and which field it is
- * about are DATA: the form shows them, and exposes what an element needs to
- * make them accessible (WCAG 3.3.1 errors identify the field, 4.1.2 state is
- * exposed): `aria-invalid`, `aria-describedby` pointing at the message, and the
- * first invalid field to focus after a failed submit.
- * docs/accessibility.md.
+ * FormBus.setErrors with server pointers, and the per-field aria facts (aria, errorId, firstInvalid).
+ * Why: server errors arrive as `/payload/<field>` pointers; if they land on the wrong field, or a field lacks aria-invalid, aria-describedby or a unique error id, users and assistive tech cannot tell which field failed.
+ * Shows: pointers map to (dotted) fields with the first per field winning and foreign pointers dropped, RFC 6901 escapes decode, outside errors clear on field change and reset, a 422 problem from submit() lands on fields, aria/errorId/firstInvalid report as expected.
+ * See: docs/contract.md, docs/accessibility.md, RFC 6901, log 36.F42.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -39,7 +31,7 @@ describe('FormBus - errors from outside its rules', () => {
     const form = createFormBus({ fields });
     form.setErrors([
       { pointer: '/payload/name', detail: 'Name is taken.' },
-      { pointer: '/payload/name', detail: 'a second one' },  // same field again: the first wins
+      { pointer: '/payload/name', detail: 'a second one' },
       { pointer: '/payload/nickname', detail: 'no such field' },
       { pointer: '/name', detail: 'not into the payload' },
       { pointer: '#/payload/name', detail: 'a URI fragment, not the contract\'s spelling' },
@@ -76,8 +68,7 @@ describe('FormBus - errors from outside its rules', () => {
   });
 
   it('submit() lands a backend problem\'s field errors on the fields and resolves false', async () => {
-    // The real path: the command goes through the bridge, the backend answers a
-    // 422 problem, and onSubmit throws the failure it got back.
+    // Real path: bus -> httpTransport -> 422 problem; onSubmit throws the failure it got back.
     const problem = { status: 422, code: 'validation_failed', detail: 'The given data was invalid.',
       errors: [{ pointer: '/payload/email', detail: 'The email has already been taken.' }] };
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify(problem), { status: 422, headers: { 'content-type': 'application/problem+json' } }));

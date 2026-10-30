@@ -1,53 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * The `<script>`-tag examples call `VaporChamber.*` globals off an IIFE bundle.
- * This asserts every global they call actually exists in the bundle they load.
- *
- * WHY IT IS A SEPARATE RISK from the ESM examples (covered by
- * html-example-imports.test.ts). Those fail loudly: a missing named import is a
- * module-resolution error the moment the page loads. A missing GLOBAL is just
- * `undefined`, so the page loads fine and dies later at
- * `VaporChamber.defineChamberStore is not a function` - only on the code path that touches
- * it, only at runtime, in a browser nobody runs during CI.
- *
- * And the failure is live, not theoretical: the three IIFE variants do NOT have
- * the same surface. The store (`defineChamberStore`) ships in `full` but is
- * absent from `core` and `elements`. `examples/sprinkled-blade` loads `core` today and only
- * calls `connect`, which core has - but an example gaining one store call,
- * or switching to the smaller bundle to save bytes, breaks with nothing to
- * catch it. That is exactly the kind of silent-negative this cycle spent its
- * time removing.
- *
- * METHOD: execute the real built IIFE (it assigns `globalThis.VaporChamber`),
- * then check the names the page actually references against it. Not a regex
- * over the bundle text - an earlier hand-check of this did use a regex on the
- * export tail, which is brittle and can quietly match nothing.
- *
- * HTML comments are stripped first: `pattern-1-blade-cdn.html` documents CDN
- * alternatives inside a comment, including a version-pinned `<script>` tag, and
- * counting those as real loads would resolve a URL that is prose.
- *
- * IT COVERS `.blade.php` TOO, and it did not until this change. The walker
- * matched `entry.endsWith('.html')`, so the two Laravel views were skipped
- * while calling five globals between them - `connect` in `cart.blade.php`, and
- * `configureVue` / `connect` / `defineWidget` / `emitDOMEvent` in
- * `widget.blade.php`, the last two being the identity of the `elements` variant
- * and absent from `core`. All five exist today; nothing would have said so if
- * one stopped.
- *
- * That is the same defect `scripts/check-ascii.mjs` had one directory over: a
- * walker whose extension list is shorter than the tree, reporting a clean pass
- * over files it never opened. The lesson from that fix applies here - the
- * assertion below that the walker finds a Blade view is what keeps this from
- * silently checking nothing again.
- *
- * Blade comments are stripped alongside HTML ones. `{{-- ... --}}` is server
- * side and never reaches the browser, and `widget.blade.php` uses it to explain
- * which bundle it loads and why - prose that names `VaporChamber` methods it
- * does not call.
- *
- * Fails when `dist/` is absent, as every suite that reads the build does
- * (tests/require-dist.ts).
+ * The `<script>`-tag examples and Blade views call `VaporChamber.*` globals off an IIFE bundle; each must exist in the bundle that page loads.
+ * Why: a missing global is just `undefined`, so the page loads and dies later on that code path, and the three IIFE variants do not share one surface.
+ * Shows: the walker finds pages, the Blade tier included; each bundle is built; running the real IIFE defines every name the page calls. Comments are stripped first: prose is not a call.
+ * See: tests/examples/html-example-imports.test.ts, tests/require-dist.ts.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -69,10 +25,7 @@ function findViews(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/**
- * Drop HTML and Blade comments so documented-but-inactive markup is not treated
- * as live. Blade's `{{-- --}}` never reaches the browser at all.
- */
+/** Drops HTML and Blade comments, so documented but inactive markup is not treated as live. */
 const stripComments = (s: string) =>
   s.replace(/<!--[\s\S]*?-->/g, '').replace(/\{\{--[\s\S]*?--\}\}/g, '');
 
@@ -85,16 +38,9 @@ function analyse(file: string): Page | null {
   if (!script) return null;
 
   const globals = [...src.matchAll(/VaporChamber\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
-  // These pages are served from the REPO ROOT (examples/static-server.mjs), so
-  // a leading `/` means repo root, not filesystem root - resolve it the way the
-  // browser will. (`../../dist/...` from `examples/` would point above the
-  // repo and work only because browsers clamp excess `..` to the origin root.)
+  // Served from the repo root (examples/static-server.mjs), so a leading `/` means the repo root, as in the browser.
   const src0 = script[1];
-  // A Blade view is served by Laravel out of `public/`, and
-  // `examples/laravel-app/setup.sh` copies the IIFEs from this repo's `dist/`
-  // into `public/js/` (lines 27-29). So `/js/<name>` names the same built file
-  // `/dist/<name>` does, one deploy step later - resolve it there rather than
-  // at a repo-root `js/` directory that does not exist.
+  // A Blade view's `/js/<name>` is the same built file: examples/laravel-app/setup.sh copies the IIFEs from dist/ into public/js/.
   const fromRoot = src0.startsWith('/js/') ? `/dist/${src0.slice('/js/'.length)}` : src0;
   const bundle = fromRoot.startsWith('/')
     ? join(root, fromRoot.slice(1))
@@ -117,11 +63,7 @@ describe('HTML examples call real IIFE globals', () => {
     expect(pages.length).toBeGreaterThan(0);
   });
 
-  // The walker's extension list being SHORTER THAN THE TREE is how the Blade
-  // views went unchecked while calling five globals. Naming the tier here means
-  // dropping `.blade.php` from the walker fails loudly instead of quietly
-  // reducing what this suite covers - the same guard tests/ascii-guard.test.ts
-  // puts on check-ascii's EXTENSIONS.
+  // Naming the tier means dropping `.blade.php` from the walker fails loudly, as tests/ascii-guard.test.ts does for check-ascii.
   it('covers the Blade tier, not only plain .html', () => {
     const blade = pages.filter((p) => p.file.endsWith('.blade.php'));
     expect(blade.map((p) => p.file).sort()).toEqual([

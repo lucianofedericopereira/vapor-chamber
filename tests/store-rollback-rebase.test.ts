@@ -1,4 +1,9 @@
-/** An `undo: true` store rolls back any step it holds and keeps every later write (log s35.157). Rationale at the end. */
+/**
+ * An `undo: true` store rolls back any step it holds by starting from the step's "before" and re-applying every later step from the ring, and an undo for a step it does not hold changes nothing.
+ * Why: if the inverse wrote the undone step's "before" into the state, undoing A after A, B would erase B, and an undo for a command the ring does not hold would make the oldest step's Command the state; a tab's write must count as a step so a rollback never erases it.
+ * Shows: sync and async rollback keep later steps, persist saves the kept state, a step undone once is a no-op the second time, later $reset and undone steps are replayed correctly, a throwing replay changes nothing, an unheld undo answers ok without changing state, an optimistic failure reports no undo error, and a rollback keeps another tab's later write and reaches that tab.
+ * See: log s35.157.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type Command, type CommandResult } from '../src/command-bus';
 import { history } from '../src/plugins-core';
@@ -20,7 +25,7 @@ const useCart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }),
 const closers: Array<() => void> = [];
 afterEach(() => { while (closers.length) closers.pop()!(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-/** The Commands a bus ran for `action`, in order. */
+// The Commands a bus ran for `action`, in order.
 function recorder(bus: { use(p: any): unknown }, action: string): Command[] {
   const seen: Command[] = [];
   bus.use({ settled: (cmd: Command) => { if (cmd.action === action) seen.push(cmd); } });
@@ -193,25 +198,3 @@ describe("a tab's write is a step", () => {
     expect(b.store.state.value).toEqual({ items: ['B'] });
   });
 });
-
-/*
- * The ring holds each step as [command, before, after]. Before this, the
- * inverse wrote the undone step's "before" straight into the state, so
- * undoing step A after A, B erased B (plan P0), and an undo for a command the
- * ring did not hold read slot 0: the oldest step's COMMAND became the state
- * (audit B1). An optimistic action's failure and a transactional batch reach both paths.
- *
- * Now (Memento for owned state, rebase as Replicache and Apollo's optimistic
- * layers do): undoing step i starts from its "before" and re-applies every
- * later step from what the ring holds, by calling the reducer directly
- * (plugins and bridges never see those steps again). An undone step is skipped
- * by every later replay, so a second $undo of it is the identity, as is an
- * undo for a step the ring does not hold. A state another tab sent is a
- * step too, under a marker no action replays, so a rollback never erases it.
- * A replay that throws leaves the state and the ring as they were.
- *
- * The share test: tab a writes A, then receives B's state [A, B] from tab b.
- * Undoing A re-applies the received step as the state it set, [A, B], so a
- * keeps it. That is share's documented last-writer-wins: the incoming state
- * is the fact.
- */

@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/index.ts - blade-row rendering (a custom fetchBlade and the
- * in-box `bladeFetcher`) and the table loaders (remote { url } / inline
- * { inline }), lazy component import, and the router:missing:component path.
+ * Blade rows (custom fetchBlade, bladeFetcher), route-table loaders (remote url, inline), and component resolution (lazy import, missing key).
+ * Why: a table or blade fetch that failed silently, or a remote table that read a bundler-only global, would leave a Blade app with no routes or a wrong error.
+ * Shows: fetchBlade gets the base-prefixed path and its HTML becomes the last render component; a rejected fetch gives router:failed:blade; bladeFetcher calls the client with responseType text; a remote table loads, reloads, and a failure reports router:failed:routes; it loads with no global process; an inline table loads; a lazy component loads once; an unknown key gives router:missing:component.
  */
-
 import { describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { bladeFetcher } from '@router/remote';
@@ -70,8 +69,7 @@ describe('blade rows', () => {
       base: '/admin',
       routes: ROWS,
       components: HOME,
-      // bladeFetcher lives in vapor-chamber/router/remote: the router core
-      // builds no http client for a feature most tables never use.
+      // bladeFetcher lives in router/remote: the core builds no http client for it.
       fetchBlade: bladeFetcher({ http: fakeHttp(get) }),
     });
     await router.isReady();
@@ -92,7 +90,7 @@ describe('table loaders', () => {
     });
     await router.isReady();
 
-    // No count of its own: the client's default re-sends a read (tests/router/one-client.test.ts).
+    // No call count here: the client's default re-sends a read (tests/router/one-client.test.ts).
     expect(get).toHaveBeenCalledWith('/api/routes');
     expect(router.currentRoute.value.location.name).toBe('home');
 
@@ -118,12 +116,7 @@ describe('table loaders', () => {
   });
 
   it('loads a remote table with no global `process` (no-bundler delivery)', async () => {
-    // The router's headline delivery - Blade inline payloads, plain ESM +
-    // import map, pattern-1 no-build - has no bundler define and no `process`.
-    // A bare `process.env.NODE_ENV` read inside loadRemoteTable's try threw
-    // ReferenceError there, which the catch rewrapped as `routes_load_failed`
-    // and blamed on the URL. Node always has `process`, so only deleting it
-    // reproduces the shipped environment.
+    // No-bundler delivery has no define and no `process`; Node always has one, so it is deleted.
     const saved = globalThis.process;
     const onError = vi.fn();
     const get = vi.fn(async () => ({ data: { routes: ROWS, base: '/admin' } }));

@@ -1,5 +1,8 @@
 /**
- * Tests for I/O plugins: createChannel (a store saves itself: tests/store-persist.test.ts)
+ * createChannel: the bridge that mirrors named fast-lane facts between tabs over a BroadcastChannel.
+ * Why: a fact emitted in one tab must reach the other tabs exactly once with the sender's own value, or tabs would diverge or echo each other in a storm; without BroadcastChannel (SSR) the local lane must keep working.
+ * Shows: a fact crosses to other tabs and is applied once each, only named events cross, onReceive can drop a fact, foreign messages are ignored, dispose() stops the bridge and its lane listener, a missing BroadcastChannel is a no-op, an uncloneable payload warns in DEV (not in production) and leaves the local emit standing, and an async bus dispatch does not loop through the bridge.
+ * See: tests/store-persist.test.ts.
  */
 
 import { describe, expect, beforeEach, vi } from 'vitest';
@@ -9,20 +12,8 @@ import { createFastLane } from '../src/fast-lane';
 import { stubGlobal } from '../src/vitest-pure';
 import { it } from '../src/vitest';
 
-// ---------------------------------------------------------------------------
-// createChannel (BroadcastChannel over an event channel)
-// ---------------------------------------------------------------------------
-
 describe('createChannel', () => {
-  // A REAL BroadcastChannel and a REAL fast lane, not mocks. The suite that
-  // stood here used a hand-written channel stub, and a stub cannot show what
-  // this bridge exists to fix: the old plugin re-dispatched the command in the
-  // receiving tab, so two tabs re-derived the outcome independently, and a
-  // stub that records `postMessage` calls agrees with that shape whatever it
-  // does. Node provides BroadcastChannel, two instances in one process talk to
-  // each other, and a sender does not receive its own message - which is the
-  // real contract worth testing against. Each test takes its own channel name
-  // so the tests do not hear each other, and closes what it opens.
+  // A real BroadcastChannel and fast lane, not stubs; each test takes its own channel name so tests do not hear each other.
   let channelSeq = 0;
   const nextChannel = () => `vc:test:sync:${++channelSeq}`;
   const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5)); };
@@ -52,8 +43,7 @@ describe('createChannel', () => {
   });
 
   it('applies the sender\'s values instead of re-deriving them', async () => {
-    // The reason the bridge carries facts rather than commands. Both tabs run
-    // the same non-deterministic producer; only the sender's value may survive.
+    // The bridge carries facts, not commands: a non-deterministic producer must yield the sender's value only.
     const ch = nextChannel();
     const a = openTab(ch), b = openTab(ch);
     const mint = (tab: string) => ({ id: `${tab}-${Math.random()}` });
@@ -81,8 +71,7 @@ describe('createChannel', () => {
   it('only the named events cross', async () => {
     const ch = nextChannel();
     const a = openTab(ch, ['cartAdded']), b = openTab(ch, ['cartAdded']);
-    // `cartRecalc` is emitted but never named, so it stays in the tab that
-    // emitted it - which is how a derivation is kept local.
+    // `cartRecalc` is never named, so it stays in the tab that emitted it.
     const bSawRecalc: unknown[] = [];
     b.lane.on('cartRecalc', (d: unknown) => { bSawRecalc.push(d); });
     a.lane.emit('cartRecalc', { derived: true });
@@ -153,9 +142,7 @@ describe('createChannel', () => {
     await flush();
     expect(b.applied).toEqual([]);
 
-    // The closed tab's own lane still works; only the bridge is gone, and its
-    // send-side listener must be off the lane too or it would post on a
-    // closed channel.
+    // The bridge's send-side listener must be off the lane too, or it would post on a closed channel.
     b.lane.emit('cartAdded', { count: 99 });
     expect(b.applied).toEqual([{ count: 99 }]);
     a.bridge.dispose();
@@ -175,8 +162,7 @@ describe('createChannel', () => {
   });
 
   it('a payload that cannot be cloned warns in DEV and leaves the local emit standing', () => {
-    // DataCloneError is thrown synchronously by postMessage. The local
-    // listeners registered after the bridge must still run.
+    // postMessage throws DataCloneError synchronously; listeners registered after the bridge must still run.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ch = nextChannel();
     const lane = createFastLane();
@@ -195,9 +181,7 @@ describe('createChannel', () => {
   });
 
   it('...and says nothing in production', async () => {
-    // `DEV` is a module-level const, so the env has to move BEFORE the module
-    // is evaluated - stubbing it around an already-imported `sync` changes
-    // nothing. Same shape as the directive plugin's production test.
+    // `DEV` is a module-level const: the env must change before the module is evaluated.
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     try {
@@ -221,10 +205,7 @@ describe('createChannel', () => {
   });
 
   it('is independent of any command bus, sync or async', async () => {
-    // What "item 24 - createChannel() on an async bus does not loop" used to guard.
-    // The bridge no longer touches the dispatch chain at all, so the async bus
-    // cannot produce a loop: there is nothing for it to re-enter. Pinned by
-    // running a real async dispatch alongside and counting the applies.
+    // The bridge never touches the dispatch chain; a real async dispatch runs alongside and the applies are counted.
     const ch = nextChannel();
     const a = openTab(ch), b = openTab(ch);
     const bus = createAsyncCommandBus();

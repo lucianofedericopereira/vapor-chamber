@@ -1,15 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * useCommand().register follows KeepAlive: the page on screen answers.
- *
- * useCommandHistory and useCommandError already pause and resume through
- * tryKeepAliveHooks; useCommand, the composable that registers handlers, did
- * not (an omission, owner 2026-09-27). Measured on rc.9: A -> B -> back to A,
- * and B's handler answered while A was on screen. Now a deactivated page
- * releases its handlers (register()'s cleanup removes only its own) and takes
- * them back when it is activated. Listeners (on()) are unchanged: whether a
- * cached page keeps listening is an open decision (ROADMAP.md, "Open
- * work, to discuss", `KeepAlive` listeners).
+ * useCommand().register follows KeepAlive: a deactivated page releases its handlers and takes them back when activated.
+ * Why: if a cached page kept its handler, going back from page B to page A would leave B's handler answering while A is on screen.
+ * Shows: with two cached Vapor pages, the page on screen answers pageSave after A -> B -> A, and no handler remains after unmount; listeners (on()) are not asserted.
+ * See: ROADMAP.md
  */
 import { expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';

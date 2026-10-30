@@ -1,4 +1,9 @@
-/** `deep: true` on the Vue store: `state.value` is Vue's reactive view, the library keeps the raw state. Rationale at the end. */
+/**
+ * `deep: true` on the Vue store: `state.value` is Vue's reactive view, the library keeps the raw state.
+ * Why: nested fields mutated in place (a `v-model`) must be tracked by Vue, but a reactive Proxy fails the structured clone a shared store sends and would reach reducers, persist and field events, so only the public `state.value` getter returns the view.
+ * Shows: a nested mutation through `state.value` and a reducer write both reach a Vue computed; reducers receive a non-reactive state; a second tab receives the shared state; without `deep`, `state.value` is not reactive.
+ * See: log s36.62
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computed, isReactive } from 'vue';
 import { createCommandBus } from '../src/command-bus';
@@ -50,16 +55,3 @@ describe('deep: true', () => {
     form.$dispose();
   });
 });
-
-/*
- * `useDeepCommandState` was `useCommandState` over a deep `ref`: its state's
- * nested fields, mutated in place by a `v-model`, were tracked by Vue. It folds
- * into the store (plan 1.32 4e) as `deep: true`, Vue entry only. The plan said
- * the cell is a `ref`; a ref's value is a reactive Proxy, and a Proxy fails
- * the structured clone a shared store sends (`DataCloneError`, measured
- * 2026-10-19, Vue 3.6.0-rc.12), and it would reach reducers, persist and the
- * field events too. So the cell stays raw and only the public `state.value`
- * getter, picked at definition, returns Vue's `reactive()` view of it, the
- * one cached proxy per object. A mutation through the view changes the raw in
- * place: the library, which follows writes by identity, does not see it.
- */

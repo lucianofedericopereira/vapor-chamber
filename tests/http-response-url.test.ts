@@ -1,9 +1,14 @@
-// HttpResponse carries Fetch's `url` and `redirected`, against a real redirect (#17).
+/**
+ * HttpResponse carries Fetch's `url` and `redirected`, against a real redirect.
+ * Why: an app redirected by its server could not learn where it ended up, and a Cache Groups map keyed by URL needs the final URL.
+ * Shows: a followed 302 gives the final url and redirected true; no redirect gives the requested url and false; postCommand keeps the POST through a 307 and reports where it landed.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHttpClient, postCommand } from '../src/http';
 
+// A real server: a stubbed Response has no url.
 let server: Server;
 let base = '';
 
@@ -43,14 +48,3 @@ describe('HttpResponse.url and redirected', () => {
     expect(res.redirected).toBe(true);
   });
 });
-
-/*
- * Decision 12 of the 1.26 list: IN, because the client was plainly wrong and
- * no plugin could fix it. Fetch's Response has `url` (the final URL, after
- * redirects) and `redirected`; the client built its HttpResponse without
- * them, so an app redirected by its server could not learn where it ended up
- * (a Cache Groups map keyed by URL, the panel's case, needs exactly this). The
- * acceptance needs a real redirect: a stubbed Response has no url. Typed
- * optional (an app's own httpClient for a bridge may not set them); both
- * builders always do, so every real response has one shape.
- */

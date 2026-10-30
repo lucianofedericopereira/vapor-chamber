@@ -1,15 +1,8 @@
 /**
- * The Idempotency-Key header is a Structured Field String, as the draft the
- * library cites requires (draft-ietf-httpapi-idempotency-key-header-07, section
- * 2; RFC 9651): quoted, `"` and `\` escaped, printable ASCII only.
- *
- * It was sent raw. An app's key can hold any text (here the action plus the
- * target as JSON, `save:{"id":1}`), so the value was neither quoted
- * nor escaped, and any character outside Latin-1 in the target (an emoji, CJK
- * text in a search term) made it a value `Headers` refuses outright: the
- * request never left. The fetch mock the old test used accepts anything, so it
- * could not see either. The platform's own Headers is the judge here.
- * (v1.25.0)
+ * The Idempotency-Key header is a Structured Field String: quoted, percent-encoded, printable ASCII only.
+ * Why: an app's key can hold any text, and a raw value with a character outside Latin-1 (an emoji, CJK text in a search term) is refused by `Headers`, so the request would never leave.
+ * Shows: the value matches the sf-string grammar and equals the quoted encodeURIComponent of the key, for single, batched and WebSocket sends; the empty key sends no header; bodies and frames stay JSON.stringify text; `Headers` accepts a non-Latin-1 target's value; different targets give different headers.
+ * See: draft-ietf-httpapi-idempotency-key-header-07, RFC 9651
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -45,6 +38,7 @@ describe('Idempotency-Key on the wire', () => {
   it('stays a valid header when the target holds characters outside Latin-1', async () => {
     const value = await sentKey({ q: 'caf\u00e9 \u{1F600} \u6771\u4eac' });
     expect(value).toMatch(SF_STRING);
+    // The platform's Headers is the judge: a fetch mock accepts any value.
     expect(() => new Headers({ 'Idempotency-Key': value })).not.toThrow();
   });
 

@@ -21,10 +21,10 @@ is <!-- vc:sizeBarrel -->48.5<!-- /vc:sizeBarrel --> KB.
 | `vapor-chamber/router` | <!-- vc:sizeRouter -->11.3<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
-| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->6.6<!-- /vc:sizeRouterRemote --> KB |
+| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->6.5<!-- /vc:sizeRouterRemote --> KB |
 | `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->6.9<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->48.6<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->48.7<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->48.7<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->48.8<!-- /vc:sizeVapor --> KB |
 | `vapor-chamber/reactive` | <!-- vc:sizeReactive -->0.5<!-- /vc:sizeReactive --> KB |
 | `vapor-chamber/transports` | <!-- vc:sizeTransports -->12.1<!-- /vc:sizeTransports --> KB |
 | `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->6.1<!-- /vc:sizeOutbox --> KB |

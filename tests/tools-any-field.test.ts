@@ -1,10 +1,8 @@
 /**
- * toTools(): a field typed `'any'` is the empty schema, `{}`.
- *
- * It was emitted as `{ type: 'any' }`, which is no JSON Schema type, so the
- * whole Anthropic or OpenAI tool schema was invalid (compiled with Ajv: "type
- * must be equal to one of the allowed values"). busToMcpTools already emits
- * `{}` (mcp-gaps.test.ts); the two generators now agree on it.
+ * toAnthropicTools and toOpenAITools: a field typed 'any' becomes the empty schema {}.
+ * Why: a type outside JSON Schema would make the whole Anthropic or OpenAI tool schema invalid.
+ * Shows: both generators emit {} for the field, matching busToMcpTools, and no emitted type is outside JSON Schema.
+ * See: tests/mcp-gaps.test.ts
  */
 import { describe, expect, it } from 'vitest';
 import { busToMcpTools } from '../src/mcp';

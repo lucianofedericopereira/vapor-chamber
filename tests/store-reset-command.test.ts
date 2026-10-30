@@ -1,4 +1,9 @@
-// `$reset()` is a command: plugins, history and listeners see it, and it reaches storage.
+/**
+ * A store's `$reset()` dispatches the command `<id>$reset`, registered beside the store's actions.
+ * Why: if `$reset` wrote the signal directly, no plugin, listener or history entry would see it, and with `persist` the reset would never reach storage, so a reload would bring back the state from before it.
+ * Shows: persist saves the reset and a reload reads it; listeners and history see `counter$reset`; it returns the dispatch result; a rule can refuse it; an async bus resets after the promise settles; $dispose unregisters it; state() is the reset target; names with `$` skip the naming rule while other violations still throw.
+ * See: log s35.70, docs/manual/02-commands.md.
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -133,7 +138,7 @@ describe('$reset goes back to state(), so state() is the reset target', () => {
 });
 
 describe('naming: a name with `$` is the library\'s', () => {
-  // The pattern manual chapter 2, "Enforce a naming convention" shows, with 'throw'.
+  // A camelCase pattern would reject `$`; names containing `$` are the library's and skip the check, which runs only after the pattern fails.
   const naming = { pattern: /^[a-z][a-zA-Z0-9]+$/, onViolation: 'throw' as const };
 
   it('a store on a bus with the manual chapter 2, "Enforce a naming convention" naming rule creates and resets', () => {
@@ -151,15 +156,3 @@ describe('naming: a name with `$` is the library\'s', () => {
     expect(() => bus.dispatch('bad_name', null)).toThrow(/does not match naming pattern/);
   });
 });
-
-// Before this, `$reset()` wrote the signal directly: no plugin, listener or
-// history entry saw it, so with `persist` the reset never reached storage and
-// the next reload brought back the state from before it (the 1.26 list, item
-// 18; its probe read storage `{n:5}` after the reset). Now it dispatches
-// `<id>$reset`, registered beside the store's actions.
-//
-// The name carries `$` so that no user action can collide with it: a store
-// with an action `reset` already owns `<id>Reset`. A naming rule such as the
-// manual chapter 2, "Enforce a naming convention" camelCase pattern would reject `$`, so names containing `$` are
-// reserved for the library and skip the naming check (log s35.70). The check
-// runs only after the pattern has failed, so a name that passes pays nothing.

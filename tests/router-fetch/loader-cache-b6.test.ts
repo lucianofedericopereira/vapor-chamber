@@ -1,4 +1,9 @@
-/** The HTTP cache's B6 cases, re-run through a cached router loader on a real server. The long note is at the end. */
+/**
+ * The HTTP cache's invalidation cases (log B6), run through a cached fetchLoaders router loader against a real node:http server.
+ * Why: the router holds no cache of its own, so a loader read is the HttpClient's cache entry; a write or in-flight read that left a stale entry would show old data after a revisit.
+ * Shows: a revisit is answered from the cache (one GET); a read in flight across a write is shown but not stored, so the revisit fetches the new value; a write through the same client makes the revisit fetch; revalidateRoutes after a mapped command costs one more GET and shows the new value.
+ * See: log s35.207, tests/http-cache-writes.test.ts, tests/http-cache-unrelated-invalidation.test.ts
+ */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -116,17 +121,3 @@ describe('a cached router loader against the B6 cases', () => {
     router.dispose();
   });
 });
-
-/*
- * Plan 1.28 item 6 (log s35.207). The plan named "the loader cache"
- * (src/router/loaders.ts). The router holds no cache: `runLoaders` calls the
- * preset, and the in-box preset (`fetchLoaders`, src/router-fetch/index.ts)
- * reads through the HttpClient it is given, so a cached loader read is the
- * client's own cache entry. This file runs the B6 cases (log B6, ext 10, 11,
- * 12) through a router navigation on a real `node:http` server: a loader read
- * in flight across an invalidation of its URL, a write to the loader's URL
- * through the same client, and `revalidateRoutes`. Each answers as the client
- * alone does (tests/http-cache-writes.test.ts,
- * tests/http-cache-unrelated-invalidation.test.ts, the positive control), and
- * the first case's control shows the revisit does read the cache.
- */

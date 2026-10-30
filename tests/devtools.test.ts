@@ -1,5 +1,8 @@
 /**
- * Tests for src/devtools.ts - Vue DevTools integration
+ * src/devtools.ts: the Vue DevTools integration, its bus-side buffer and its @vue/devtools-api plugin.
+ * Why: a published subpath must work with the optional peer and degrade silently without it, and do nothing in production.
+ * Shows: a no-op in production; a timeline event per dispatch, ok or error; an inspector tree, filtered, with state per node; the last 100 commands; facts on their own layer; stop removes all.
+ * See: docs/timestamps.md.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setupDevtools } from '../src/devtools';
@@ -22,24 +25,13 @@ describe('setupDevtools', () => {
     unsub();
   });
 
+  // Coverage: the only case that reaches the production branch.
   it('no-ops in production mode', () => {
     vi.stubGlobal('process', { env: { NODE_ENV: 'production' } });
     const bus = createCommandBus({ onMissing: 'ignore' });
     const unsub = setupDevtools(bus, {});
     expect(typeof unsub).toBe('function');
     // Should not throw when called
-    unsub();
-  });
-
-  it('records commands via onAfter hook', () => {
-    const bus = createCommandBus({ onMissing: 'ignore' });
-    const unsub = setupDevtools(bus, {});
-
-    // Dispatch something - should not throw even without devtools API
-    bus.dispatch('testAction', { id: 1 }, { qty: 2 });
-    bus.dispatch('testAction2', { id: 2 });
-
-    // Cleanup
     unsub();
   });
 
@@ -62,15 +54,7 @@ describe('setupDevtools', () => {
   });
 });
 
-/**
- * The devtools-api half: everything above only exercises the bus-side buffer,
- * because the `import('@vue/devtools-api')` callback never ran without the
- * optional peer installed. It is a devDependency now, so the plugin body -
- * timeline layer, inspector, and the two inspector callbacks - is reachable.
- *
- * v1.9 promotes this module to the public `vapor-chamber/devtools` subpath, and
- * a published entry point should be measured, not assumed.
- */
+/** The @vue/devtools-api half: timeline layers, inspector and its callbacks, reachable since the peer is a devDependency. */
 describe('setupDevtools - the @vue/devtools-api integration', () => {
   /** Capture the api object the plugin registers, plus its callbacks. */
   async function withDevtools(facts?: string[]): Promise<{
@@ -96,9 +80,7 @@ describe('setupDevtools - the @vue/devtools-api integration', () => {
     const { setupDevtools: fresh } = await import('../src/devtools');
     const bus = createCommandBus({ onMissing: 'ignore' });
     const stop = fresh(bus, {}, facts ? { facts } : undefined);
-    // Poll for the actual side effect instead of racing a fixed setTimeout(0)
-    // against the dynamic import - a fixed tick is flaky under load (the
-    // import + module transform can take longer than one macrotask).
+    // Wait for the plugin's side effect: the dynamic import can outlast a fixed tick under load.
     await vi.waitFor(() => {
       if (api.addTimelineLayer.mock.calls.length === 0) throw new Error('devtools plugin not ready yet');
     });
@@ -111,11 +93,7 @@ describe('setupDevtools - the @vue/devtools-api integration', () => {
   });
 
   it('degrades silently when @vue/devtools-api is not installed', async () => {
-    // The `.catch` on the dynamic import - the only part of this module the
-    // suite never reached, because the optional peer IS installed here. It is
-    // the shape every consumer who imports `vapor-chamber/devtools` without
-    // the peer gets, and without the catch it surfaces as an unhandled
-    // rejection in their console.
+    // The import's .catch: every consumer without the peer takes it; without it they see an unhandled rejection.
     vi.doMock('@vue/devtools-api', () => {
       throw new Error("Failed to resolve import '@vue/devtools-api'");
     });

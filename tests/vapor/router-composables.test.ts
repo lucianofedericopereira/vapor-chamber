@@ -1,29 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the router composables inside a REAL mounted Vapor component.
- *
- * WHY THIS FILE EXISTS. `tests/router/composables.test.ts` covers all eight
- * composables, but through `app.runWithContext(fn)` on a VDOM app - no
- * component, no mount, no Vapor. `tests/router/vapor-fixture.test.ts` does use
- * a real Vapor app, but only to measure provide/inject as a primitive; it never
- * calls a composable. So the actual shipped combination - a router composable
- * executing inside `defineVaporComponent({ setup() })` - had no coverage.
- *
- * That is the same gap that hid the rc.4 KeepAlive bug: `tryKeepAliveHooks`
- * was gated on `getCurrentInstance()`, which answers null in a Vapor setup, so
- * a feature was inert on Vapor while every VDOM-shaped test stayed green. The
- * router is the largest surface still exposed to that class, because it leans
- * on three context-sensitive Vue primitives - `inject()`, `getCurrentScope()`
- * and `onScopeDispose()` - and each is a place where "works in VDOM" does not
- * imply "works in Vapor".
- *
- * This file runs under `vitest.vapor.config.ts`, which aliases `vue` to the
- * with-vapor build. That alias is not a convenience: the router imports `vue`
- * as a bare specifier, so without it the router and the Vapor app would be two
- * disconnected reactivity instances and `inject(ROUTER_KEY)` would miss for
- * harness reasons. Real Vapor apps need no alias - Vue's bundler entry
- * re-exports `@vue/runtime-vapor` (see the header of `vitest.vapor.config.ts`)
- * - but vitest's bare `vue` is not that bundler entry, so this config aliases.
+ * The router composables (`useRouter`, `useRoute`, `useQueryParam`, `useMenu`, `useBreadcrumbs`, `useRouteData`, `useRouteError`, `usePagination`) running inside a real mounted `defineVaporComponent({ setup() })`.
+ * Why: the router leans on three context-sensitive Vue primitives, `inject()`, `getCurrentScope()` and `onScopeDispose()`, and "works in VDOM" does not imply "works in Vapor"; if `getCurrentScope()` were falsy in a Vapor setup, every mounted route component would leak a router subscription.
+ * Shows: `useRouter`/`useRoute` resolve through `inject()`; `useRoute` tracks a navigation; `useQueryParam` reads its default and writes the URL; the menu, breadcrumbs, route data, route error and pagination composables return values in a Vapor setup; navigating after unmount stays quiet. Run under `vitest.vapor.config.ts`, which aliases `vue` to the with-vapor build so the router and the app share one reactivity instance.
+ * See: tests/router/composables.test.ts, tests/router/vapor-fixture.test.ts, vitest.vapor.config.ts
  */
 
 import { describe, expect, it } from 'vitest';
@@ -41,8 +21,7 @@ import {
 } from '@router/composables';
 import type { RouteRecord } from '@router/types';
 
-// Pulled from the alias target, so this is the SAME module instance the router
-// imports as bare `vue` - the whole point of this config.
+// The alias target: the same module instance the router imports as bare `vue`.
 import { createVaporApp, defineVaporComponent, nextTick, template } from 'vue';
 
 const ROWS: RouteRecord[] = [
@@ -85,8 +64,6 @@ async function mountWithRouter(router: ReturnType<typeof makeRouter>, setup: () 
 
 describe('router composables inside a real Vapor component', () => {
   it('runs on a with-vapor build (guards the alias itself)', () => {
-    // If this fails, the alias is wrong and every other assertion here would be
-    // measuring the harness rather than the router.
     expect(typeof createVaporApp).toBe('function');
     expect(typeof defineVaporComponent).toBe('function');
   });
@@ -102,8 +79,6 @@ describe('router composables inside a real Vapor component', () => {
       path = useRoute().value.path;
     });
 
-    // The load-bearing one: app.use(router) -> app.provide -> inject() all work
-    // across the Vapor boundary, from inside a mounted component.
     expect(injected).toBe(router);
     expect(path).toBe('/');
     unmount();
@@ -120,8 +95,6 @@ describe('router composables inside a real Vapor component', () => {
     await router.push('/list');
     await nextTick();
 
-    // A computed() created inside a Vapor setup must still track the router's
-    // shallowRefs - one reactivity instance, so this holds.
     expect(route.value.path).toBe('/list');
     unmount();
   });
@@ -136,7 +109,7 @@ describe('router composables inside a real Vapor component', () => {
       page = useQueryParam<number>('page') as never;
     });
 
-    expect(page.value).toBe(1); // declared default
+    expect(page.value).toBe(1);
 
     page.push(3);
     await nextTick();
@@ -164,7 +137,7 @@ describe('router composables inside a real Vapor component', () => {
 
     expect(menuLen).toBeGreaterThan(0);
     expect(crumbLen).toBeGreaterThan(0);
-    expect(data).toBeUndefined(); // no loader on this record
+    expect(data).toBeUndefined();
     expect(err).toBeNull();
     unmount();
   });
@@ -196,11 +169,7 @@ describe('router composables inside a real Vapor component', () => {
     expect(page.value).toBe(1);
     unmount();
 
-    // useQueryParam registers its unsubscribe via
-    // `if (getCurrentScope()) onScopeDispose(off)`. If getCurrentScope() were
-    // falsy in a Vapor setup - as getCurrentInstance() is - that cleanup would
-    // never arm and every mounted route component would leak a router
-    // subscription. Navigating after unmount must stay quiet.
+    // useQueryParam arms its unsubscribe with `onScopeDispose`; navigating after unmount must stay quiet.
     await expect(router.push('/')).resolves.toBeNull();
     await nextTick();
   });

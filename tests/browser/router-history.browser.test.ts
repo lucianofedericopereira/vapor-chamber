@@ -1,8 +1,10 @@
 /**
  * Back and Forward during a held navigation, on the real History API: its pops are asynchronous, the memory history's are not.
- * The long note is at the end.
+ * Why: a browser fires popstate after the walking navigation settles, the order the engine's compensating step and supersession must survive.
+ * Shows: two quick Backs land on the second; a Forward during a held Back keeps page and address bar together; a refused Back walks the bar back.
+ * See: log 35.90, log 35.91, tests/router/superseded-navigation-history.test.ts, tests/router/navigation-to-current-page.test.ts.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWebHistory } from '@router/history';
 import { createRouter } from '@router/index';
 import { ROWS } from '../router/fixture';
@@ -15,6 +17,7 @@ afterEach(() => {
   window.history.replaceState(null, '', start);
 });
 
+// Each step waits for its popstate: two history.back() calls in one task are one traversal to Chromium.
 const popped = () => new Promise<void>((r) => window.addEventListener('popstate', () => r(), { once: true }));
 const settle = () => new Promise((r) => setTimeout(r, 100));
 
@@ -86,20 +89,9 @@ describe('router history (real Chromium)', () => {
     window.history.back();
     await pop;
     await settle();
+    // The walk back is a second traversal with no event to await, and a busy machine can take over the fixed wait.
+    await vi.waitFor(() => expect(window.location.pathname).toBe(`${base}/list`), { timeout: 5000 });
     expect(router.currentRoute.value.location.path).toBe('/list');
-    expect(window.location.pathname).toBe(`${base}/list`);
     router.dispose();
   });
 });
-
-/*
- * Router re-review, 1.26 (log 35.90 and 35.91). The node tests of the same
- * cases (tests/router/superseded-navigation-history.test.ts,
- * tests/router/navigation-to-current-page.test.ts) run on the memory history,
- * whose go() calls its listeners synchronously, inside the navigation that
- * walks it. A browser queues the traversal and fires popstate later, after
- * the walking navigation has settled, which is the order the engine's
- * compensating step and its supersession rules have to survive. Each case
- * waits for the user's own popstate before the next step, because two
- * history.back() calls in one task are one traversal to Chromium.
- */

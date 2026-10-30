@@ -1,4 +1,9 @@
-/** A store id defined again takes over, as register() does for a handler (log s35.101). Rationale at the end. */
+/**
+ * A store id defined again takes over, as register() does for a handler.
+ * Why: a second definition of a held id would otherwise get the first store, without its own actions and running the old reducers with no warning, so a module-level store would keep its first definition through every edit.
+ * Shows: the same definition called again joins its store; a new definition builds its own store with its own actions and reducers and starts from its own state(), with register()'s warning per taken-over action; the old store's $dispose removes only the handlers it still owns; the old store's last scope ending after the takeover leaves the new store.
+ * See: log s35.101, s35.88, docs/contract.md rule 7, tests/vapor/store-hmr.test.ts.
+ */
 import { describe, expect, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus, inspectBus } from '../src/command-bus';
@@ -28,7 +33,7 @@ describe('another definition of a held id', () => {
   it('takes over: its actions and reducers apply, from its own state()', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    const old = v1()(bus); // outside any scope: pinned, as a module-level store is
+    const old = v1()(bus); // outside any scope: pinned, like a module-level store
     old.add(1);
     const next = v2()(bus);
 
@@ -36,7 +41,7 @@ describe('another definition of a held id', () => {
     expect(typeof next.bump).toBe('function');
     next.add(3);
     expect(next.state.value.items).toEqual([30]);
-    // register()'s own DEV warning, one per action the new definition takes over.
+    // register() warns in DEV once per action the new definition takes over.
     expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([
       expect.stringContaining('Handler for "cartAdd" already exists'),
       expect.stringContaining('Handler for "cart$reset" already exists'),
@@ -71,7 +76,7 @@ describe('another definition of a held id', () => {
     page.run(() => v1()(bus));
     const useNext = v2();
     const next = useNext(bus);
-    page.stop(); // the old store's last holder leaves: it disposes the OLD store
+    page.stop(); // disposes the OLD store, as its last holder
 
     expect(useNext(bus)).toBe(next);
     next.add(1);
@@ -80,20 +85,3 @@ describe('another definition of a held id', () => {
     bus.dispose();
   });
 });
-
-/*
- * Log s35.101. Before, `useStore` returned whatever the registry held for the
- * id, so a second DEFINITION of an id that was still held got the first
- * store: without its own actions, running the old reducers, with no word.
- * Measured on a real hot update (tests/vapor/store-hmr.test.ts): a component
- * that holds a store is unmounted before its reloaded setup runs, so it was
- * already fine; a store created at module load (pinned) kept the first
- * definition through every edit.
- *
- * The rule is the core's for `register()` (docs/contract.md rule 7): last wins,
- * with ownership. The new definition builds its own store and registers its
- * actions over the old ones - `register()` warns per action in DEV, the
- * signal that two definitions claim one id - and the old store's `$dispose`
- * removes only what it still owns: the handlers no newer one replaced, and
- * the registry entry only while it is still its own (log s35.88).
- */

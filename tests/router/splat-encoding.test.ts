@@ -1,4 +1,9 @@
-// A splat comes back decoded and is encoded segment by segment on the way out.
+/**
+ * A `*` splat (`params.pathMatch`) is decoded segment by segment by resolve and encoded segment by segment, slashes kept, by buildPath and interpolateLoad.
+ * Why: if the splat were decoded or encoded as a whole, no value would work for both a link and a load: a link would break at `#` or `?`, and a load would send its slashes as `%2F` or double-encode.
+ * Shows: resolve decodes `a%20b/c%23d` to `a b/c#d`; buildPath encodes `a b/c#d?e%f` per segment and keeps slashes; a resolved URL builds back to itself; interpolateLoad encodes the splat once with slashes kept, while a param stays one encoded segment.
+ * See: log s36.11
+ */
 import { describe, expect, it } from 'vitest';
 import { createRouteTable } from '@router/table';
 import { interpolateLoad } from '@router/loaders';
@@ -32,14 +37,3 @@ describe('the splat, as resolve, buildPath and interpolateLoad read it', () => {
     expect(interpolateLoad('/api/users/{id}', at({ id: 'a b/c' }), {})).toBe('/api/users/a%20b%2Fc'); // control: a param is one segment
   });
 });
-
-/*
- * RouteTable.resolve's docblock says captured params come back decoded, and a
- * `*` splat is captured as `params.pathMatch`. resolve skipped decoding it,
- * buildPath wrote it raw, and interpolateLoad encoded it whole, slashes
- * included. So no value worked for both a link and a load: decoded, the link
- * broke at `#` or `?`; encoded, the load sent `%2520`; either way the load's
- * slashes went out as `%2F`. The splat is a path, as vue-router reads it:
- * decoded per segment, encoded per segment, `/` kept. Owner report, audit
- * log s36.11.
- */

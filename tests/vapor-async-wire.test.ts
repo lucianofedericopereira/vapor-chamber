@@ -1,13 +1,8 @@
 /**
- * `defineVaporAsyncComponent` under `vaporChamberWire({ entry: 'vapor' })`
- * (decision 6, D1 scoped to the plugin; build list A5). Rationale at the end.
- *
- * Real Vite production builds of three consumers, the way
- * tests/vite-wire-plugin.test.ts builds them: the package resolved through
- * node_modules to `dist/`. The one read for its imports keeps `vue` external;
- * the two run in Node afterwards bundle it (Node would resolve an external
- * `vue` to its CJS build, which has no Vapor exports), so "non-null in
- * production" is an executed fact, not a reading of the bundle.
+ * `defineVaporAsyncComponent` in real Vite production builds under `vaporChamberWire({ entry: 'vapor' })`.
+ * Why: the root's async wrapper would return null in production if the plugin dropped the registry seed, and an app that never defines an async component would ship Vue's async code if the seed stayed unconditional.
+ * Shows: a built root-import app executes and gets a component; a built app without one imports no `defineVaporAsyncComponent` from vue; the plugin defines `__VC_WIRED_VAPOR__` only in a build under `entry: 'vapor'`; without the plugin, importing `/vapor` still seeds the root wrapper.
+ * See: log s35.109, tests/vite-wire-plugin.test.ts
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -47,7 +42,7 @@ afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A production build of `source`, its chunks joined; `vue` stays an import unless `withVue`. */
+/** A production build of `source`, its chunks joined; `vue` stays an import unless `withVue` (a bundle run in Node needs it bundled: Node resolves an external `vue` to its CJS build, which has no Vapor exports). */
 async function bundle(name: string, source: string, plugins: unknown[], withVue = false): Promise<string> {
   writeFileSync(join(dir, `${name}.js`), source);
   const result = await build({
@@ -106,27 +101,3 @@ describe("vaporChamberWire({ entry: 'vapor' }) and the async wrapper", () => {
     expect((globalThis as { __vcAsync?: unknown }).__vcAsync).toBeTruthy();
   });
 });
-
-/*
- * Decision 6 (owner, 2026-10-02; log s35.109).
- * `vapor-chamber/vapor` seeded Vue's `defineVaporAsyncComponent` into
- * the registry for the root's wrapper, a static import every `/vapor` app kept
- * whether it defined an async component or not (1.84 KB raw / 0.74 KB gzip on
- * the vapor-sfc example, vapor.ts's table). D1, the seed dropped and /vapor's
- * wrapper calling Vue's directly, would make the root's own documented example
- * (chamber-vapor.ts) return null in production only, where the probe that
- * fills the registry in dev does not run, and where a DEV warning cannot fire.
- * So D1 is scoped to the plugin: under `entry: 'vapor'` the wired root exports
- * /vapor's wrapper by name (an explicit export beats `export *`), the plugin
- * defines `__VC_WIRED_VAPOR__` in a build, and the seed sits in a condition
- * on it. Every other build keeps today's seed and behaviour.
- *
- * Seeded red: the second test fails on today's tree (the seed keeps the
- * import); the first fails with the condition in place but the wired root's
- * explicit export removed (null); the third fails with the seed under the
- * condition and no `typeof` guard defaulting it on.
- *
- * examples/vapor-sfc does not use vaporChamberWire (examples/vite.base.ts
- * composes `vue()` and `vaporChamberHMR()` only), so the saving shows in
- * these fixture builds, not in that example.
- */

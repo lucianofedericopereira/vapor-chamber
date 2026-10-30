@@ -1,12 +1,8 @@
 /**
- * Supplemental coverage for src/plugins-extra.ts.
- *
- *  - rateLimit: window-expiry head advance + array compaction.
- *  - metrics: head-based eviction + compaction.
- *  - idempotent, on a real bus: stampMeta:false, TTL expiry drop, the bounds,
- *    and a failure clearing inflight without caching.
- *  - supersede: merging a caller-supplied signal via AbortSignal.any
- *    and the same without AbortSignal.any (tests/combine-signals.test.ts).
+ * The window, bound and signal rules of rateLimit, metrics, idempotent and supersede in src/plugins-extra.ts.
+ * Why: a rate-limit window must reopen once its entries expire; metrics and idempotent must keep to their size bounds without duplicating a command declared idempotent; supersede must still abort when the caller's own signal aborts. Also the only file reaching rateLimit's window expiry and compaction and idempotent's `stampMeta: false`, so the 100% floor needs it.
+ * Shows: rateLimit admits again after the window passes; metrics keeps only `maxSize` entries; idempotent leaves `meta` alone with `stampMeta: false`, drops an expired key, keeps nothing at `maxSize: 0` or a negative one, keeps the default retention for a NaN one, evicts oldest first, and caches nothing after a failure; supersede merges a caller's signal with `AbortSignal.any` (aborting with it) and without it (not aborted yet).
+ * See: tests/combine-signals.test.ts.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
@@ -18,10 +14,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// ---------------------------------------------------------------------------
-// rateLimit - window compaction
-// ---------------------------------------------------------------------------
-
 describe('rateLimit window compaction', () => {
   it('advances past expired timestamps and compacts the backing array', () => {
     vi.useFakeTimers();
@@ -31,23 +23,17 @@ describe('rateLimit window compaction', () => {
     bus.use(rateLimit({ max: 3, window: 100 }));
     bus.register('tap', () => 1);
 
-    // Fill the window to the cap...
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
-    expect(bus.dispatch('tap', {})).toFailWith('rateLimit:limited:action'); // over the limit
+    expect(bus.dispatch('tap', {})).toFailWith('rateLimit:limited:action');
 
-    // ...then let all three expire: head walks past them and, being more than
-    // half the array, triggers the slice-compaction.
+    // All three entries expire.
     vi.setSystemTime(1_000_200);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// metrics - eviction + compaction
-// ---------------------------------------------------------------------------
 
 describe('metrics eviction', () => {
   it('drops oldest entries past maxSize and compacts', ({ bus }) => {
@@ -63,10 +49,6 @@ describe('metrics eviction', () => {
     expect(m.summary().go.count).toBe(2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// idempotent - stampMeta, TTL expiry, rejection arm
-// ---------------------------------------------------------------------------
 
 /** A real async bus with `idempotent(options)`: `run` dispatches `orderCreate` on `target`, the handler answering `fn(cmd)`. */
 function idem(options: Parameters<typeof idempotent>[0] = {}) {
@@ -96,12 +78,11 @@ describe('idempotent', () => {
     const next = () => ++runs;
 
     await run({}, next);
-    // Within TTL -> cached result, no second run.
+    // Within the TTL the result is cached.
     const cached = await run({}, next);
     expect(cached.value).toBe(1);
     expect(runs).toBe(1);
 
-    // Past TTL -> the stale entry is deleted and the handler runs again.
     vi.setSystemTime(2_002_000);
     const fresh = await run({}, next);
     expect(fresh.value).toBe(2);
@@ -109,37 +90,23 @@ describe('idempotent', () => {
   });
 
   it('maxSize: 0 remembers nothing, matching cache({ maxSize: 0 })', async () => {
-    // Eviction runs down to the bound AFTER the insert, as cache() does:
-    // evicting one key before inserting would, on an empty map, evict nothing
-    // and make `maxSize: 0` a one-entry cache while `cache({ maxSize: 0 })`
-    // stores nothing - one word, opposite meanings, in one module.
+    // Eviction runs down to the bound after the insert, as cache() does.
     const run = idem({ maxSize: 0 });
     expect((await run({}, () => 1)).value).toBe(1);
     expect((await run({}, () => 2)).value).toBe(2); // nothing was retained, so the handler ran again
   });
 
-  // NaN is the sharpest form of this class: it propagates through the clamp
-  // and loses every comparison, so the bound is not merely wrong, it is
-  // absent. In cache() the same value produced the opposite failure - the
-  // eviction walk never broke, so it dropped everything and reported size 0.
   it('a NaN maxSize remembers nothing instead of growing unbounded', async () => {
     const run = idem({ maxSize: Number('nope'), ttl: 60_000 });
     for (let i = 0; i < 20; i++) await run(i, () => i);
 
-    // Retention falls back to the documented 500, so the dedupe this plugin
-    // exists to provide still works. The previous rule mapped NaN to 0 and
-    // remembered nothing, which turned a bad option into DUPLICATE EXECUTION of
-    // commands declared idempotent - the one outcome worse than an unbounded
-    // key map.
+    // NaN falls back to the default retention (500), so dedupe still works: forgetting would run an idempotent command twice.
     expect((await run(0, () => -1)).value).toBe(0);
     expect((await run(19, () => -1)).value).toBe(19);
   });
 
   it('a negative maxSize is clamped, not treated as a one-entry cache', async () => {
-    // Unclamped, `done.size >= -1` was always true, so every insert evicted the
-    // previous key and the plugin quietly behaved as a 1-entry cache. cache()
-    // clamps `maxSize` for the same class of reason (there, a negative bound
-    // hung the eviction loop outright).
+    // A negative bound clamps to 0: the same key runs again (a one-entry cache would return 1).
     const run = idem({ maxSize: -5 });
     expect((await run({}, () => 1)).value).toBe(1);
     expect((await run({}, () => 2)).value).toBe(2);
@@ -151,7 +118,6 @@ describe('idempotent', () => {
     await run('b', () => 2);
     await run('c', () => 3); // evicts 'a'
 
-    // 'b' and 'c' are still cached; 'a' has to run again.
     expect((await run('b', () => 99)).value).toBe(2);
     expect((await run('c', () => 99)).value).toBe(3);
     expect((await run('a', () => 99)).value).toBe(99);
@@ -162,15 +128,10 @@ describe('idempotent', () => {
     const failed = await run({}, () => { throw new Error('backend down'); });
     expect(failed.ok).toBe(false);
 
-    // A genuine retry after the failure must run - nothing was cached.
     const retry = await run({}, () => 'recovered');
     expect(retry).toMatchObject({ ok: true, value: 'recovered' });
   });
 });
-
-// ---------------------------------------------------------------------------
-// supersede - signal merging
-// ---------------------------------------------------------------------------
 
 describe('supersede signal merging', () => {
   it('merges a caller-supplied signal with the per-key controller', async ({ asyncBus: bus }) => {
@@ -183,7 +144,6 @@ describe('supersede signal merging', () => {
 
     expect(observed).toBeDefined();
     expect(observed!.aborted).toBe(false);
-    // The merged signal must respond to the user's controller too.
     user.abort();
     expect(observed!.aborted).toBe(true);
   });

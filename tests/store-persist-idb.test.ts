@@ -1,4 +1,9 @@
-/** A store's persist on an async storage (IndexedDB): read when it answers, its failures warned. The long note is at the end. */
+/**
+ * A store's persist on an async storage (IndexedDB): read when it answers, its failures warned.
+ * Why: IndexedDB answers with promises, so a store on it starts on state() and takes the saved state later, and any storage failure (no database, rejected read, non-string value) would break writes unless persist warns and the store keeps working.
+ * Shows: a write saves and the next store reads it back after the read lands; a non-string value reads as nothing saved; a missing indexedDB, a throwing validate and a rejected read warn without failing the dispatch or raising unhandledrejection; indexedDbStorage rejects with a named error for a failed open (not cached), a failed request and an uncommitted write that stores nothing; a failed or throwing open is not kept, so a later call opens.
+ * See: tests/store-persist.test.ts, tests/browser/idb-commit.browser.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type CommandResult, createCommandBus } from '../src/command-bus';
 import { indexedDbStorage } from '../src/idb';
@@ -175,15 +180,24 @@ describe('indexedDbStorage, its own failures (each reaches persist, which warns)
     expect(await settledAs(indexedDbStorage().setItem('k', 'v') as Promise<unknown>)).toBe(answer);
     expect(idb.data.has('k')).toBe(false);
   });
-});
 
-/*
- * IndexedDB answers with promises, so a store on it cannot have its saved
- * state when it is created. It starts on `state()` and takes the saved state
- * when the read lands, the writes made before then replayed on top
- * (tests/store-persist.test.ts). Every failure the storage can give, no
- * database at all, a rejected read, a value that is not a string, warns and
- * leaves the store working: persistence is best effort and never fails a
- * write. An IndexedDB write settles when it commits
- * (tests/browser/idb-commit.browser.test.ts).
- */
+  it('a failed open is not kept: a later call opens once IndexedDB is there', async () => {
+    const storage = indexedDbStorage();
+    await expect(storage.getItem('k')).rejects.toThrow('indexedDB is not available');
+    const idb = fakeIndexedDb();
+    vi.stubGlobal('indexedDB', idb);
+    await storage.setItem('k', 'v');
+    expect(idb.data.get('k')).toBe('v');
+  });
+
+  it('an open that throws is not kept either', async () => {
+    const idb = fakeIndexedDb();
+    const open = vi.fn(() => { throw new Error('blocked by policy'); });
+    vi.stubGlobal('indexedDB', { open });
+    const storage = indexedDbStorage();
+    await expect(storage.getItem('k')).rejects.toThrow('blocked by policy');
+    vi.stubGlobal('indexedDB', idb);
+    await storage.setItem('k', 'v');
+    expect(idb.data.get('k')).toBe('v');
+  });
+});

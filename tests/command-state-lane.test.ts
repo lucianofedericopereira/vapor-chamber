@@ -1,4 +1,9 @@
-// commandState as the bus's internal facts observer: what moved from the user's hooks, and why.
+/**
+ * commandState as the bus's internal facts observer, not a hook or listener on the user's bus.
+ * Why: on the user's hooks it would unseal a sealed bus, show in inspectBus, read settled keys as in flight, and miss raw dispatches.
+ * Shows: anyPending counts raw dispatches; a sealed bus stays sealed with no hook added; every exit settles its start; a query lights no key; foreign buses are refused.
+ * See: plan 1.32 4.4, log 36.84.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { commandState } from '../src/command-state';
 import { createAsyncCommandBus, createCommandBus, inspectBus, type BaseBus } from '../src/command-bus';
@@ -190,18 +195,3 @@ describe('commandState - the buses it takes', () => {
     s.dispose();
   });
 });
-
-/*
- * Why these tests. The command state once hooked the user's bus: a
- * before-hook for the start (installed past the seal) and an `on('*')`
- * listener for the settle. So a sealed bus was unsealed and sealed again,
- * `inspectBus` counted a hook and a listener the app never added, a listener
- * registered before the state read a settled key as still in flight, and a
- * subscriber's throw inside the before-hook cancelled the dispatch. Its
- * any-loading flag counted only its own `dispatch` wrapper, so a raw dispatch
- * never showed (vapor-sfc's StatusBar). Plan 1.32 4.4 moves it onto the bus's
- * internal facts (revision 23), as its one observer: a fast lane read +16.8 ns
- * slower on a tracked dispatch (log 36.84). The query case is the
- * positive control of "lights no key": the same handler lights its key when
- * dispatched.
- */

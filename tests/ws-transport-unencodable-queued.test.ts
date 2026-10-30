@@ -1,9 +1,7 @@
 /**
- * wsTransport: a command whose envelope JSON cannot encode (a BigInt in its
- * payload) fails alone. Held while disconnected, its `done` settles with
- * `transport:invalid:json` when the outbox sends it, and the commands held
- * behind it still go. Once it threw out of the flush on reconnect: the
- * commands behind it were never sent, and `onConnect` was skipped.
+ * `wsTransport` sending a held command whose envelope JSON cannot encode (a BigInt in its payload).
+ * Why: if an unencodable command threw out of the flush on reconnect, the commands held behind it would never be sent and `onConnect` would be skipped; it must fail alone.
+ * Shows: the bad command's `done` settles with `transport:invalid:json`, the good command held behind it is still sent, and `onConnect` runs once.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Accepted } from '../src/accepted';

@@ -1,30 +1,8 @@
 /**
- * The no-build HTML examples import named exports straight out of `dist/`.
- * Nothing else checks them.
- *
- * WHY THIS EXISTS. `examples/` has three tiers of enforcement, and until this
- * file the third tier was empty:
- *   1. the top-level `.ts` snippets  -> `examples/tsconfig.patterns.json`, run
- *      by `npm run typecheck`
- *   2. the three package.json projects -> real `vite build` / `astro build`
- *   3. the plain-HTML examples        -> nothing
- *
- * Tier 3 is not a lesser tier. `feature-directives.html` and
- * `router-demo/index.html` are runnable ESM pages that `import { ... } from
- * '/dist/index.js'` - the same files npm publishes - so a renamed or removed
- * export breaks them exactly as it would break a consumer, silently, with no
- * gate to notice. That is not hypothetical: `useCommandBus()` was removed in
- * this cycle, and the only reason no example broke is that none happened to
- * use it. Confirming that by hand does not scale to the next removal.
- *
- * So this walks every HTML example, extracts each named import from a `/dist/`
- * specifier, and asserts the built module actually exports it. It is a link
- * check, not a behavior test - running these pages needs a browser and a static
- * server (`node examples/static-server.mjs`), which is out of scope here.
- *
- * Fails when `dist/` is absent, as every suite that reads the build does
- * (tests/require-dist.ts): it used to skip, and a skipped check read green in
- * a CI job that never built. Run `npm run build` first.
+ * The no-build HTML examples import named exports straight out of `dist/`: a link check, since running them needs a browser and a static server.
+ * Why: these pages use the files npm publishes, so a renamed or removed export breaks them silently, as it would a consumer; no typecheck or build covers them.
+ * Shows: the walker finds pages; every `/dist/` specifier resolves to a built module; every named import exists on it.
+ * See: tests/examples/html-example-globals.test.ts, tests/require-dist.ts.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';

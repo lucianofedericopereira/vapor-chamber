@@ -1,4 +1,9 @@
-// The Vapor busy pattern: VcTransition's :show on `pending`, a delay in the Enter handler, gone when Leave answers; rationale at the end.
+/**
+ * The Vapor busy placeholder: `VcTransition` with `:show` on a command's `pending`, a delay in the app's Enter handler, and the content gone when Leave answers.
+ * Why: the library has no busy indicator of its own, so the pattern in the docs would break for an app if a fast command flashed the placeholder or a slow one left it up after the data landed. A command that answers first turns `show` false while Enter waits, and `<ns>EnterCancelled` must clear the delay.
+ * Shows: with a fast command the placeholder is inserted hidden, never becomes visible and is gone after Leave; with a slow one it becomes visible after the delay and stays until Leave answers.
+ * See: log s36.94, docs/accessibility.md
+ */
 import * as vue from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '../../src/vapor';
@@ -15,14 +20,14 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** The app's bus with one slow command, a bus of the indicator's own, and the placeholder mounted. */
+/** The app's bus with one slow command, a bus of the indicator's own, and the placeholder mounted. `VcTransition` inserts the content when `show` turns true and dispatches `<ns>Enter` after that flush, so the placeholder starts hidden and the Enter handler shows it after its delay. */
 async function page() {
   const app = createAsyncCommandBus();
   let answer!: () => void;
   app.register('cartSave', () => new Promise<void>((r) => { answer = r; }));
   const saving = commandState(app).pending('cartSave');
 
-  // The indicator's commands on their own bus, so they never count in the app's anyPending.
+  // Own bus: on the app's bus these commands would count in its `anyPending` and `errors`.
   const ui = createAsyncCommandBus();
   let delay: ReturnType<typeof setTimeout> | undefined;
   ui.register('busyEnter', (cmd) => new Promise<void>((done) => {
@@ -69,13 +74,3 @@ describe('the busy placeholder on Vapor', () => {
     expect({ shown, leaving, gone: p.busy() === null }).toEqual({ shown: true, leaving: true, gone: true });
   });
 });
-
-// The owner's pattern (2026-10-20), documented beside the display bindings and in
-// docs/accessibility.md: nothing in the library for it. `VcTransition` inserts the content
-// as soon as `show` turns true and dispatches `<ns>Enter` after that flush, so the
-// placeholder starts hidden in its own style and the app's Enter handler shows it after
-// its delay. A command that answers first turns `show` false while Enter waits:
-// `<ns>EnterCancelled` clears the delay and the leave commands run, so nothing was shown.
-// On an async bus the content leaves only when `<ns>Leave` answers (busy until the data
-// lands). The indicator's commands go on a bus of their own: on the app's bus they would
-// count in its `anyPending` and `errors`.

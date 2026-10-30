@@ -1,27 +1,10 @@
 /**
- * FIXTURE - the HTTP `timeout` option under values that are not a usable delay.
- *
- * WHY THIS FILE EXISTS. Both request loops in src/http.ts hand `timeout`
- * straight to `setTimeout`, and `setTimeout` does not refuse a bad delay - it
- * fires at once. NaN is read as 0. Anything past the 32-bit ceiling
- * (`MAX_TIMEOUT_MS`, see src/bounds.ts) is clamped to 1ms by Node and wrapped
- * by browsers. So `timeout: NaN` - what `Number(config.x)` yields for a missing
- * value, the class src/bounds.ts exists for - and `timeout: Infinity` - the
- * natural way to ask for "no timeout" - both aborted every request the moment
- * it started, reported as a TimeoutError. src/http.ts was the one module the
- * numeric-option sweep never reached.
- *
- * The rule now, per path, normalized once before the loop:
- *   - a non-number or NaN -> that path's documented default (10_000 through
- *     `postCommand`, 30_000 through a client)
- *   - above MAX_TIMEOUT_MS -> MAX_TIMEOUT_MS, the longest wait a timer can hold
- *   - 0 and negatives are left as they are (an explicit request to fire now)
- *
- * The fetch stub never resolves; it rejects only when the request's own
- * signal aborts, the way real `fetch` does. Fake timers make the moment of the
- * TimeoutError observable in exact milliseconds.
+ * The HTTP `timeout` option under values that are not a usable delay.
+ * Why: setTimeout fires at once on NaN and on a delay past the 32-bit ceiling, so a `timeout` of NaN or Infinity would abort every request the moment it started; a bad value must fall back to the path's default or clamp to MAX_TIMEOUT_MS.
+ * Shows: NaN and undefined wait the default (10_000 through postCommand, 30_000 through a client); Infinity waits until MAX_TIMEOUT_MS; 5_000 aborts at 5_000; postCommand with 0 aborts at once; each rejects with transport:timeout:reply where checked.
+ * See: src/bounds.ts
  */
-
+// The fetch stub never resolves and rejects only when the request's own signal aborts, as real fetch does; fake timers make the abort time exact.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient, postCommand } from '../src/http';
 import { MAX_TIMEOUT_MS } from '../src/bounds';
@@ -88,8 +71,7 @@ describe('HTTP timeout option - bounds', () => {
   });
 
   describe('createHttpClient().get (documented default 30_000)', () => {
-    // retry: 0 isolates the timeout - a GET otherwise retries a timeout twice,
-    // with jittered backoff, which would blur the moment being measured.
+    // retry: false isolates the timeout: a retried GET would blur the moment measured.
     const get = (timeout: number | undefined) => () =>
       createHttpClient().get('/api/items', timeout === undefined ? { retry: false } : { retry: false, timeout });
 

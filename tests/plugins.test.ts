@@ -1,3 +1,9 @@
+/**
+ * The logger, validator, history and authGuard plugins from src/plugins, and register({ optimistic }).
+ * Why: the logger must show each dispatch at the configured level and style, a validator or auth guard must refuse before the handler runs with the plugin as owner, history must undo and redo without recording its own triggers, and an optimistic change must roll back on failure.
+ * Shows: logger output (target, payload, result, collapsed, filter, level, badges with and without `window`); validator allow, block, command argument and skip of unlisted actions; history tracking, undo, redo, future cleared by a new command, maxSize, filter, clear, trigger actions excluded from recording and removed by dispose(), and undo/redo run through the bus; authGuard blocks protected actions as `unauthenticated`, allows when signed in and calls onUnauthenticated; an optimistic update is kept on success and undone on failure.
+ * See: docs/contract.md.
+ */
 import { conditionOf } from '../src/command-bus';
 import { describe, expect, vi, } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
@@ -182,11 +188,9 @@ describe('history plugin - undoAction/redoAction triggers', () => {
     bus.dispatch('cart.add', 2);
     expect(total).toBe(3);
 
-    // The footgun this API removes: a trigger recorded into history itself
-    // would make the second undo pop the trigger (a no-op) and wipe the redo
-    // stack on every dispatch.
+    // A trigger recorded into history would make the second undo pop the trigger and wipe the redo stack.
     bus.dispatch('cart.undo', {});
-    bus.dispatch('cart.undo', {});       // second undo must also apply
+    bus.dispatch('cart.undo', {}); // must also apply
     expect(total).toBe(0);
     expect(h.getState().canRedo).toBe(true); // redo stack survives
 
@@ -343,8 +347,6 @@ describe('history plugin', () => {
   });
 });
 
-// ─── history with bus (undo executes inverse handler) ─────────────────────────
-
 describe('history plugin with bus (undo/redo execution)', () => {
   it('should execute undo handler when bus is provided', ({ bus }) => {
     const undoFn = vi.fn();
@@ -378,8 +380,6 @@ describe('history plugin with bus (undo/redo execution)', () => {
   });
 });
 
-// ─── authGuard plugin ─────────────────────────────────────────────────────────
-
 describe('authGuard plugin', () => {
   it('should block protected actions when not authenticated', ({ bus }) => {
 
@@ -391,10 +391,8 @@ describe('authGuard plugin', () => {
     bus.register('shopCartAdd', () => 'added');
     bus.register('uiToast', () => 'toasted');
 
-    // A refusal owned by the plugin, as every library refusal is: retry() does
-    // not re-send it and a circuit breaker does not count it.
     const blocked = bus.dispatch('shopCartAdd', {});
-    // No session is `unauthenticated` (docs/contract.md 3: sign in, then the same request), not `refused`.
+    // No session is `unauthenticated`, not `refused`.
     expect(blocked).toFailWith('authGuard:unauthenticated:action');
     expect(conditionOf(blocked.error)).toBe('unauthenticated');
     expect(blocked.error?.message).toContain('Unauthorized');
@@ -431,8 +429,6 @@ describe('authGuard plugin', () => {
     );
   });
 });
-
-// ─── register({ optimistic }) ─────────────────────────────────────────────────
 
 describe('register optimistic', () => {
   it('keeps the change on success', ({ bus }) => {

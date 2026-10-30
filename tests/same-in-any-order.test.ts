@@ -1,4 +1,9 @@
-/** Two built-in plugins give the same outcome in either install order (plan-architecture.md 1.3). The long note is at the end. */
+/**
+ * Pairs of built-in plugins (and rules) installed in both orders on an async bus.
+ * Why: if an outcome depended on the order of bus.use calls, a logged refusal, a refusal versus a cached answer, or an aborted in-flight command would change with install order.
+ * Shows: for six pairs, each order gives the one outcome the plugins exist to give; each pair but the metrics one has a control showing one order gives it, and the metrics pair's control is that metrics counts a command a rule lets through.
+ * See: log s36.43, s36.99, s36.105, s36.107
+ */
 import { existsSync, writeFileSync } from 'node:fs';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { type AsyncCommandBus, type CommandResult, type PluginParts, createAsyncCommandBus } from '../src/command-bus';
@@ -122,7 +127,7 @@ async function bothOrders(p: Pair): Promise<Record<string, unknown>> {
 
 describe('two built-in plugins give the same outcome in either install order', () => {
   for (const p of PAIRS) {
-    // The control: the scenario works, one order gives the outcome. A pinned pair has none: its own control is below.
+    // Control: the scenario works, so install order is the only variable. A pinned pair has its own control below.
     if (!p.pinned) {
       it(`${p.name} (control: one order gives it)`, async () => {
         const observed = await bothOrders(p);
@@ -130,12 +135,12 @@ describe('two built-in plugins give the same outcome in either install order', (
         expect(Object.values(observed)).toContainEqual(p.expected);
       });
     }
-    // The acceptance: `it` once its step fixed the pair, else `it.fails`, which passes while one order differs.
+    // A pair not marked `fixed` runs as `it.fails`, which passes while one order differs.
     (p.fixed ? it : it.fails)(p.name, async () => {
       expect(await bothOrders(p)).toEqual({ 'A then B': p.expected, 'B then A': p.expected });
     });
   }
-  // The pinned pair's control: metrics counts a command that passes, so the scenario reads the right thing.
+  // The pinned pair's control: metrics counts a command that passes.
   it('metrics counts a command a rule lets through (control)', async () => {
     const c = ctx();
     const m = metrics();
@@ -145,43 +150,3 @@ describe('two built-in plugins give the same outcome in either install order', (
     expect(m.entries().length).toBe(1);
   });
 });
-
-/*
- * Step 1 of .probes/plan-1.32.md: the goal "the same wherever installed" for
- * pairs of built-ins, the fourteen interactions plan-architecture.md 1.3 read
- * off the code (eight adjacencies and six pairs; row 8, anything after the
- * destination, is tests/same-wherever-installed.test.ts). Each scenario states
- * the outcome the plugins exist to give, as one value an app sees, and runs
- * the two plugins in both install orders. A pair that gives that outcome in
- * one order only fails here. Each pair also has a control, green: one order
- * gives the outcome, so the scenario works and the order is the cause (all
- * fifteen read so on 2026-10-15). Rows red today are `it.fails`: they pass while
- * the defect is there and turn red when it is fixed, so the step that fixes
- * one flips it to `it`. One pair of plan-architecture's list, debounce with
- * idempotent, has no outcome an app can observe apart (idempotent keeps the
- * `{ pending }` answer in memory, and both orders then answer `{ pending }`),
- * so it is not a row here. The row debounce with persist moved to
- * tests/store-persist.test.ts when persist became the store's own option
- * (plan 1.32 step 4b): a debounced store action saves once, after it ran.
- * The row outbox with history moved to tests/history-installs.test.ts when
- * history stopped being a plugin (step 4h). The rows outbox with idempotent and
- * debounce with outbox moved to tests/outbox-on-bus.test.ts when the outbox
- * became a bus option, held at the work step below every plugin (step 4i).
- * The rows cache with throttle, idempotent with throttle and debounce with
- * throttle left when pacing moved to the sender (`pace`, step 6a): neither
- * is a plugin, so neither has an install order.
- * The rows rateLimit with optimistic, rateLimit with optimisticUndo, optimistic
- * with serialize and supersede with serialize moved to
- * tests/register-optimistic.test.ts and tests/register-exclusive.test.ts when
- * the three plugins became options on the action (step 4k): no install order.
- * Step 7 (logs 36.98 and 36.99): `logger` and `schemaLogger` read the settled
- * result and the rules (`validator`, `authGuard`, `schemaValidator`) run before
- * the chain, so the logger, authGuard-with-cache and authGuard-with-validator
- * rows are `it`. The row metrics with validator was `it.fails` while `metrics`
- * was a chain plugin: a rule's refusal answered before it. Step 8b (log
- * 36.105) made it a `started` and a `settled` part in the facts slot, so the
- * row is `it`. It has no generic control (no order counted the refusal); its
- * control is metrics counting a command a rule lets through. The row rateLimit
- * with supersede is `it` since step 8c (log 36.107): both are work steps,
- * every `admit` before any `begin`, so a refused command aborts nothing.
- */

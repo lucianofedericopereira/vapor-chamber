@@ -1,4 +1,9 @@
-/** The HTTP client's cache: an invalidation or a write elsewhere does not cost a read in flight its store. The long note is at the end. */
+/**
+ * The HTTP client's cache: a read in flight is stored unless an invalidation of its own URL happens meanwhile.
+ * Why: if a write to another URL also kept the read from being stored, every overlapping read of an app that writes often would cost an extra fetch.
+ * Shows: a read is stored with nothing else going on or after a write to another URL, and is not stored after a write to its own URL, with dedupe on or off.
+ * See: tests/http-cache-writes.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 

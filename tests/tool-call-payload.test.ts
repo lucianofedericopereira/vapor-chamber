@@ -1,9 +1,7 @@
 /**
- * A tool call that leaves out the payload its action declares is checked as
- * an empty payload: the validator names the missing fields. It skipped
- * validation (an absent payload is app code's choice on dispatch()) and the
- * handler got `payload` undefined, while toTools() did not say payload was
- * required. Now the tool schemas say so, and the call is checked either way.
+ * fromToolCall checks a tool call that leaves out the payload its action declares as an empty payload.
+ * Why: a handler would receive `payload` undefined from an LLM tool call, and toTools() would not tell the model the payload is required.
+ * Shows: a missing declared payload is refused naming the field, on the sync and async bus; an action with no declared payload still dispatches; dispatch() may still omit it; toTools() lists target and payload as required with their typed fields; an unknown tool name fails.
  */
 import { describe, expect, it } from 'vitest';
 import { createAsyncSchemaCommandBus, createSchemaCommandBus } from '../src/schema';

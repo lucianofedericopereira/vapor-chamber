@@ -1,3 +1,8 @@
+/**
+ * buildMenu, buildBreadcrumbs and pathActivity project the route table into menu items, crumbs and active flags.
+ * Why: an admin sidebar and breadcrumb trail would list the wrong rows, link to unbuildable URLs or light up the wrong entry.
+ * Shows: menued rows only, sorted and nested; hrefs base-prefixed and null for groups; active/exact flags; dev-only validation errors and their absence in production; crumbs from the parent chain with params interpolated; setRoutes swaps the menu source; pathActivity trailing-slash and root rules.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { buildBreadcrumbs, buildMenu } from '@router/menu';
@@ -112,19 +117,15 @@ describe('buildMenu', () => {
     expect(menu.map((item) => item.href)).toEqual(['/report', '/docs']);
   });
 
-  // The FALSE arm of `if (DEV)`. The loud-validation test above only ever ran
-  // the dev arm, because DEV is module-scope and true under vitest - so the
-  // production contract ("diagnostics are worth no bytes in production") was
-  // asserted nowhere. Re-import after stubbing NODE_ENV, as dev-flag.test.ts does.
   describe('in production (DEV=false)', () => {
+    // DEV is read at module scope, so the module is re-imported after stubbing NODE_ENV.
     afterEach(() => {
       vi.unstubAllEnvs();
       vi.resetModules();
     });
 
     it('skips the row validation entirely rather than throwing, and still projects the menu', async () => {
-      // Built with the dev-mode table (these rows are structurally fine - it is
-      // buildMenu's own meta checks that reject them).
+      // Built with the dev-mode table: the rows are structurally valid, only buildMenu's meta checks reject them.
       const badPosition = createRouteTable([
         { name: 'x', path: '/x', component: 'X', meta: { menu: 'first', title: 't' } },
       ]).records;
@@ -134,13 +135,12 @@ describe('buildMenu', () => {
       vi.resetModules();
       const prod = await import('@router/menu');
 
-      // Both of these throw router:invalid:menu in dev - see the test above.
       expect(() => prod.buildMenu(badPosition, '/')).not.toThrow();
       expect(prod.buildMenu(badPosition, '/').map((item) => item.name)).toEqual(['x']);
 
       const built = prod.buildMenu(noTitle, '/');
       expect(built.map((item) => item.name)).toEqual(['y']);
-      // `String(undefined)` - the garbage the dev guard exists to catch first.
+      // String(undefined): the garbage the dev guard exists to catch.
       expect(built[0]?.title).toBe('undefined');
     });
   });

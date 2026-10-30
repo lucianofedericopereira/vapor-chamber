@@ -1,35 +1,8 @@
 /**
- * MARKER GUARD - what a Vapor consumer's production bundle must NOT carry.
- *
- * Vue 3.6.0-rc.8's CI (commit 21) fails the build when a Vapor client-render
- * bundle still contains hydration code, and it checks the bundle Vue's own
- * bundler produced. This is the same stance one level up: a consumer that
- * wires through `vapor-chamber/vapor` and renders routes through
- * `vapor-chamber/router/vapor` is the audience this library says pays for no
- * vDOM renderer and no interop, so its bundle - built with Vite, the bundler
- * that audience ships with - is checked for exactly that.
- *
- * WHAT IT ADDS OVER tests/router/vapor-boundary.test.ts, which it must not
- * duplicate. That file enumerates the `vue` bindings the ROUTER's Vapor outlet
- * retains, alone, under esbuild. This one bundles the WIRING entry beside it -
- * `/vapor` pulls chamber.ts, the static Vue lists in vue.ts and vapor.ts, the
- * composables - with rolldown, and asks two questions the router-only check
- * cannot: does the wiring entry drag in anything vDOM, and does the graph
- * carry ONE chamber module or two. The runtime probe is the fingerprint: one
- * copy of chamber.ts, one `VUE_PKG = "vue"` binding (log 36.F26).
- *
- * And one fact the static entries and `vaporChamberWire()` both rest on,
- * pinned here because this is where the consumer's bundler runs: even when
- * the app BUNDLES Vue, that probe stays a runtime name - no Vue chunk is made
- * for it - so in a browser with no import map it cannot resolve.
- *
- * WHY BINDINGS, NOT TEXT, for the vDOM markers. `vue` is external, so anything
- * vDOM the app pulls shows up as a name imported from it. A raw text search
- * would be wrong here in both directions: chamber.ts's registry reads the
- * PROPERTY `vaporInteropPlugin` off whatever namespace it is handed (that is
- * how the opt-in works, and it pulls no interop code), and
- * `createVaporChamberApp`'s error message says "use createApp() from vue" in a
- * string. Neither is the renderer; an imported binding is.
+ * A Vite production build of a Vapor consumer (`vapor-chamber/vapor` plus `vapor-chamber/router/vapor`): what its bundle must not carry.
+ * Why: the audience that wires through `/vapor` pays for no vDOM renderer and no interop, and two copies of chamber.ts would mean two registries (the wiring landing in one, the composables reading the other). The runtime Vue probe must stay a name, since a browser with no import map cannot resolve a literal `import('vue')`.
+ * Shows: the entry chunk imports none of the vDOM markers from `vue` and holds one `VUE_PKG = "vue"` probe; the lazy chunks import no `vaporInteropPlugin`; with Vue bundled in, the probe is still one name, no `import('vue')` literal is written and no lazy chunk carries `createVaporApp`.
+ * See: log s36.F26, tests/router/vapor-boundary.test.ts
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -40,7 +13,7 @@ import { requireDist } from '../require-dist';
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
 requireDist(existsSync(dist('vapor.js')) && existsSync(dist('router/index.js')) && existsSync(dist('router/vapor.js')));
 
-/** Names whose presence would mean the vDOM renderer or interop is in the app. */
+/** Names whose presence would mean the vDOM renderer or interop is in the app. Checked as imported bindings, not text: chamber.ts reads the property `vaporInteropPlugin` off a namespace and an error message says "createApp()", and neither is the renderer. */
 const VDOM_MARKERS = ['vaporInteropPlugin', 'defineComponent', 'createApp', 'h', 'createVNode', 'createRenderer'];
 
 const MAIN = `import { createVaporChamberApp, useCommand } from 'vapor-chamber/vapor';
@@ -127,29 +100,24 @@ describe('Vapor consumer bundle (vapor-chamber/vapor + router/vapor, Vite)', () 
     const vueNames = importsFrom(entry, 'vue');
     console.log(`  vue bindings in the entry chunk: ${vueNames.join(', ')}`);
 
-    // Harness guard: an empty enumeration would pass the check below vacuously.
+    // An empty enumeration would pass the marker check vacuously.
     expect(vueNames).toEqual(expect.arrayContaining(['createVaporApp', 'createDynamicComponent', 'hasInjectionContext']));
 
     expect(vueNames.filter((n) => VDOM_MARKERS.includes(n))).toEqual([]);
 
-    // ONE chamber module: its runtime probe is the fingerprint. Two copies of
-    // chamber.ts would mean two registries - the wiring landing in one and the
-    // composables reading the other.
+    // The runtime probe is the fingerprint of one chamber module.
     expect(entry.match(PROBE) ?? []).toHaveLength(1);
 
-    // The router's lazy blade chunk is the only other chunk, and it is the one
-    // place vDOM is allowed to live: it loads only when a blade row renders.
+    // The router's lazy blade chunk loads only when a blade row renders; only it may hold vDOM.
     for (const code of lazy) expect(importsFrom(code, 'vue')).not.toContain('vaporInteropPlugin');
   });
 
   it('the runtime probe stays a name even when the app bundles Vue', async () => {
     const external = await bundle(true);
     const bundled = await bundle(false);
-    // Vue is really in the bundled build - the app's own static imports pull it.
+    // Vue is really in the bundled build.
     expect(bundled.entry.length).toBeGreaterThan(external.entry.length * 3);
-    // ...and the probe is still a name: the bundler made no chunk for it and
-    // wrote no literal. In a browser, with no import map, that import rejects,
-    // which is why wiring has to be static.
+    // No chunk and no literal for the probe: with no import map the import rejects in a browser.
     expect(bundled.entry.match(PROBE) ?? []).toHaveLength(1);
     expect(LITERAL.test(bundled.entry)).toBe(false);
     expect(bundled.lazy.some((code) => /\bcreateVaporApp\b/.test(code))).toBe(false);

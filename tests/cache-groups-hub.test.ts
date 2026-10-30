@@ -1,4 +1,9 @@
-/** One group hub per bus: every source reaches cache(), the client's store and the router, once (audit M2). Rationale at the end. */
+/**
+ * One group hub per bus: every invalidation source reaches cache(), the client's store and the router, once.
+ * Why: a group name means one set, local or server; the transport client is the bus's hub, sources call it, readers only listen, so nothing loops.
+ * Shows: a local write, a batched header, a client write and invalidateGroups() each reach all three once; failures invalidate nothing; unregister and clear() remove declarations.
+ * See: audit M2, RFC 9875.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,7 +55,7 @@ afterEach(() => vi.restoreAllMocks());
 const got = (url: string) => s.gets.filter((g) => g === url).length;
 const cached = { cache: { ttl: 60_000 } };
 
-/** The three readers on one client: cache() on the bus, the client's store (`/users`), the router (`/team`). */
+/** The three readers on one client: cache() on the bus, the client's store (`/users`), the router (`/team`); `heard` counts the "once". */
 async function world(http: HttpClient | undefined) {
   const transport = httpTransport({ endpoint: `${base}/batch`, httpClient: http, batch: {} });
   const bus = createAsyncCommandBus({ retry: false, transport: { 'api*': transport } });
@@ -215,6 +220,7 @@ describe('the local write', () => {
   });
 });
 
+// The local write is one exact listener for its action alone, so an action that declares nothing keeps the bare path.
 describe('the group listener only with a hub', () => {
   const declared = () => {
     const bus = createCommandBus();
@@ -294,22 +300,3 @@ describe('one bus, one client for its groups', () => {
     expect(String(warn.mock.calls[0]?.[0])).toContain('transport:conflict:client');
   });
 });
-
-/*
- * One group namespace (RFC 9875 Cache-Groups and Cache-Group-Invalidation, the
- * coordinator's ruling of 2026-10-21): a group name means one set, local or
- * server. The client already was the lane (revision 23 item 3), so its pair
- * `invalidateGroups` / `onInvalidateGroup` is the hub, and a bus's transport
- * client is that bus's hub. A bus with no client gets an own hub from its
- * first reader (cache()).
- *
- * Sources call the hub; readers listen. No reader emits, so nothing loops and
- * no marker is needed. The counting listener in `world` hears each group once
- * per source: that is the "once" of every cell.
- *
- * The side that knows declares, once, at register: `cacheGroups` (a cached
- * result joins them) and `cacheGroupInvalidation` (a success makes them stale).
- * The local write is one exact listener for its action alone, so an action that
- * declares nothing runs the code it ran. An Accepted invalidates on its done, as
- * revalidateRoutes refreshes.
- */

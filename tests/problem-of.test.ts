@@ -1,4 +1,9 @@
-/** problemOf(error): the backend's RFC 9457 problem, read through the cause chain once (docs/contract.md 6, log s35.121). */
+/**
+ * problemOf(error): the backend's RFC 9457 problem, read through the cause chain once.
+ * Why: callers would otherwise dig through `cause` themselves, and a failure without context would throw instead of giving its detail.
+ * Shows: the problem is found behind a router loader failure and a bridge remote failure; a non-problem body gives status and `HTTP <status>`; an unexpected 2xx gives its detail; no backend answer, or a cyclic cause chain, gives undefined.
+ * See: docs/contract.md, log s35.121
+ */
 import { afterEach, describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, problemOf } from '../src/index';
 import { createHttpClient } from '../src/http';
@@ -43,7 +48,7 @@ describe('problemOf', () => {
   });
 
   it("a bridge's 2xx reply that is not the envelope gives its detail, and does not throw", async () => {
-    // remote:unexpected:json carries no context (transports.ts); the reader destructured it.
+    // remote:unexpected:json carries no context, so the reader must not assume one.
     vi.stubGlobal('fetch', vi.fn(async () => ({ ...problemResponse(200, [1]), ok: true, headers: new Headers({ 'content-type': 'application/json' }) })));
     const bus = createAsyncCommandBus({ retry: false, transport: httpTransport({ endpoint: '/api/vc' }) });
     const result = await bus.dispatch('orderSave', {});

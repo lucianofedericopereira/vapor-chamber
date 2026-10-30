@@ -1,4 +1,9 @@
-/** A shared store against a scripted lead: each arrangement of the tab protocol set exactly, on the real lock and channel. Rationale at the end. */
+/**
+ * A shared store against a scripted lead: each arrangement of the tab protocol set exactly, on the real Web Lock and channel.
+ * Why: two real tabs settle the protocol in whatever order their tasks fall, so a test of a rare arrangement there tests luck; each branch of the follower side (confirmed writes, a lead's state under an unrun write, a new lead's answer, an undo of a step not held, taking the lock) must give the lead's arrangement and send only what the lead has not already run.
+ * Shows: the tab's state and the messages it sends for each arrangement the code has a branch for.
+ * See: tests/store-share-converge.test.ts, log s36.F39.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store/core';
@@ -20,14 +25,10 @@ beforeEach(() => { vi.stubGlobal('window', {}); });
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); });
 
 let n = 0;
-/** A command as a tab sends it. */
+// A command as a tab sends it.
 const wire = (action: string, target: string, id: string) => ({ action, target, payload: undefined, id, causationId: undefined, ts: 1 });
 
-/**
- * The lead, scripted: it holds the store's Web Lock (so no store takes it),
- * answers each ask with `state()` while `answering`, and posts what a test
- * tells it to, as the tab `tab`.
- */
+// The lead, scripted: a raw channel that holds the store's Web Lock (so no store takes it), answers each ask with `state()` while `answering`, and posts what a test tells it to as the tab `tab`.
 async function scriptedLead(name: string, state: () => S) {
   let free!: () => void;
   await new Promise<void>((granted) => {
@@ -47,13 +48,13 @@ async function scriptedLead(name: string, state: () => S) {
     heard,
     me,
     post: (kind: string, value: unknown, to?: string) => ch.postMessage({ kind, value, tab: me.tab, ...(to !== undefined ? { to } : {}) }),
-    /** As another tab on the channel (a follower), not the lead. */
+    // As another tab on the channel (a follower), not the lead.
     as: (tab: string, kind: string, value: unknown) => ch.postMessage({ kind, value, tab }),
     release,
   };
 }
 
-/** A store's commands as it posted them, from the scripted lead's ear. */
+// A store's messages as the scripted lead hears them, not the lead's or a follower's.
 const sent = (heard: Msg[], kind = 'cmd') => heard.filter((m) => m.kind === kind && m.tab !== 'lead-1' && !m.tab.startsWith('lead-') && !m.tab.startsWith('f-'));
 
 function store(name: string, undo: boolean) {
@@ -237,14 +238,3 @@ describe('this tab takes the lock', () => {
     expect(lead.heard.filter((m) => m.kind === 'state' && m.value.id === 'fs' && !m.tab.startsWith('f-'))).toHaveLength(1);
   });
 });
-
-/*
- * Two real tabs settle the protocol in whatever arrangement their tasks fall
- * (tests/store-share-converge.test.ts): a test of a rare arrangement there is
- * a test of luck. Here the lead is a raw channel that holds the store's real
- * Web Lock, so no store takes it, and speaks the lead's side of the protocol:
- * it answers asks, confirms a write by its id, posts its own commands and
- * states, says it is a new lead, and stands in for followers. Each test sets
- * one arrangement the code has a branch for, and checks the store's state and
- * what it sends against it (log 36.F39).
- */

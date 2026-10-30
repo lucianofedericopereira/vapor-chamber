@@ -1,4 +1,9 @@
-/** One spelling per request header name, merged as the Fetch Standard's "set": first spelling kept, last value wins (log s35.163). Rationale at the end. */
+/**
+ * Request headers merge case-insensitively across postCommand, the HTTP bridges and createHttpClient.
+ * Why: header names are case-insensitive but object keys are not; if one name sat under two spellings, fetch would join both values ("a, b"), a FormData upload would keep an app content-type and lose its boundary, and a 419 refresh would leave a stale csrf token beside the fresh one.
+ * Shows: the first spelling is kept with the last value, FormData drops an app content-type, a csrf token is sent once, a 419 refresh replaces an app token, names without a collision go out as written, a header named __proto__ stays a header.
+ * See: log s35.163, RFC 9110 5.1, Fetch Standard header list "set".
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
@@ -144,21 +149,3 @@ describe('controls', () => {
     expect(names[0]).toEqual(['Content-Type', 'Accept', '__proto__', 'X-A']);
   });
 });
-
-/*
- * HTTP field names are case-insensitive (RFC 9110 5.1); an object key is
- * not. A request's headers live in a plain object, the library writing its
- * own names capitalised and the app writing whatever it wrote, so one name
- * could sit under two keys, and fetch sends them as one header, both values
- * joined ("a, b"). Found on the release: an app `idempotency-key` beside the
- * bridge's `Idempotency-Key`, an app `content-type` beside the default, a
- * FormData request keeping an app `content-type` (no multipart boundary), a
- * 419 refresh deleting only `X-CSRF-TOKEN`.
- *
- * The Fetch Standard's header list "set": "If list contains name, then set
- * the value of the first such header to value and remove the others." So
- * the merge keeps the first spelling and the last value, and deleting a name
- * deletes every spelling. The library keeps writing its own names as it
- * did; lowercasing on the wire stays the platform's (RFC 9113 8.2). Plan
- * Log s35.163.
- */

@@ -1,21 +1,7 @@
 /**
- * Every entry must share ONE chamber instance.
- *
- * `chamber.ts` keeps the Vue registry in module-level state: `configureVue()`
- * writes it, `isVaporAvailable()` / `getVaporAppFn()` read it. Two copies of
- * that module means writes land in one and reads come from the other, and the
- * symptom is the worst kind - `createVaporChamberApp()` throwing
- * "No Vue detected" on a page that just called `configureVue()` successfully.
- *
- * This happened. `src/vue.ts` was briefly built in its own Vite pass (to keep
- * an optional peer out of the main build's `external` list). A separate pass
- * cannot share the main pass's chunks, so it inlined a private copy of
- * chamber - `dist/vue.js` was 41 KB instead of 1 KB - and any app importing
- * from both the root and the subpath got two registries.
- *
- * Unit tests cannot catch this: vitest resolves `src/`, where there is only
- * ever one module. It is a property of the BUILT package, so it is asserted
- * against dist.
+ * Every built entry shares one chamber instance.
+ * Why: chamber.ts keeps the Vue registry in module state; with two copies configureVue() writes one and createVaporChamberApp() reads the other and throws. Only dist can show this, as src has one module.
+ * Shows: chamber.ts is emitted in exactly one chunk; each entry imports it instead of inlining it; the vue subpath stays a thin re-export.
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -79,7 +65,7 @@ describe('dist - one chamber instance across all entries', () => {
     if (!existsSync(vue)) return;
     const bytes = readFileSync(vue).length;
 
-    // It wires two things and re-exports; ~1 KB. The regression made it 41 KB.
+    // It wires two things and re-exports, about 1 KB; an inlined chamber is far larger.
     expect(
       bytes,
       `dist/vue.js is ${bytes} B - an order of magnitude over a re-export shim, ` +

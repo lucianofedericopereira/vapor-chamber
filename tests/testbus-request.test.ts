@@ -1,17 +1,7 @@
 /**
- * The TestBus's request()/respond() behave like a real bus's.
- *
- * Before: respond() returned a no-op and dropped the handler; request()
- * ignored its payload and options and resolved dispatch(). A consumer whose
- * code under test used request()/respond() got a double that could not
- * exercise that path at all. Now a responder answers through the plugin
- * chain and the after-hooks, is recorded like a dispatch, has its thenable
- * value awaited, and an already-aborted signal settles core:aborted:dispatch
- * before it runs; with no responder the request falls back to dispatch(), as
- * on a real bus. A sealed TestBus refuses respond(); dispose() drops
- * responders (clear() keeps them, as it keeps handlers - the double's own
- * documented contract). Not mirrored, by design: the timeout and dispose()
- * settling a waiting request - a double records, it does not wait.
+ * The TestBus's request() and respond() behave like a real bus's.
+ * Why: code under test that uses request()/respond() would otherwise get a double that cannot exercise that path; the timeout and dispose() settling a waiting request are not mirrored, because a double records and does not wait.
+ * Shows: a responder answers through plugins and after-hooks and is recorded; a thenable is awaited and a rejection or throw is a result; with no responder, or after it is removed, request() falls back to dispatch(); an aborted signal settles core:aborted:dispatch before the responder runs; a sealed bus refuses respond(); dispose() runs plugin dispose() and drops responders.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
@@ -52,7 +42,7 @@ describe('TestBus request()/respond()', () => {
   });
 
   it('no responder falls back to dispatch(), and an unsubscribed responder falls back too', async () => {
-    const bus = createTestBus({ passthroughHandlers: true }); // the double stubs handlers unless told otherwise
+    const bus = createTestBus({ passthroughHandlers: true }); // the default stubs every handler
     bus.register('q', () => 'from handler');
     expect((await bus.request('q', 1)).value).toBe('from handler');
 

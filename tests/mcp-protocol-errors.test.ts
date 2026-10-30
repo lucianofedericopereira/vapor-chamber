@@ -1,4 +1,13 @@
-/** MCP: version negotiation and protocol errors as the 2025-06-18 spec states them (log s35.172). Rationale at the end. */
+/**
+ * MCP: version negotiation and protocol errors as the 2025-06-18 spec states them.
+ * Why: a server must answer a protocol version it does not speak with one it does, report an unknown
+ * tool as the JSON-RPC error -32602 (identical for unknown and not-allowed, so a client cannot tell
+ * them apart), answer a request with id null as Invalid Request with id null, and never reply to a
+ * notification. A listed tool's execution failure stays a result with isError.
+ * Shows: the answered version for unsupported, supported and absent versions, the exact -32602 and
+ * -32600 replies, an isError result for a failing tool, and null for a notification.
+ * See: log s35.172, MCP spec 2025-06-18
+ */
 import { describe, expect, it } from 'vitest';
 import { createSchemaCommandBus } from '../src/schema';
 import { createActionFilter } from '../src/action-filter';
@@ -48,18 +57,3 @@ describe('controls', () => {
     expect(await handler()({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
   });
 });
-
-/*
- * MCP 2025-06-18, read at the source. Lifecycle: "If the server supports the
- * requested protocol version, it MUST respond with the same version.
- * Otherwise, the server MUST respond with another protocol version it
- * supports." The handler echoed any string (audit S1). Tools: "Protocol
- * Errors: Standard JSON-RPC errors for issues like: Unknown tools" (the
- * example is -32602); an unknown tool came back as a tool result with
- * isError (S2). A tool not listed, unknown or not allowed, gets the same
- * error, so a client cannot tell them apart. Basic: "Unlike base JSON-RPC,
- * the ID MUST NOT be null"; a request with id null got no reply, as if it
- * were a notification. JSON-RPC 2.0 answers an invalid request with -32600
- * and id null. Tool execution errors stay results, as the spec agrees.
- * Log s35.172.
- */

@@ -1,4 +1,9 @@
-// A Vue subscriber that throws on a command-state write is logged; the dispatch runs and nothing stays lit. Rationale at the end.
+/**
+ * A Vue subscriber that throws on a command-state write is logged; the dispatch runs and nothing stays lit.
+ * Why: a synchronous subscriber that throws on a state write would otherwise cancel the dispatch or leave a count at 1, lighting every reader for ever.
+ * Shows: the throw is logged, the dispatch returns its own result, the key and anyPending end false, the next dispatch lights and settles again, and the failure still lands in the errors ring.
+ * See: log s35.227, log s36.87, src/command-state.ts
+ */
 import { beforeAll, describe, expect, vi } from 'vitest';
 import { effect, isRef } from 'vue';
 import { createAsyncCommandBus, createCommandBus, useSharedCommandState, waitForVueDetection } from '../src/index';
@@ -16,7 +21,7 @@ describe('useSharedCommandState: a subscriber that throws on a write', () => {
       bus.register('save', () => { handled++; return 1; });
       const s = useSharedCommandState({ bus });
       const flag = read === 'anyPending' ? s.anyPending : s.pending('save', null);
-      // Control: the signal is Vue's, so the effect is a real subscriber.
+      // The signal must be a Vue ref, or the effect below is not a real subscriber.
       expect(isRef(flag)).toBe(true);
       const boom = new Error('subscriber threw');
       const runner = effect(() => { if (flag.value) throw boom; });
@@ -98,14 +103,3 @@ describe('useSharedCommandState: a subscriber that throws on a write', () => {
     s.dispose();
   });
 });
-
-/*
- * Why this file exists. The command state's writes once ran inside a
- * before-hook or a dispatch wrapper, so a synchronous subscriber that threw on
- * one cancelled the dispatch, or escaped it and left a count at 1, lighting
- * every reader for ever (log s35.222, s35.227). It is now the bus's
- * internal facts observer (plan 1.32 4.4) and catches its writes: the throw is
- * logged, the dispatch runs with its own result, and the counts move before any write
- * (`lit` and `ended` in src/command-state.ts), so the settle still ends the
- * start.
- */

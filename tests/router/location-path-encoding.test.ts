@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** `location.path` is the path as in the URL; only params are decoded. The long note is at the end. */
+/**
+ * `location.path` is the path as in the URL (percent-encoded); only params are decoded.
+ * Why: a link or redirect built from `location.path` would double-decode or break on spaces and reserved characters if the path were decoded.
+ * Shows: a pushed string keeps its encoding in path and fullPath while the param is decoded; a named push encodes the param into the path.
+ * See: log 35.95
+ */
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -38,14 +43,3 @@ describe('location.path encoding', () => {
     router.dispose();
   });
 });
-
-/*
- * Router re-review, 1.26 (log 35.95). `RouteLocation.path` was documented as
- * "Decoded path relative to base" and `RouteTable.resolve` as taking "a decoded
- * path". Neither is what the code does: the engine takes the path from the
- * string as given (the history hands it `location.pathname`, which the browser
- * percent-encodes) or from `buildPath`, which encodes each param; the table
- * matches that and decodes only the captured params. vue-router's `path` is
- * the encoded one too. The comments now say so; these tests pin the behaviour
- * they state.
- */

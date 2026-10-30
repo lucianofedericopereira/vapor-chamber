@@ -101,7 +101,7 @@ createWebHistory(rawBase?: string) => RouterHistory
 
 ### decodeQueryParam
 
-**Function** - [src/router/url.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L72)
+**Function** - [src/router/url.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L76)
 
 ```ts
 decodeQueryParam(raw: string | string[] | undefined, def: QueryParamDef) => unknown
@@ -126,7 +126,7 @@ URL templates depend only on the placeholders they mention. Override via
 
 ### encodeQueryParam
 
-**Function** - [src/router/url.ts:103](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L103)
+**Function** - [src/router/url.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L107)
 
 ```ts
 encodeQueryParam(value: unknown, def: QueryParamDef) => string | string[] | null
@@ -166,7 +166,7 @@ normalizeBase(base?: string) => string
 
 ### onBeforeLeave
 
-**Function** - [src/router/composables.ts:150](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L150)
+**Function** - [src/router/composables.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L152)
 
 ```ts
 onBeforeLeave(guard: (to: RouteLocation, from: RouteLocation) => boolean | void | Promise<boolean | void>) => () => void
@@ -179,7 +179,7 @@ protection. Auto-disposes with the component scope.
 
 ### parseQuery
 
-**Function** - [src/router/url.ts:14](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L14)
+**Function** - [src/router/url.ts:13](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L13)
 
 ```ts
 parseQuery(search: string) => QueryValues
@@ -190,7 +190,7 @@ Repeated keys collect into arrays. '+' decodes to space.
 
 ### pathActivity
 
-**Function** - [src/router/url.ts:127](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L127)
+**Function** - [src/router/url.ts:136](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L136)
 
 ```ts
 pathActivity(targetPath: string, currentPath: string) => { active: boolean; exact: boolean; }
@@ -251,7 +251,7 @@ payloads can localize titles per request.
 
 ### resolveQueryHistory
 
-**Function** - [src/router/url.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L141)
+**Function** - [src/router/url.ts:150](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L150)
 
 ```ts
 resolveQueryHistory(key: string, def: QueryParamDef | undefined, override?: "push" | "replace") => "push" | "replace"
@@ -340,7 +340,7 @@ page, and ARIA asks for one current element per set.
 
 ### stringifyQuery
 
-**Function** - [src/router/url.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L42)
+**Function** - [src/router/url.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L41)
 
 ```ts
 stringifyQuery(query: QueryValues | Record<string, unknown>) => string
@@ -361,7 +361,7 @@ Case-insensitive base prefix strip; null when pathname is outside base.
 
 ### useBreadcrumbs
 
-**Function** - [src/router/composables.ts:139](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L139)
+**Function** - [src/router/composables.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L141)
 
 ```ts
 useBreadcrumbs() => { readonly value: readonly Breadcrumb[]; }
@@ -386,7 +386,7 @@ Reactive to navigation AND table swaps (setRoutes / reload).
 
 ### usePagination
 
-**Function** - [src/router/composables.ts:212](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L212)
+**Function** - [src/router/composables.ts:214](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L214)
 
 ```ts
 usePagination<T = unknown>(options?: PaginationOptions<T>) => Pagination<T>
@@ -647,7 +647,7 @@ Navigation guard. Return:
 
 ### Pagination
 
-**Type alias** - [src/router/composables.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L178)
+**Type alias** - [src/router/composables.ts:180](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L180)
 
 ```ts
 export type Pagination<T> = {
@@ -672,7 +672,7 @@ export type Pagination<T> = {
 
 ### PaginationOptions
 
-**Type alias** - [src/router/composables.ts:165](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L165)
+**Type alias** - [src/router/composables.ts:167](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L167)
 
 ```ts
 export type PaginationOptions<T> = {

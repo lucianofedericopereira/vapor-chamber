@@ -1,4 +1,9 @@
-/** Two reads sharing one request: each failure is marked by its own request's `silent` (log 36.13). Rationale at the end. */
+/**
+ * Two reads of one URL at once: each failure is marked by its own request's `silent`.
+ * Why: `silent` is part of the dedupe key, or a joiner would be handed the leader's error object with the leader's mark; a read aborted by its own signal must be marked silent too.
+ * Shows: a silent and a loud read are two requests each marked by its own flag, a silent read aborted while joining, already aborted, or leading is marked silent, and two reads alike share one request.
+ * See: log s36.13, src/http.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 
@@ -89,16 +94,3 @@ describe('control', () => {
     expect([both, calls.length]).toEqual([[['remote:failed:http', undefined], ['remote:failed:http', undefined]], 1]);
   });
 });
-
-/*
- * HttpConfig.silent marks a request's own failure for a global error handler
- * to skip. A GET joins a read already in flight for the same key, and the
- * key holds what changes the answer (method, responseType, the 304 opt-in,
- * headers, url), and not `silent`, which changes the failure's mark. The
- * leader's chain marks the error in place (asSilent), and every joiner was
- * handed that same object. Now `silent` is in the key, as the 304 opt-in is:
- * a silent read and a loud one at once are two requests (asserted), each
- * marked by its own. A holder's own abort (`hold`, an already aborted
- * joiner) was not marked at all; it is now. The controls: two reads alike,
- * one request; a silent read alone, aborted.
- */

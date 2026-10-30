@@ -1,14 +1,8 @@
 /**
- * rateLimit({ max: 0 }) - a refusal with no slot to wait for declares no wait.
- *
- * `max: 0` keeps its meaning (refuse every dispatch, bounds.ts), but the
- * refusal computed `retryIn` from the oldest dispatch in the window, and an
- * empty window has none: `retryIn` was NaN ("Retry in NaNms"). Readers of
- * `context.retryIn` test `typeof === 'number'`, so the outbox read it as a
- * declared wait, kept the record, and slept NaN ms - no wait - before flushing
- * again, forever, re-saving the queue each time. With no slot that frees up,
- * the refusal declares no `retryIn`. Since 1.32 step 4i the outbox holds at the
- * work step, below every plugin, so the refusal never reaches it at all.
+ * rateLimit({ max: 0 }) refuses every dispatch and declares no wait.
+ * Why: with no slot that ever frees up there is nothing to wait for, so a `retryIn` (or a NaN message) would be read by `typeof === 'number'` callers as a real wait and loop.
+ * Shows: the refusal has no `context.retryIn` and no NaN in its message; with an outbox the refusal comes before it holds anything, so nothing is pending or saved.
+ * See: src/bounds.ts
  */
 import { describe, expect, it } from 'vitest';
 import type { BusError } from '../src/command-bus';

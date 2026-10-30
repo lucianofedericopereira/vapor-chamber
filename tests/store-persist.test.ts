@@ -1,4 +1,8 @@
-/** A store's `persist` option: read at creation, saved once per microtask after any write. Rationale at the end. */
+/**
+ * A store's `persist` option: read at creation, saved once per microtask after any write.
+ * Why: a persist scoped to commands would miss a state written by another command's reply, a page unload could fall between a write and its save, and an async storage cannot hold a sync bus, so early writes must replay on the saved state without being saved over it.
+ * Shows: on both runtimes the saved state is the first state while $reset gives state(); a burst saves once, also after $reset and undo; validate refuses a wrong shape; early writes replay on an async read (also with undo, after a $reset, and when the replay throws); a failed write, a blocked or missing storage and corrupt JSON save nothing or warn without failing dispatch; custom serialize works; saveTo without a key throws.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type CommandResult, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
@@ -156,7 +160,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       storage.land();
       await settle();
       expect(cart.state.value).toEqual({ items: [9, 3] });
-      // After the read landed, a server's state is written as usual, kept for nothing.
+      // After the read landed, a server state is simply written.
       await cart.save();
       expect(cart.state.value).toEqual({ items: [9] });
       cart.$dispose();
@@ -279,22 +283,3 @@ describe('saveTo in production', () => {
     }
   });
 });
-
-/*
- * Plan 1.32 section 4.2 moves persistence onto the store: its options read
- * once at definition, its state saved by the store's one watcher after any
- * write, whatever wrote it. The `persist()` plugin saved by its place in the
- * chain, after the commands it saw, so a state written by another command's
- * reply, or by a scoped-out action, was not saved (bug B1, docs only). On the
- * store there is nothing to scope and nothing to miss. Saved once per
- * microtask (record revision 9 A): a microtask runs before the next task, so
- * an unload cannot fall between a write and its save.
- *
- * An async storage cannot hold the store's dispatches on the sync bus, which
- * never awaits a handler, and examples/feature-persistence.ts runs IndexedDB
- * on a sync bus. So the store starts on `state()`, keeps each write, and
- * replays them on the saved state when it lands, by the undo ring's rule: a
- * reducer runs again, a state set whatever came before (`$reset`, a server's
- * state) is kept. Nothing is saved before the read lands: that save would
- * overwrite what was saved.
- */

@@ -1,24 +1,14 @@
 /**
- * Supplemental coverage for src/plugins-core.ts.
- *
- *  - logger badges outside a browser: the node arm of the %c styling
- *    split.
- *  - history(): undo/redo on empty stacks, self-registered trigger
- *    actions with a bus, and the DEV warning without one.
- *  - history() redo on an ASYNC bus is recorded once, for every payload
- *    shape; the sync wiring the island cart uses, and the flag keeping an
- *    undo handler's own dispatches out of the ledger, are unchanged.
+ * The logger badges and the history() plugin in src/plugins-core.ts: badge text and colour, empty stacks, trigger actions, and redo recording on the async and sync buses.
+ * Why: history must record a redone command exactly once and keep a rollback's own dispatches out of the ledger, or the undo stack grows and the redo stack is wiped; logger badges must not emit `%c` styling outside a browser. Also the only file reaching the logger's `window` arm, so the 100% floor needs it.
+ * Shows: plain badges without `window`, OK and FAIL colours with it, undo/redo on empty stacks return undefined, trigger actions register only when configured, an async redo is recorded once for object and number payloads, the sync cart wiring reports count/canUndo/canRedo per command, and a command an undo handler dispatches, or one stamped origin 'sync', is not recorded.
+ * See: log s35.114.
  */
 import { describe, expect, vi } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
 import { history, logger } from '../src/plugins-core';
 import { stubGlobal } from '../src/vitest-pure';
 import { it } from '../src/vitest';
-
-
-// ---------------------------------------------------------------------------
-// logger - badges in a non-browser environment
-// ---------------------------------------------------------------------------
 
 describe('logger badges (node arm)', () => {
   it('prints plain-text badges when window is absent', () => {
@@ -39,14 +29,9 @@ describe('logger badges (node arm)', () => {
     const labels = group.mock.calls.map(c => String(c[0]));
     expect(labels[0]).toBe('[  OK  ] ⚡ ok');
     expect(labels[1]).toBe('[ FAIL ] ⚡ down');
-    // Node arm: no %c styling directives.
     expect(labels.every(l => !l.includes('%c'))).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// history - empty stacks + trigger actions
-// ---------------------------------------------------------------------------
 
 describe('history', () => {
   it('undo/redo on empty stacks return undefined without side effects', ({ bus }) => {
@@ -66,7 +51,6 @@ describe('history', () => {
     bus.dispatch('act', {});
     expect(h.getState().canUndo).toBe(true);
 
-    // Dispatching the trigger actions drives the api - that's the wiring 213-214 adds.
     bus.dispatch('historyUndo', {});
     expect(calls).toEqual(['do', 'undo']);
     expect(h.getState().canRedo).toBe(true);
@@ -76,15 +60,8 @@ describe('history', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The optional-shape arms: one trigger without the other.
-// ---------------------------------------------------------------------------
-
 describe('history - optional-shape arms', () => {
   it('registers only the trigger that was configured', ({ bus }) => {
-    // The wiring test above supplies BOTH undoAction and redoAction, so each
-    // `if` only ever ran its true arm. Configuring one alone is the ordinary
-    // case for an app that exposes undo but not redo.
     const calls: string[] = [];
     bus.register('act', () => { calls.push('do'); return 1; }, { undo: () => { calls.push('undo'); } });
 
@@ -93,16 +70,11 @@ describe('history - optional-shape arms', () => {
     bus.dispatch('act', {});
     bus.dispatch('historyUndo', {});
     expect(calls).toEqual(['do', 'undo']);
-    // The trigger that was never configured is not a registered command.
-    //
-    // `hasHandler`, a real accessor: an optional call on a method the bus does
-    // not have would read `undefined` and let the assertion pass for any code.
+    // hasHandler is a real accessor: an optional call on a method the bus lacks would pass for any code.
     expect(bus.hasHandler('historyRedo')).toBe(false);
-    // ...and the configured one IS registered, so the line above is reading a
-    // real difference rather than a bus with nothing on it.
+    // Control: the configured trigger is registered.
     expect(bus.hasHandler('historyUndo')).toBe(true);
 
-    // ...and the mirror: redo only.
     const bus2 = createCommandBus();
     const calls2: string[] = [];
     bus2.register('act', () => { calls2.push('do'); return 1; }, { undo: () => { calls2.push('undo'); } });
@@ -115,16 +87,9 @@ describe('history - optional-shape arms', () => {
 
 });
 
-// ---------------------------------------------------------------------------
-// Cheap remaining arms: the browser badge colour.
-// ---------------------------------------------------------------------------
-
 describe('logger badges in a browser-ish environment', () => {
   it('uses the FAIL colour for a failed command', () => {
-    // The `ok ? '#2a6' : '#c33'` ternary. The browser branch is only taken when
-    // `window` exists, and the file's other logger tests run without one - so
-    // the failure colour had never been produced. logger() writes through
-    // console.groupCollapsed, so that is what gets spied.
+    // The browser branch needs `window`; logger() writes through console.groupCollapsed.
     using _window = stubGlobal('window', {});
     const calls: unknown[][] = [];
     vi.spyOn(console, 'groupCollapsed').mockImplementation((...args: unknown[]) => { calls.push(args); });
@@ -146,17 +111,8 @@ describe('logger badges in a browser-ish environment', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// history on an ASYNC bus - a redo is recorded once
-// ---------------------------------------------------------------------------
-
 describe('history - redo on an async bus', () => {
-  // redo() set `_replaying`, dispatched, and cleared it in `finally`. On an
-  // async bus the recorder runs when the dispatch SETTLES - a microtask after
-  // that `finally` - so the redone command was pushed a second time and
-  // `future.length = 0` wiped the rest of the redo stack. The number payload
-  // is why the marker rides on the dispatch (`_withOrigin`), not in the
-  // payload: a primitive has nowhere to carry a key.
+  // The origin marker rides on the dispatch (`_withOrigin`), not the payload: a primitive payload cannot carry a key.
   it.each([
     ['an object payload', { qty: 1 }],
     ['a number payload', 5],
@@ -181,10 +137,7 @@ describe('history - redo on an async bus', () => {
 
 describe('history - sync behaviour the async redo fix must not move', () => {
   it('island-cart wiring: count, canUndo and canRedo after every cart command', () => {
-    // A hand-wired history on the sync bus: triggers registered by history()
-    // itself, a scope on the one undoable command, and a cart* listener reading
-    // getState(). The listener also sees the cartAdd a redo re-dispatches from
-    // inside the cartRedo handler.
+    // The cart* listener also sees the cartAdd a redo re-dispatches from inside the cartRedo handler.
     const bus = createCommandBus();
     const cart = { count: 0 };
     const h = history({ maxSize: 50, bus, actions: ['cartAdd'], undoAction: 'cartUndo', redoAction: 'cartRedo' });
@@ -203,7 +156,7 @@ describe('history - sync behaviour the async redo fix must not move', () => {
     expect(seen).toEqual([
       ['cartAdd', 1, true, false],
       ['cartAdd', 2, true, false],
-      ['cartAdd$undo', 1, true, true], // the undo, a command (s35.114)
+      ['cartAdd$undo', 1, true, true], // the undo, a command
       ['cartUndo', 1, true, true],
       ['cartAdd', 2, true, false], // re-dispatched by the redo
       ['cartRedo', 2, true, false],
@@ -218,10 +171,7 @@ describe('history - sync behaviour the async redo fix must not move', () => {
   });
 
   it('a command an undo handler dispatches is not recorded (the rollback stays out of the ledger)', () => {
-    // Why `_replaying` stays beside the origin marker: on the sync bus it
-    // brackets the undo handler, so a compensating command the handler
-    // dispatches is part of the rollback, not a new entry. Recording it would
-    // push it onto the undo stack and wipe the redo stack.
+    // `_replaying` brackets the undo handler on the sync bus: a command it dispatches is part of the rollback.
     const bus = createCommandBus();
     const h = history({ bus });
     bus.register('refund', () => 'refunded');

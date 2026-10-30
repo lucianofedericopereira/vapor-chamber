@@ -1,4 +1,8 @@
-/** The bus's placed parts on their less common paths: no id, past the caps, a step without begin, two signals, an answer over a failing work. The long note is at the end. */
+/**
+ * The bus's placed plugin parts on their less common paths: a part with no id, past 512 actions, a step without begin, two signals, a ticket's answer over a failing work, command-state queries, `_keyed` with no meta.
+ * Why: a throwing part with no id would fail without an owner's code, per-action answers would break past their 512 cap, an abort of one of several tickets would go unseen by the work, and a request or query would leave the command state counting a pending command. Also the only file reaching the id-less part report, the chain-cache cap, two tickets' signals, the query facts and `_keyed` with no meta, so the 100% floor needs it.
+ * Shows: a throwing `started` part reports `plugin:failed:plugin` and the dispatch still succeeds; across 520 actions the scoped filter and the step are each asked once per dispatch and the first action still answers; the work sees an abort of either ticket's signal; a ticket's answer stands when the work rejects or answered at once; sync request, async query and async request answer and leave the command state not pending; `_keyed` leaves a missing meta alone.
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, _keyed, _okResult as ok } from '../src/command-bus';
 import { commandState } from '../src/command-state';
@@ -95,13 +99,3 @@ describe('placed parts, less common paths', () => {
     expect(meta.idempotencyKey).toBe('m1');
   });
 });
-
-// Step 8's close measured these paths unreached (coverage, log 36.125). Each
-// is a reachable case of a part the bus places: a part without an id owns its
-// throw as `plugin`; the facts filter and the steps keep a per-action answer
-// capped at 512 like every per-action map; a step may lack `begin`; several
-// tickets' signals combine; a ticket's answer is the caller's even when the
-// work rejects (onMissing 'throw' with no handler); a sync request with a
-// responder and an async query tell the command state they were queried; a
-// request with no responder is a dispatch; `_keyed` is exported, so its guard
-// on a missing meta is pinned.

@@ -1,4 +1,9 @@
-/** circuitBreaker: a cancel is not a backend failure (log s35.170). Rationale at the end. */
+/**
+ * circuitBreaker: a cancel is not a backend failure.
+ * Why: the breaker guards against a failing backend; counting cancels lets supersede's cancelled keystrokes open the circuit and refuse the next search.
+ * Shows: superseded searches, the caller's abort with or without its own Error, a library aborted: code and a raw AbortError do not count; real failures, even after an abort, do.
+ * See: audit B5, log s35.170, tests/abort-custom-reason.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { BusError, createAsyncCommandBus, type Command } from '../src/command-bus';
 import { circuitBreaker, supersede } from '../src/plugins-extra';
@@ -93,14 +98,3 @@ describe('controls', () => {
     expect(cb.getState('save')).toBe('closed');
   });
 });
-
-/*
- * The breaker protects against a failing backend, and it already skips a
- * pipeline bug (`_isBug`). It counted every other failure, so `supersede`,
- * built for a search box, cancelled three keystrokes and opened the circuit:
- * the next search was refused `circuitBreaker:limited:action` (audit B5,
- * probe P4). Polly's circuit breaker handles "Any exceptions other than
- * OperationCanceledException" by default. A failure whose condition is
- * `aborted` (every `aborted:` code, and a raw AbortError) now neither
- * counts nor resets the run of real failures, as a bug does. Log s35.170.
- */

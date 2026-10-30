@@ -1,4 +1,9 @@
-/** The HMR shim's first load reads no bus, so an app's own setCommandBus() stays quiet (handoff finding 13, log s35.123). */
+/**
+ * The generated HMR shim (virtual:vapor-chamber-hmr) on first load and on reload.
+ * Why: if the shim created or read a bus on first load, an app's own setCommandBus() would warn and a reload could replace the app's bus.
+ * Shows: first load creates no bus and setCommandBus() does not warn, a reload with no stored bus leaves the app's bus alone, and a reload restores the bus the dispose hook stored.
+ * See: handoff finding 13, log s35.123.
+ */
 import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { getCommandBus, resetCommandBus, setCommandBus } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
@@ -19,8 +24,7 @@ async function runShim(): Promise<void> {
   );
 }
 
-// The suite's plugin installs a shared bus before each test; an app's first
-// load starts with none.
+// The suite's plugin installs a shared bus before each test; an app's first load has none.
 beforeEach(() => resetCommandBus());
 
 afterEach(() => {

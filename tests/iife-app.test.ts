@@ -1,4 +1,9 @@
-/** The IIFEs' one createApp and connect: the transport declared at the bus, the plugins installed, csrf on for connect(). Rationale at the end. */
+/**
+ * The one createApp and connect shared by the IIFE variants.
+ * Why: every IIFE variant would otherwise need its own copy and its own plugin-then-transport install order; with the transport a bus option there is no order to get wrong.
+ * Shows: createApp declares the transport at the bus and installs the plugins, onMissing defaults to an error and passes through, and connect() sends over HTTP with the XSRF header and keeps its plugins.
+ * See: tests/iife-bundle.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type PluginParts, inspectBus } from '../src/command-bus';
 import { connect, createApp } from '../src/iife-app';
@@ -43,11 +48,3 @@ describe('connect', () => {
     expect(seen).toEqual(['cartAdd']);
   });
 });
-
-/*
- * C14 of .probes/capacity-examples.md: the three IIFE variants each carried
- * their own createApp and connect, each installing the plugins and then the
- * transport by hand, in that order. With the transport a bus option there is
- * nothing to order, so the three are one module the variants import.
- * tests/iife-bundle.test.ts checks each built bundle exposes them.
- */

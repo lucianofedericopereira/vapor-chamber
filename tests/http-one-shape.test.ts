@@ -1,7 +1,8 @@
 /**
- * The HTTP client's failures are the core's (7.1 #16, log s35.131): the same
- * BusError a bridge returns for the same answer, read once where the response
- * arrives, retried by the bus's one rule.
+ * The HTTP client's failures are the core's BusError: the same code and context a bridge returns for the same answer.
+ * Why: if the client and the bridge read one answer two ways, callers would handle one failure under two codes and the client would retry by a different rule than the bus.
+ * Shows: a backend problem gives equal code, context and problem on postCommand and the bridge; non-problem bodies, timeouts, lost replies, aborts, bad JSON, empty 2xx, a custom client's rejection and the safe helpers each give their declared code; status wins over an unreadable body; retry re-sends idempotent or keyed requests after uncertain failures, any method after transient ones, and nothing after verdicts.
+ * See: log s35.131, 7.1 #16, RFC 9110 9.2.2, RFC 9110 5.1
  */
 import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { BusError, conditionOf, createAsyncCommandBus } from '../src/command-bus';

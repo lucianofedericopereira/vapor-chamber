@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// When the router warms a page's code: hover and focus, what is skipped, `meta.preheat: false`. See the note at the end of this file.
+/**
+ * When the router warms a page's code: on hover and focus, which links are skipped, and `meta.preheat: false`.
+ * Why: warming a download link, or warming for a user saving data, wastes bandwidth for a page that never opens; a route marked `preheat: false` would be downloaded anyway; a warm-up that navigates or moves focus would disturb the user.
+ * Shows: hover skips download and data-native links, Save-Data and 2g, and reads Save-Data when the timer fires; `_blank` and `rel=external` links still warm; focus warms with its own timer; `meta.preheat: false` is read per record while a same-named component on an unmarked route still warms; a warm-up leaves route, focus and live region alone while a click moves focus and announces.
+ * See: log 36.19, docs/accessibility.md
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration } from '@router/dom';
 import type { RouteRecord } from '@router/types';
@@ -181,6 +186,7 @@ describe('a warm-up never navigates, moves focus or speaks (docs/accessibility.m
   async function page() {
     document.body.innerHTML = '<h1 id="title">Orders</h1><a id="to-list" href="/list">list</a>';
     const lazy = vi.fn(async () => ({ name: 'List' }));
+    // focusOnNavigate and announce are on, else no navigation would move focus or speak either.
     const router = makeRouter({ components: { Home: { name: 'Home' }, List: lazy }, focusOnNavigate: '#title', announce: true });
     await router.isReady();
     await frame();
@@ -216,34 +222,3 @@ describe('a warm-up never navigates, moves focus or speaks (docs/accessibility.m
     }
   });
 });
-
-// ---------------------------------------------------------------------------
-// Why this file exists
-// ---------------------------------------------------------------------------
-//
-// A warm-up (`preheatPath`, src/router/index.ts) downloads a route's component
-// code before the click. Hover warmed every routable link but `data-native`,
-// so it also warmed for a user saving data, which idle preheat already skips,
-// and for a `download` link, whose click opens no page. Both are always waste,
-// so the library decides them. A `_blank` or `rel=external` link opens a page
-// of the app, so it is still warmed: the click's rule (should the router handle
-// this in place) is a different question. The click's `rel` and `target`
-// checks copied into the warm-up were seeded once and turned both pins red.
-// What else is worth warming only the app knows: `meta.preheat: false` on a
-// route says a link to it does not warm its component. Per record, as idle
-// preheat reads `meta.preheat`. The cache is keyed by component, so a route
-// that names the same component and is not marked still warms it. Data saving
-// is read when the timer fires, as the route is: reading it when the hover
-// arms was seeded once and turned both "during the delay" tests red. Red
-// before: download, Save-Data, 2g, slow-2g, Save-Data switched on during the
-// delay, and both `meta.preheat: false` cases. The rest are controls and pins,
-// green before and after. Log 36.19 item 3.
-//
-// Log 36.19 item 4. A link that takes focus warms as a hover does, with its
-// own timer: one timer for both was seeded once and turned "mouse over A,
-// focus B, the mouse leaves A" red (`[]`). Red before: `focusin`, a real
-// `focus()`, that A and B case, and the never-navigates test (its loader was
-// not called). The blur, `download` and Save-Data focus tests are green before
-// only because nothing listened to focus. The never-navigates test needs
-// `focusOnNavigate` and `announce` on, else no navigation moves focus or
-// speaks either. Its control, a real click, does both.

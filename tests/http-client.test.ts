@@ -1,13 +1,11 @@
 /**
- * Tests for createHttpClient - multi-method HTTP client
+ * createHttpClient: methods, bodies, query params, baseURL, retry, timeout, dedupe, cache, interceptors, safe mode, CSRF, download.
+ * Why: a wrong method, body, URL, retry, cache or error shape would send the wrong request or hide a failure from every caller of the client.
+ * Shows: each method and body kind reaches fetch as expected; retry re-sends only retryable failures (a 422 on a POST and a 404 on a GET are not retried, a 503 is); a timeout competes for the retry budget; concurrent GETs dedupe and POSTs do not; cache, stale-while-revalidate and serveStaleOnError (including a deduped follower) behave per option; interceptors, safe mode, create(), CSRF on mutations only and download() return the documented values.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient } from '../src/http';
 import { problemOf } from '../src/http-errors';
-
-// ---------------------------------------------------------------------------
-// Fetch mock helpers
-// ---------------------------------------------------------------------------
 
 function mockResponse(status: number, body: unknown = null, headers: Record<string, string> = {}) {
   return {
@@ -29,7 +27,7 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 beforeEach(() => {
-  // Each createHttpClient() owns its cache (item 6) - nothing global to reset.
+  // Each createHttpClient() owns its cache: nothing global to reset.
   vi.stubGlobal('fetch', vi.fn());
 });
 
@@ -37,10 +35,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-
-// ---------------------------------------------------------------------------
-// HTTP methods
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - methods', () => {
   it('get() sends GET request', async () => {
@@ -100,10 +94,6 @@ describe('createHttpClient - methods', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Body handling
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - body', () => {
   it('auto-serializes objects as JSON with Content-Type', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
@@ -129,10 +119,6 @@ describe('createHttpClient - body', () => {
     expect(init.headers['Content-Type']).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Query params
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - query params', () => {
   it('appends scalar params to URL', async () => {
@@ -170,10 +156,6 @@ describe('createHttpClient - query params', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// BaseURL
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - baseURL', () => {
   it('prepends baseURL to relative paths', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
@@ -195,10 +177,6 @@ describe('createHttpClient - baseURL', () => {
     expect(url).toBe('https://other.com/data');
   });
 });
-
-// ---------------------------------------------------------------------------
-// Retry
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - retry', () => {
   it('GET retries on 503 (default retry: 2)', async () => {
@@ -228,10 +206,7 @@ describe('createHttpClient - retry', () => {
     expect(attempts).toBe(1);
   });
 
-  // The missing negative case. RETRY_STATUS only governs the polite path
-  // (Retry-After parsing); a status outside it is thrown *inside* the try and
-  // must not re-enter retry through the catch, which for a mutation would mean
-  // re-sending it.
+  // RETRY_STATUS governs only the Retry-After path; a status outside it is thrown inside the try and must not re-enter retry through the catch, which would re-send a mutation.
   it('POST with retry configured does NOT retry a 422', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -243,7 +218,7 @@ describe('createHttpClient - retry', () => {
     await expect(http.post('/api/cmd', { qty: -1 }, { retry: { maxAttempts: 3 } })).rejects.toMatchObject({
       context: { status: 422 },
     });
-    expect(attempts).toBe(1); // was 3 - the mutation was re-sent twice
+    expect(attempts).toBe(1);
   });
 
   it('GET with retry configured does NOT retry a 404', async () => {
@@ -255,7 +230,7 @@ describe('createHttpClient - retry', () => {
 
     const http = createHttpClient();
     await expect(http.get('/api/missing', { retry: { maxAttempts: 3 } })).rejects.toThrow();
-    expect(attempts).toBe(1); // was 3 - every backoff burned before surfacing
+    expect(attempts).toBe(1);
   });
 
   it('still retries a 503 when retry is configured on a POST', async () => {
@@ -273,11 +248,7 @@ describe('createHttpClient - retry', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Timeout retry - a timeout-triggered abort must compete for the same
-// retry budget as a 5xx/429/408 response, not throw on the first attempt
-// regardless of `retry`.
-// ---------------------------------------------------------------------------
+// A timeout-triggered abort competes for the same retry budget as a 5xx/429/408 response.
 
 describe('createHttpClient - timeout retry', () => {
   it('retries a GET after a timeout instead of failing on the first attempt', async () => {
@@ -320,10 +291,6 @@ describe('createHttpClient - timeout retry', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// silent flag - stamped on thrown errors for a caller's global error handler
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - silent flag', () => {
   it('stamps error.context.silent when config.silent is true', async () => {
     (globalThis.fetch as any).mockImplementation(async () => jsonResponse(500, { message: 'boom' }));
@@ -343,10 +310,6 @@ describe('createHttpClient - silent flag', () => {
     expect(err.context.silent).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Request deduplication
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - deduplication', () => {
   it('deduplicates concurrent GET requests to the same URL', async () => {
@@ -386,10 +349,6 @@ describe('createHttpClient - deduplication', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// LRU cache
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - cache', () => {
   it('caches GET responses with cache: true', async () => {
     let fetchCount = 0;
@@ -425,10 +384,6 @@ describe('createHttpClient - cache', () => {
 
 });
 
-// ---------------------------------------------------------------------------
-// Stale-while-revalidate (cache.staleTtl)
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - stale-while-revalidate', () => {
   it('serves a stale hit instantly and revalidates in the background', async () => {
     let fetchCount = 0;
@@ -448,9 +403,7 @@ describe('createHttpClient - stale-while-revalidate', () => {
 
     const r2 = await http.get('/api/thing', { cache, dedupe: false });
     expect(r2.stale).toBe(true);
-    expect(r2.data).toEqual({ n: 1 }); // stale data served immediately, even
-    // though the background revalidation fetch has already been dispatched
-    // (it starts synchronously alongside the stale return, not lazily).
+    expect(r2.data).toEqual({ n: 1 }); // stale data is returned at once
 
     const fresh = await r2.revalidation;
     expect(fresh?.data).toEqual({ n: 2 });
@@ -472,13 +425,9 @@ describe('createHttpClient - stale-while-revalidate', () => {
 
     const r2 = await http.get('/api/thing', { cache, dedupe: false });
     expect(r2.stale).toBeFalsy();
-    expect(fetchCount).toBe(2); // no stale hit - a real blocking refetch
+    expect(fetchCount).toBe(2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// serveStaleOnError (opt-in resilience)
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - serveStaleOnError', () => {
   it('serves the retained entry on a transient failure (500)', async () => {
@@ -502,20 +451,14 @@ describe('createHttpClient - serveStaleOnError', () => {
     expect(res.error).toBeTruthy();
   });
 
-  // Every other test in this block passes `dedupe: false`, which is exactly
-  // why this went unnoticed: the two features were only ever exercised apart.
-  // http.ts registers the RAW fetch promise for dedupe and returns a
-  // `.catch()`-wrapped one to the caller, so the leader was served stale while
-  // a follower on the same key received the untouched rejection - the opposite
-  // of what the comment on that branch promises.
+  // Dedupe shares the raw fetch promise, so a follower on the same key must be served stale like the leader; the other tests here pass dedupe: false.
   it('serves the retained entry to a DEDUPED follower, not just the leader', async () => {
     let attempts = 0;
     let release: (() => void) | undefined;
     (globalThis.fetch as any).mockImplementation(async () => {
       attempts++;
       if (attempts === 1) return jsonResponse(200, { v: 1 });
-      // Hold the second request open so both callers are in flight together,
-      // which is the only state in which dedupe does anything.
+      // Hold the second request open so both callers are in flight together: dedupe only acts then.
       await new Promise<void>((resolve) => { release = resolve; });
       return jsonResponse(500, { message: 'down' });
     });
@@ -574,10 +517,6 @@ describe('createHttpClient - serveStaleOnError', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Interceptors
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - interceptors', () => {
   it('request interceptor modifies config', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
@@ -622,10 +561,6 @@ describe('createHttpClient - interceptors', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Safe mode
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - safe mode', () => {
   it('returns { data, error: null, status } on success', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { id: 42 }));
@@ -650,10 +585,6 @@ describe('createHttpClient - safe mode', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Instance creation
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - create instance', () => {
   it('create() produces a new client with merged defaults', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
@@ -669,13 +600,8 @@ describe('createHttpClient - create instance', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// CSRF on mutations only
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - CSRF', () => {
   it('attaches CSRF token to POST but not GET', async () => {
-    // Mock a CSRF meta tag
     const metaEl = { content: 'test-csrf-token' };
     vi.stubGlobal('document', {
       querySelector: (sel: string) => sel === 'meta[name="csrf-token"]' ? metaEl : null,
@@ -695,10 +621,6 @@ describe('createHttpClient - CSRF', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Response types
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - response types', () => {
   it('parses text response', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, 'plain text'));
@@ -708,10 +630,6 @@ describe('createHttpClient - response types', () => {
     expect(res.data).toBe('plain text');
   });
 });
-
-// ---------------------------------------------------------------------------
-// Download
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - download', () => {
   it('returns blob data with filename', async () => {
@@ -729,7 +647,6 @@ describe('createHttpClient - download', () => {
       json: async () => ({}),
     });
 
-    // Mock document for download trigger
     const appendSpy = vi.fn();
     const removeSpy = vi.fn();
     const clickSpy = vi.fn();

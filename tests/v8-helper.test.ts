@@ -1,4 +1,9 @@
-// tests/v8.ts reads what it claims to, on this Node: one positive control per bit.
+/**
+ * tests/v8.ts reads the optimization tier and map identity it claims to, on this Node.
+ * Why: the helper decodes V8's internal OptimizationStatus bits; a stale decode would answer "not optimized" for everything, and every test built on it would pass for the wrong reason.
+ * Shows: each bit is driven to both values on the running Node (map identity, lazy, interpreted, TurboFan, Maglev, deopt, Sparkplug, young generation), one positive control per bit.
+ * See: tests/v8.ts, src/runtime/runtime-test.cc in V8
+ */
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
@@ -42,10 +47,7 @@ describe('tests/v8.ts', () => {
     expect(s.maglevved).toBe(false);
   });
 
-  // A Node built without Maglev (v8_enable_maglev 0, e.g. NodeSource's 22.x on
-  // Linux) cannot reach that tier with any flag: V8 prints "Maglev is not
-  // enabled." and the function stays interpreted. Skipped only on that build
-  // fact; a Node whose config omits the key still runs it (owner, 2026-10-03).
+  // A Node built without Maglev (v8_enable_maglev 0) cannot reach that tier with any flag; skip only on that build fact, so a config that omits the key still runs it.
   const maglevBuilt = (process.config.variables as Record<string, unknown>).v8_enable_maglev !== 0;
   it.skipIf(!maglevBuilt)('optimize(..., "maglev") reaches Maglev', () => {
     const f = (x: number) => x * 5 - 1;
@@ -77,11 +79,3 @@ describe('tests/v8.ts', () => {
     expect(inYoungGeneration(o)).toBe(false);
   });
 });
-
-// Why each test is a positive control: the bits are V8's internal
-// OptimizationStatus enum (src/runtime/runtime-test.cc), renumbered across V8
-// versions before. A helper that decoded a stale bit would answer "not
-// optimized" for everything, and every test built on it would pass for the
-// wrong reason; here each bit is driven to both values on the running Node.
-// The young-generation check takes `gc` from a fresh VM context, since the
-// suite runs without --expose-gc and only contexts made after the flag get it.

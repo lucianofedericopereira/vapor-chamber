@@ -1,4 +1,9 @@
-/** ERROR_CODE_REGISTRY's `retryable` names a transient condition; the bus re-sends only what the call it retries produced (log s35.177). Rationale at the end. */
+/**
+ * ERROR_CODE_REGISTRY's `retryable` names a transient condition; the bus re-sends only what the call it retries produced.
+ * Why: the retry sits at the call that produced the outcome (a handler, a transport), inside the plugins. A retryable code raised outside it, such as a throttled second dispatch or a rateLimit refusal, would be re-sent if the column meant "the bus re-sends it for any action", and the handler would run again.
+ * Shows: pace:limited:dispatch and rateLimit:limited:action are retryable codes yet leave the handler run once; a transient handler failure is re-sent.
+ * See: log s35.177
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, BusError } from '../src/command-bus';
 import { rateLimit } from '../src/plugins-extra';
@@ -17,6 +22,7 @@ describe('retryable codes the bus does not re-send', () => {
     let runs = 0;
     bus.register('t', async () => { runs++; });
     const send = pace(bus.dispatch, { throttle: 30 });
+    // Fake timers: the throttle gate reads Date.now(), so a real stall between the two dispatches would let the second run.
     await send('t', 1);
     const second = send('t', 1);
     await vi.runAllTimersAsync(); // a re-send would wait out the window here
@@ -30,6 +36,7 @@ describe('retryable codes the bus does not re-send', () => {
     const bus = createAsyncCommandBus({ retry: { baseDelay: 1, maxAttempts: 3, maxDelay: 2000 } });
     let runs = 0;
     bus.register('api', async () => { runs++; });
+    // Fake timers: rateLimit reads Date.now(), so a real stall between the two dispatches would let the second run.
     bus.use(rateLimit({ max: 1, window: 40 }));
     await bus.dispatch('api', 1);
     const second = bus.dispatch('api', 1);
@@ -46,18 +53,3 @@ describe('retryable codes the bus does not re-send', () => {
     expect([r.ok, runs]).toEqual([true, 3]);
   });
 });
-
-/*
- * ErrorCodeEntry.retryable read "Whether the async bus re-sends it for any
- * action", but the retry sits at the call that produced the outcome (a
- * handler, a transport), inside the plugins: a throttled second dispatch and
- * a rateLimit refusal both ran the handler once (audit B15, N4, D11, probe
- * P10). The column names a transient condition; the doc now says where the
- * bus re-sends it. Log s35.177.
- *
- * The two window tests run on fake timers. The throttle gate and rateLimit
- * read Date.now(), so on real timers a stall of 40 ms between the two
- * dispatches (a loaded machine) let the second one run: `['ok', 2]`. A
- * re-send still shows: it waits out the window inside runAllTimersAsync, and
- * the handler runs twice.
- */

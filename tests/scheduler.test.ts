@@ -1,8 +1,14 @@
+/**
+ * The scheduler's lanes (ordered runs per key) and sleeper (cancellable sleeps).
+ * Why: a lane that stayed blocked after a failed run would stall every later command on that key, and a sleep that could not be woken or aborted would hold a retry or debounce open.
+ * Shows: a lane runs in order and a failed run releases it; a sleep resolves true when due and false when woken or aborted, and an abort ends only its own sleep.
+ * See: tests/timer-delays.test.ts
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { delayOption } from '../src/bounds';
 import { createLanes, createSleeper } from '../src/scheduler';
 
-// A sleep takes a Delay (tests/timer-delays.test.ts).
+// A sleep takes a Delay, not a number of milliseconds.
 const ten = delayOption(10, 10);
 
 describe('scheduler', () => {

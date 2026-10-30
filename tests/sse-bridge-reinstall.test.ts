@@ -1,6 +1,8 @@
 /**
- * createSseBridge: a second install() replaces the stream. The first one was
- * left open, out of dispose()'s reach, and kept delivering to its bus.
+ * createSseBridge: a second install() closes the first stream and replaces it.
+ * Why: a first stream left open would be out of dispose()'s reach and keep delivering to its bus.
+ * Shows: after two installs the first EventSource is closed, and dispose() closes the second.
+ * See: src/transports.ts
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';

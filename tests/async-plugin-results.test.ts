@@ -1,13 +1,8 @@
 /**
- * Four plugins, one cause: `next()` returns a PROMISE on the async bus.
- *
- * Each is declared `Plugin`, whose `next` returns a `CommandResult`, and each
- * read that return value directly. `promise.ok` is `undefined`, so every one
- * took the wrong branch - silently, with no throw and no warning. Found by
- * running examples/pattern-1-blade-cdn.html (the IIFE/CDN delivery, where
- * there are no types at all) and reading its console.
- *
- * The measurements in each test are what the plugin did BEFORE src/settled.ts.
+ * logger, history, circuitBreaker and metrics on the async bus, where `next()` returns a promise.
+ * Why: a plugin reading `next()`'s return directly sees `promise.ok` as undefined and silently takes the wrong branch.
+ * Shows: successes read as successes, failures as failures; history records, the breaker trips only on failure, metrics times the settlement; the sync bus stays sync.
+ * See: src/settled.ts.
  */
 import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -81,14 +76,12 @@ describe('plugins on an async bus', () => {
     await bus.dispatch('slow', {});
     const entry = m.entries()[0];
     expect(entry?.ok).toBe(true);
-    // A fraction of the sleep it is measuring, so the two cannot drift apart.
-    // A slow machine only makes this MORE true; no ceiling is asserted.
+    // A fraction of the sleep, so the two cannot drift; no ceiling, so a slow machine still passes.
     expect(entry?.durationMs).toBeGreaterThan(SLEEP_MS / 3);
   });
 
   it('the sync bus is byte-for-byte unaffected', ({ bus }) => {
-    // onSettled preserves sync-ness: a sync next() is never wrapped in a
-    // promise, so a sync plugin behaves exactly as before.
+    // onSettled keeps sync-ness: a sync next() is never wrapped in a promise.
     bus.register('add', () => 'ok');
     const h = history({ bus });
     const m = metrics({});

@@ -1,10 +1,15 @@
-/** `VcTransition`'s dependency surface on Vue, enumerated: its imports and its two block reads. */
+/**
+ * `VcTransition`'s dependency surface on Vue (src/transitions/vapor.ts): its six value imports and its two block-property reads.
+ * Why: an upstream rename of an import, or of the fragment `nodes` / instance `block` property, would leave `elementOf` returning null so the transition commands carry no target.
+ * Shows: each import exists in vue's bundler entry and matches the file's import block; nothing of Vue's transition is imported; slot functions return a node, an array, a fragment with `nodes`, or an instance with `block`.
+ * See: log s35.34, tests/vapor/vapor-outlet-helpers.test.ts, tests/vapor/vc-transition.test.ts
+ */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createVaporApp, defineVaporComponent, template } from 'vue';
+import { bundlerEntryExports } from '../bundler-entry';
 import { compileVapor } from '../compile-vapor';
 
 const vueVersion = (
@@ -15,14 +20,12 @@ const vueVersion = (
 
 const SOURCE = readFileSync(resolve(process.cwd(), 'src', 'transitions', 'vapor.ts'), 'utf8');
 
-/** Everything `src/transitions/vapor.ts` imports from `vue` as a value. */
+// Everything src/transitions/vapor.ts imports from `vue` as a value.
 const VC_TRANSITION_IMPORTS = ['createIf', 'defineVaporComponent', 'nextTick', 'onScopeDispose', 'shallowRef', 'watch'] as const;
 
 describe('VcTransition - dependency surface', () => {
   it("every helper it imports is statically exported by vue's bundler entry", async () => {
-    const bundlerEntry = resolve(process.cwd(), 'node_modules', 'vue', 'dist', 'vue.runtime.esm-bundler.js');
-    const mod = (await import(/* @vite-ignore */ pathToFileURL(bundlerEntry).href)) as Record<string, unknown>;
-    const names = Object.keys(mod);
+    const names = await bundlerEntryExports();
     // A resolution failure must fail loudly, not report "nothing missing".
     expect(names.length).toBeGreaterThan(100);
 
@@ -115,29 +118,3 @@ describe('VcTransition - dependency surface', () => {
     host.remove();
   });
 });
-
-/*
- * Modelled on tests/vapor/vapor-outlet-helpers.test.ts, which explains why a
- * surface like this is a fixture and not a paragraph, and why the enumeration
- * goes through the bundler entry (`vue.runtime.esm-bundler.js`, the file a
- * consumer's bundler resolves bare `vue` to) by absolute file URL.
- *
- * WHAT IS PINNED. `src/transitions/vapor.ts` depends on Vue in two ways:
- *   - six named imports, all reachable from bare `vue`. `createIf` and
- *     `defineVaporComponent` are compiler-output surface, the other four are
- *     ordinary public API; all six are listed, and the list is compared with
- *     the file's import block so it cannot go stale by eye.
- *   - two property reads, `nodes` on a fragment and `block` on a component
- *     instance, which is how it finds the element to hand to the command
- *     handlers. Neither is public API. The last test compiles four slots on
- *     the installed Vue and records what each slot function returns, so a
- *     rename of either property fails here. If it ever does, the component
- *     does not throw: `elementOf` returns null and the commands carry no
- *     target, which tests/vapor/vc-transition.test.ts pins for content with no
- *     element (arm k, `text`).
- *
- * "IMPORTS NOTHING OF VUE'S TRANSITION" is the premise of the component (log
- * s35.34: Vue's Vapor transition is 4.4 KB brotli, and no exported piece lets
- * a bundle take less of it). The third test is that claim, with a positive
- * control on the scan.
- */

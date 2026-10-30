@@ -1,4 +1,9 @@
-/** pending() first read while its key is already in flight: lit, then dark at the settle. The long note is at the end. */
+/**
+ * pending() read for the first time while its key is already in flight.
+ * Why: a loading flag created mid-flight must start from the in-flight count, not from false, or a spinner would stay dark during a running dispatch.
+ * Shows: a key counted before anyone reads it (tracking armed by another key) reads lit, a different key stays dark, and the same flag goes dark at the settle; the control reads before the dispatch.
+ * See: log s35.44.
+ */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { type CommandBus, createAsyncCommandBus } from '../src/command-bus';
@@ -38,15 +43,3 @@ describe('isLoading read for the first time mid-flight', () => {
     s.dispose();
   });
 });
-
-/*
- * perf-1.26 (log s35.44), item d. A loading slot used to carry its signal from
- * the moment a dispatch first counted into it, read or not, so every dispatch
- * of a key nobody asked about allocated a shallowRef and wrote it twice. The
- * slot now gets its signal on the first pending() read, created from the
- * count. The second test is the case that change could break: the key is
- * counted (tracking is armed by another key) before anyone reads it, so the
- * signal is created mid-flight and must start lit, and the settle must then
- * write that same signal dark. A seeded `signal(false)` in place of the count
- * turns it red.
- */

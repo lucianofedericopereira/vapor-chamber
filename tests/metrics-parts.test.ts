@@ -1,4 +1,9 @@
-/** metrics times every outcome as a `started` and a `settled` part, wherever it is installed. The note is at the end. */
+/**
+ * `metrics` records every outcome through a `started` and a `settled` part, wherever it is installed.
+ * Why: a rule refusal or a before-hook cancel that never reaches `metrics`, or a result that depends on install order, would silently drop entries.
+ * Shows: a refusal is counted with `metrics` installed before or after the validator, query and dispatch are timed over the work, an abort before the start records 0 ms, and the sync bus counts a success and a throw.
+ * See: log s36.105.
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { validator } from '../src/plugins-core';
@@ -52,14 +57,3 @@ describe('metrics as parts', () => {
     expect(m.summary()).toEqual({ ok: { count: 1, avgMs: expect.any(Number), errorRate: 0 }, boom: { count: 1, avgMs: expect.any(Number), errorRate: 1 } });
   });
 });
-
-/*
- * Plan 1.32 step 8b (log 36.105). `metrics` was a chain plugin: it timed
- * `next()`, so a rule's refusal (answered before the chain) and a before-hook's
- * cancel never reached it, and the pair "metrics with validator" in
- * tests/same-in-any-order.test.ts failed in both orders. As a `started` part
- * it records the start in a Map from the command to `performance.now()`, and
- * its `settled` part records the entry and deletes the start. A query starts
- * through `Facts.queried`, so it is timed too. An abort before the start
- * settles with no start: 0 ms, never a stale start.
- */

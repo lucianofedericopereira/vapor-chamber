@@ -1,9 +1,8 @@
 /**
- * The errors the library builds match its own catalogue (ERROR_CODE_REGISTRY):
- * each carries a catalogued code, and the owner in that code is the one the
- * wiring minted it for. Before the factory, every site filled code, emitter and
- * severity by hand and drifted from the catalogue (validator() refused with no
- * code at all). (v1.25.0) and docs/contract.md 5.
+ * The errors the library builds match ERROR_CODE_REGISTRY: each carries a catalogued code, with the owner the wiring minted it for.
+ * Why: a site filling code and owner by hand drifts from the catalogue, and an uncoded failure cannot be queried.
+ * Shows: validator, pace, abort, schemaValidator, synthesize and the directive's timeout each fail with their catalogue code; a schema rejection precedes the outbox; src/ wraps no uncoded Error.
+ * See: docs/contract.md section 5.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -22,8 +21,6 @@ import { it } from '../src/vitest';
 const entry = (code: string) => ERROR_CODE_REGISTRY.find((e) => e.code === code)!;
 
 function matchesCatalogue(error: unknown): void {
-  // The catalogue documents every code the library raises; the owner in the
-  // code is the one the wiring stamped (docs/contract.md 5).
   const e = error as BusError;
   expect(e.code, 'the error carries a catalogue code').toBeDefined();
   expect(entry(e.code), `${e.code} is catalogued`).toBeDefined();

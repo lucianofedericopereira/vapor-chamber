@@ -1,4 +1,9 @@
-/** A store `answer` that returns something other than an object writes nothing, as a declared `stores` value. Rationale at the end. */
+/**
+ * A store `answer` that returns something other than an object writes nothing, the rule a declared `stores` value follows.
+ * Why: writing null or undefined as the state would make every reader of `state.value.items` throw, and with `version` the version read would throw inside the transport step and fail a dispatch the server already applied.
+ * Shows: null, a number and undefined from `answer` leave the state alone, the dispatch is ok, development warns once; the same holds with `version`; an object answer is written.
+ * See: tests/store-declared-by-server.test.ts, log s35.186
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -23,7 +28,7 @@ describe('an answer that is not a state', () => {
     const cart = defineChamberStore('cart', {
       state: (): Cart => ({ items: [1] }),
       reducers,
-      // The third reply maps to undefined: a mapper that forgot to return.
+      // The third reply maps to undefined, as a mapper that forgot to return would.
       answer: (_s, value) => (++mapped === 3 ? undefined : value) as Cart,
     })(bus);
 
@@ -58,15 +63,3 @@ describe('an answer that is not a state', () => {
     cart.$dispose();
   });
 });
-
-/*
- * `answer` maps a bridged action's reply to the next state, and its result was
- * written as is. A server answering `state: null` through `(_s, value) =>
- * value`, or a mapper that forgot to return, replaced the store's state with
- * `null` or `undefined`, and every reader of `state.value.items` then threw.
- * With `version`, `version(null)` threw first, inside the transport step, and
- * the dispatch failed after the server had applied the command. A state
- * declared under `stores` already followed the rule "only an object is a
- * state": not written, one development warning per store
- * (tests/store-declared-by-server.test.ts). `answer` now follows the same rule.
- */

@@ -1,7 +1,8 @@
 /**
- * FIXTURE - a synchronous subscriber that THROWS on one of the form's signal
- * writes must not leave the other signals stale (`set`) or a busy flag stuck
- * on true (`submit`). Real Vue `effect`s. The long note is at the end.
+ * createFormBus with a synchronous Vue effect that throws on one of the form's signal writes.
+ * Why: a Vue effect runs inside the write that triggers it; if a throw skipped later writes, set() would leave isValid stale (an invalid value reading as valid) and submit() would leave a busy flag stuck on true.
+ * Shows: after a throw on values, errors or isDirty, set() leaves all cells current; a throw on isValidating or isSubmitting rejects submit() with that error and ends with every flag false; the isValidating case then submits again; the control records the order of every write across set and submit.
+ * See: log s35.18, log s35.23, log 36.63.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -96,7 +97,6 @@ describe('createFormBus: a throwing sync subscriber', () => {
     });
     expect(submitted).toBe(0);
     runner.effect.stop();
-    // The form is usable again: the next submit goes through.
     expect(await f.submit()).toBe(true);
     expect(submitted).toBe(1);
   });
@@ -151,7 +151,7 @@ describe('createFormBus: a throwing sync subscriber', () => {
     events.length = 0;
 
     f.set('email', 'x');
-    // The rule runs first: a command builds the form's next state, then writes it once (4f).
+    // The rule runs before the writes: a command builds the next state, then writes it once.
     expect(events).toEqual(['rule', 'values:x', 'errors:Invalid email', 'isDirty:true', 'isValid:false']);
     events.length = 0;
 
@@ -189,36 +189,3 @@ describe('createFormBus: a throwing sync subscriber', () => {
     for (const r of runners) r.effect.stop();
   });
 });
-
-/*
- * Why this file exists. Found by reading `form.ts` against Vue `ef5ff106`
- * (log s35.18) and fixed in s35.23: the shape `runDispatch` had.
- *
- * `set`. The `formSet` handler writes four signals in a row: `values`,
- * `errors`, `isDirty`, `isValid`. A Vue effect runs inside the write that
- * triggers it, so a subscriber that throws on one write skipped the writes
- * after it. The bus turns the handler's throw into a failed result, which
- * `set()` drops, so `set()` returned normally with `values` new and the rest
- * stale: an invalid value read as valid. The `values` write now sits in a
- * `try` whose `finally` makes the other three, so they land and the
- * subscriber's error still leaves the handler the way it did.
- *
- * What that left, a subscriber throwing on `errors` or on `isDirty` skipping
- * the writes after it (log s35.23 b), went with plan 1.32 4f (log 36.63): the
- * form's state is one store written once per command, and each public cell is
- * fed by the store's field events, whose lane logs a subscriber's throw and
- * goes on. The second test pins it fixed. The control's two `set` lists now
- * show the rule before the writes: a command builds the next state, then
- * writes it once. Its two submit lists are unchanged.
- *
- * `submit`. `isValidating = true` and `isSubmitting = true` each stood one
- * line above the `try` whose `finally` clears it. A subscriber throwing on
- * either rejected `submit()` and left the flag true for good. Both are now the
- * first statement inside their `try`. `submit()` still rejects with the
- * subscriber's error, as it does for a rule or an `onSubmit` that throws.
- *
- * The last test is the control for both moves. It records every write eight
- * effects see, and each call of the rule and of `onSubmit`, across an invalid
- * set, a failed submit, a valid set and a successful submit. The lists are the
- * ones this test produced before the move.
- */

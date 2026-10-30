@@ -1,4 +1,9 @@
-/** A plugin's parts keep their facts right when another command runs between them for one command. The long note is at the end. */
+/**
+ * A plugin's parts (cache, idempotent, metrics) when another command runs between one command's parts, on a sync bus.
+ * Why: these plugins keep the latest command in two fields, so a nested dispatch would leave the fields naming the inner command and the outer one would be cached, recorded or timed under the wrong key.
+ * Shows: cache stores the first command under its own key; idempotent collapses the repeat of the first command, and with no key records nothing; metrics times outer and inner each from its own start, and a command settled without a start it saw reads 0 ms.
+ * See: log s36.105, s36.107
+ */
 import { describe, expect, it } from 'vitest';
 import { type Command, type PluginParts, createCommandBus } from '../src/command-bus';
 import { cache, idempotent, metrics } from '../src/plugins-extra';
@@ -78,10 +83,3 @@ describe('metrics when commands nest', () => {
     expect(m2.entries().map((e) => [e.action, e.durationMs])).toEqual([['inner', expect.any(Number)], ['outer', expect.any(Number)], ['y', 0]]);
   });
 });
-
-// cache, idempotent and metrics each keep the latest command in two fields,
-// so the common case reads a field, not a Map (log 36.105, 36.107). When a
-// nested command runs between one command's parts (a step's admit that
-// dispatches, a handler that dispatches), the fields name the inner command,
-// and each part must fall back to the command it was given. Each case nests
-// on a sync bus, where the nested command runs inside the outer one's steps.

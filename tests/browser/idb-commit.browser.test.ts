@@ -1,4 +1,9 @@
-/** In Chromium: an IndexedDB write settles when its transaction commits, a read when its request succeeds (log 36.14 D14). Note at the end. */
+/**
+ * In Chromium: an IndexedDB write settles when its transaction commits, a read when its request succeeds.
+ * Why: a transaction can still abort after its write request succeeded, rolling the write back; only the commit makes it durable.
+ * Shows: with no abort the value reads back; an abort after success rejects put() and stores nothing; a read still resolves; a store's persist warns.
+ * See: log 36.14 D14.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _idbStore, indexedDbStorage } from '../../src/idb';
 import { createCommandBus } from '../../src/command-bus';
@@ -12,7 +17,7 @@ afterEach(() => {
 
 const fresh = () => `vc-idb-commit-${Math.random().toString(36).slice(2)}`;
 
-/** From now on, every `mode` transaction aborts from its request's success event. */
+/** From now on, every `mode` transaction aborts from its request's success event, before the library's onsuccess: a quota failure cannot be forced here. */
 function abortAfterSuccess(mode: IDBTransactionMode): void {
   IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
     const tx = nativeTransaction.apply(this, args);
@@ -46,6 +51,7 @@ describe('an IndexedDB write whose transaction aborts after its request succeede
   it('put() rejects, and the value is not in the store', async () => {
     const store = _idbStore(fresh(), 's');
     abortAfterSuccess('readwrite');
+    // An explicit abort leaves transaction.error null, so the rejection is the library's own Error naming the store.
     const answer = await settled(store.put('k', 'v'));
     expect([answer, await store.get('k')]).toEqual(['rejected indexedDB write to "s" did not commit', undefined]);
   });
@@ -70,18 +76,3 @@ describe('an IndexedDB write whose transaction aborts after its request succeede
   });
 
 });
-
-/*
- * A write is durable only when its transaction commits: the transaction can
- * still abort after the write request succeeded, and the write is then rolled
- * back. A quota failure at commit could not be forced in the headless shell
- * (Storage.overrideQuotaForOrigin left the quota at 10 GB), so these tests
- * abort the transaction from the request's success event, as the spec allows
- * any script to. That is the same outcome: request success, then no commit.
- * The listener is added before the library sets `onsuccess`, so it runs first.
- *
- * An explicit abort() leaves `transaction.error` null (the spec aborts "with
- * null"), so the rejection is the library's own Error naming the store. A
- * commit failure (quota, I/O) sets `transaction.error`, and that is what the
- * write rejects with then. The Node suite's fakes cover both arms.
- */

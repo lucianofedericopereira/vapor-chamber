@@ -1,4 +1,9 @@
-/** `meta.request`: request-level headers a plugin adds, sent by the HTTP bridges (log s35.139). */
+/**
+ * `meta.request`: request-level headers a bus plugin adds, sent by `httpTransport`.
+ * Why: a plugin header (a trace id) that never reaches the request, or that leaks into the bridge's shared headers, would tag the wrong requests or none.
+ * Shows: a plugin header is sent next to the bridge's own, the bridge's headers object is never mutated, a batch merges in queue order, and an untouched command keeps `request` undefined.
+ * See: log s35.139.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { httpTransport } from '../src/transports';
@@ -12,7 +17,6 @@ const stubFetch = () => vi.stubGlobal('fetch', vi.fn(async (_u: string, init: Re
 }));
 afterEach(() => { vi.unstubAllGlobals(); sent.length = 0; });
 
-// A tracing plugin, as an app writes it: an ordinary bus plugin.
 const trace = (bus: ReturnType<typeof createAsyncCommandBus>) =>
   bus.use({ started: (cmd) => { cmd.meta!.request = { headers: { traceparent: `00-${cmd.meta!.id}` } }; } });
 

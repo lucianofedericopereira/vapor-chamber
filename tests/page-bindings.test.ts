@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// `bindDisplay`: display bindings on plain HTML follow a store's fields and the bus's command state; rationale at the end.
+/**
+ * `bindDisplay`: data-vc-text, -show, -each and -pending on plain HTML follow a store's fields and the bus's command state.
+ * Why: a page without a framework would show stale server markup after a store write, a removed row's button would still dispatch, and a missing store would fail silently in development.
+ * Shows: elements render at bind time and on each write, paths read through own properties only (an inherited name reads nothing), each rows rebuild and unbind their old commands, a missing store warns in development only, vc-loading follows the in-flight action and target, and unbind stops it all.
+ * See: log s36.92, src/dict.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bindDisplay } from '../src/page-bindings';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -219,13 +224,3 @@ describe('data-vc-pending', () => {
     expect(during).toBe(false);
   });
 });
-
-// Plan 1.32 4.5: display bindings on a store's field events, no second reactivity system.
-// A path is `<store id>.<field>[.<more>]`: the store comes from the bus's registry, one
-// `$onField` subscription per element, the rest of the path read from the field's value.
-// The store is the truth, so a bound element renders at bind time and on each write.
-// `data-vc-show` shows a truthy value that is not an empty array. `data-vc-each` clones
-// its `<template>` per entry, and a row's paths read its item (exo-astro's rule).
-// `data-vc-pending` sets the `vc-loading` class the command binding sets, from the bus's
-// command state (step 5), so the owner's CSS recipe for a delayed busy display works on
-// both. Each path segment is an own property: `constructor` reads nothing (src/dict.ts).

@@ -1,9 +1,14 @@
-/** Async request(): identical means identical, each caller keeps its own wait, the responder sees the chain's command (log s35.167). Rationale at the end. */
+/**
+ * Async request(): identical in-flight requests share one responder run, each caller keeps its own timeout and signal, the responder gets the chain's command.
+ * Why: if the dedupe key ignored the payload, two different requests would get one answer; if a joined caller inherited the first caller's timeout or signal, one caller's abort would settle another; if the responder got a fresh Command, plugin stamps and the dispatch id would never reach it. The dispatch runs under the bus's own controller, aborted once every caller holding it has aborted.
+ * Shows: different payloads are two runs, identical ones one; a joined caller's abort or shorter timeout settles only that caller; a lone caller's abort reaches cmd.signal with its reason; an abort by only some callers does not; a fresh identical request starts afresh after all aborted; dispose() settles every waiting caller.
+ * See: log s35.167, log s35.202
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, type Command } from '../src/command-bus';
 
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** A responder's wait that the test ends with `release()`. */
+/** A responder's wait that the test ends with `release()`: a caller that settles before it settled on its own abort or timeout, whatever the load, so no test compares wall time. */
 function held() {
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
@@ -140,28 +145,3 @@ describe('controls', () => {
     expect((await b).ok).toBe(false);
   });
 });
-
-/*
- * AsyncCommandBus.request's contract: "identical in-flight requests share one
- * promise", "a timeout (default 5000 ms) bounds the wait", "`signal` settles
- * the request and reaches the responder on cmd.signal". The dedupe key left
- * the payload out, so two different requests got one answer (audit B6). A
- * joined caller got the first caller's promise, with the first caller's
- * timeout and signal (B17). The responder got a fresh Command, so a
- * plugin's stamps and the dispatch's id never reached it, where the sync bus
- * hands it the chain's own (B7).
- *
- * Shape, the HTTP client's dedupe rule ("A caller joins the read in flight,
- * but its signal stays its own: it cancels its promise, never another
- * caller's"): the key includes the payload when one is given, every caller
- * races the shared dispatch with its own timeout and signal, and the
- * dispatch runs under the bus's own controller, aborted once every caller
- * holding it has aborted. Log s35.167.
- *
- * "At once" is read against a held responder, not a clock. The first version
- * timed the joined caller (abort at 10 ms, "late" from 60 ms, responder
- * 80 ms) and failed once under the gate's full parallel run: the 10 ms timer
- * fired more than 50 ms late. A responder that waits for `release()` cannot
- * answer first, so a caller that settles before the release settled on its
- * own abort or timeout, whatever the load. Log s35.202.
- */

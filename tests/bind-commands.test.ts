@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// `bindCommands(root, { bus })`: the directive's interaction on plain HTML, the bus passed in; rationale at the end.
+/**
+ * `bindCommands(root, { bus })`: the directive's interaction on plain HTML, from `[data-vc-command]` attributes.
+ * Why: the interaction (busy, error, announce, keyboard, in-flight guard) is DOM code with no Vue, so plain HTML gets it too, on the bus passed in, never the shared one.
+ * Shows: presses dispatch with target and payload, busy and error states, the action read at press time; debounce, throttle and IME pace a control; a refused press is silent.
+ * See: plan 1.32 4.5, plan 1.32 step 6a.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bindCommands } from '../src/command-binding';
 import { createAsyncCommandBus, createCommandBus, type Command } from '../src/command-bus';
@@ -101,6 +106,7 @@ describe('bindCommands: presses', () => {
   });
 });
 
+// A form control sends on `input`, or `change` for a select, checkbox or radio, as `v-model` chooses.
 describe('bindCommands: pacing from attributes', () => {
   beforeEach(() => { vi.useFakeTimers(); });
 
@@ -199,15 +205,3 @@ describe('bindCommands: pacing from attributes', () => {
     expect(heard).toEqual(['mark']);
   });
 });
-
-// Plan 1.32 4.5: the directive's whole interaction (busy, error, announce, optimistic, the
-// keyboard, the in-flight guard) is DOM code with no Vue in it, so plain HTML gets it from
-// attributes: `bindCommands(root, { bus })` mounts it on every `[data-vc-command]`, with the
-// bus passed in, never the shared one. The action is read at press time, so a changed
-// attribute retargets the next press.
-//
-// Pacing is the sender's (step 6a): `data-vc-debounce` and `data-vc-throttle` pace the
-// element with `pace`. A form control sends on `input`, or `change` for a select, a checkbox
-// and a radio, as `v-model` chooses, with its value (a checkbox's `checked`) as the payload,
-// so a burst of keystrokes shares one key. A press the sender refuses is silent: no
-// `vc-error`, no announce, nothing on the bus.

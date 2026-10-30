@@ -1,14 +1,10 @@
 /**
- * verify-contract --against: the release cut replays the last release's contract.
- *
- * A stand-in verifier (a shell script that records its arguments and the
- * files it was given) runs in place of pact-verifier, and a local server
- * answers the monitor GET, so this needs neither a backend nor the binary.
- * Refs used: HEAD (holds contract/) and git's empty tree (holds nothing),
- * which every repository resolves, a shallow CI checkout included. An
- * unpacked archive has neither: those three cases skip there and run from a
- * clone (tests/require-git.ts); the control needs no history.
+ * `scripts/verify-contract.mjs --against <ref>`, run against a stand-in verifier script and a local monitor server.
+ * Why: the release cut must replay the previous release's pact files exactly, or a breaking change to the wire contract would pass unnoticed.
+ * Shows: the ref's own pact files reach the verifier byte for byte with the session cookie and Sec-Fetch-Site arguments; a ref with no contract exits 0 with a notice; an unresolvable ref exits 2; without --against the checkout's contract/ is replayed.
+ * See: tests/require-git.ts
  */
+// Refs are HEAD and git's empty tree, which a shallow CI checkout resolves; an unpacked archive has no history, so those three cases skip there.
 import { execFile, spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';

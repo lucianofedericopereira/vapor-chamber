@@ -1,4 +1,9 @@
-/** persist and the outbox against the same four storage failures. The long note is at the end. */
+/**
+ * persist and the outbox against the same four storage failures: none, quota, corrupt JSON, blocked.
+ * Why: a storage that is missing, full, corrupt or blocked must never fail a dispatch or throw to the app; an unreadable `localStorage` getter would otherwise fail every dispatch that saves.
+ * Shows: with a working storage both round-trip one state; under each failure the dispatch result, the loaded state and whether the console warned are the same for persist and the outbox (corrupt JSON dispatches nothing and loads nothing, silently).
+ * See: log s35.207, s35.208, s36.F5
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createOutbox } from '../src/outbox';
@@ -27,7 +32,7 @@ function memoryStorage(quota = false) {
 type Case = 'working' | 'none' | 'quota' | 'blocked' | 'corrupt';
 function install(c: Case) {
   if (c === 'blocked') {
-    // A browser with site data blocked: reading `localStorage` itself throws.
+    // Site data blocked: reading `localStorage` itself throws, which `typeof` does not guard.
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });
     return;
   }
@@ -102,27 +107,3 @@ describe('the same failure, both side by side', () => {
   });
 
 });
-
-/*
- * Plan 1.28 item 7 (log s35.207). `persist` (a store's option since 1.32,
- * src/store-persist.ts) and the
- * outbox (src/outbox.ts) each looked up `localStorage` with
- * `typeof globalThis.localStorage`. Since the 1-7 fix-up (log 36.F5) the
- * outbox's queue is saved by persist itself, so the parity holds by
- * construction and this test pins it. The probe gives both the same four
- * failures and records what an app sees: the dispatch's result, what a later
- * load returns, and whether the console was warned.
- *
- * No storage, a quota error: the same answer. Corrupt JSON: both load
- * nothing, silently (persist's default `deserialize` swallows the parse
- * error). Blocked storage, where reading `localStorage`
- * itself throws a SecurityError (a browser with site data blocked): `typeof`
- * guards an undeclared name, not a getter that throws, so the lookup throws.
- * The outbox calls its storage inside a try (`saveQueue`, the load at creation) and
- * carries on with a warning. `persist` looked up before its try, in `save()`,
- * `load()` and `clear()`: the save after every successful dispatch threw
- * inside the plugin, so every dispatch answered `persist:failed:plugin`
- * though its handler ran, and `load()` threw to the app. The lookup now sits
- * inside each try (log s35.208), and blocked storage warns as a quota error
- * does.
- */

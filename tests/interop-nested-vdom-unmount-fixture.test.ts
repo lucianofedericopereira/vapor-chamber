@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `useCommand()` in a vDOM component nested in Vapor components,
- * removed by a vDOM `v-if`. Fails on Vue 3.6.0-rc.10, passes from rc.11. The
- * long note is at the end of this file.
+ * Fixture: useCommand() in a vDOM component nested in Vapor components, removed by a vDOM v-if.
+ * Why: a listener hangs its unsubscribe on the component scope, so if Vue does not stop the scope when vDOM removes the form, the listener outlives its view and runs its side effects on every later dispatch.
+ * Shows: both nested grandchildren are subscribed while mounted, and after the v-if removes the form no listener fires and both scopes are disposed.
+ * See: docs/rc-alignment-log.md.
  */
 
 import { beforeAll, expect, it } from 'vitest';
@@ -48,7 +49,7 @@ it('a vDOM v-if removing nested Vapor components stops the vDOM grandchildren\'s
   app.component('VaporButtons', v.defineVaporComponent({ setup: () => buttons.render({}) }));
   app.mount(host);
 
-  // Positive control: both grandchildren are subscribed while mounted.
+  // Positive control: without it, "0 fired after removal" could pass on a listener that never subscribed.
   bus.dispatch('cartAdd', 1);
   expect(fired).toBe(2);
 
@@ -62,25 +63,3 @@ it('a vDOM v-if removing nested Vapor components stops the vDOM grandchildren\'s
   app.unmount();
   host.remove();
 });
-
-/*
- * WHY THIS FILE EXISTS. `useCommand().on()` hangs its unsubscribe on the
- * component's scope, so a listener lives exactly as long as the component.
- * That holds only if Vue stops the scope.
- *
- * The shape is upstream's regression test for Vue 3.6.0-rc.11 `daf7004e`: a
- * vDOM `<form v-if>` holding a Vapor component, which renders Vapor
- * components, which each render a vDOM component. When the vDOM `v-if`
- * removes the form, vDOM owns the removal and removes the DOM itself, so the
- * Vapor components are unmounted with no parent node, and on rc.10 the vDOM
- * components inside them were never unmounted.
- *
- * Measured on rc.10 (docs/rc-alignment-log.md, the rc.11 cycle): after the
- * form left, one dispatch still ran both grandchildren's listeners, and
- * neither scope was ever disposed, not even by `app.unmount()`. A listener
- * that outlives its view runs its side effects for every later dispatch. On
- * rc.11 both are disposed with the form. Nothing in `src` changed for it.
- *
- * The first dispatch is the positive control: without it, "0 fired after
- * removal" could pass on a listener that never subscribed.
- */

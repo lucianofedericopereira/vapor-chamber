@@ -1,4 +1,9 @@
-// CI's speed check decides from the A/B summaries: each failure it must catch, seeded.
+/**
+ * ab:ci, CI's speed check: decide(), the same-code skip and the base check (base-ok.sh).
+ * Why: the job is worth only the failures it reports, so each one is seeded here.
+ * Shows: a slower row, no passing control or an empty workload fails, "no result" does not; same JS and unusable bases skip with a reason.
+ * See: log s35.59, log 36.31.
+ */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_WORKLOADS, decide, sameShippedCode } from '../scripts/ab/ci.mjs';
 import { gitHistory } from './require-git';
@@ -47,8 +52,7 @@ describe('ab:ci decide', () => {
 });
 
 describe('ab:ci skips a head that ships the same JavaScript as its base', () => {
-  // A commit that touches docs, CI or FUNDING.yml only builds the same dist:
-  // an A/B of two identical builds can only report noise (log 36.31).
+  // A docs- or CI-only commit builds the same dist; an A/B of identical builds reports only noise.
   const dists = async (files: Record<string, string>, other: Record<string, string>) => {
     const { mkdirSync, mkdtempSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
@@ -87,8 +91,7 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     return { status: r.status, out: r.stdout.trim() };
   };
 
-  // Reads this checkout's HEAD: a clone only (tests/require-git.ts). The
-  // base-ok.sh paths also run against a throwaway repository two tests down.
+  // Needs this checkout's HEAD, so a clone only; the throwaway-repo test below covers the same paths.
   it.skipIf(!gitHistory)('accepts a commit this checkout has, or refuses it across an uncommitted version bump', async () => {
     const { execSync } = await import('node:child_process');
     const { readFileSync } = await import('node:fs');
@@ -169,10 +172,3 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     expect(yml.slice(check, yml.indexOf('build-dists.sh', check))).toMatch(/exit 0/);
   });
 });
-
-// Why each case: the job's value is the failure it reports, so each failure is
-// seeded and must turn the decision red. "no result" rows do not fail (the gate
-// saying it cannot tell); but a run in which NO control passed measured nothing,
-// and passing it would be the silent-pass shape this repo has hit before (a
-// guard that never fires). The real run, base against head on built dists, is
-// verified locally (log s35.59); GitHub runs it on every push and PR.

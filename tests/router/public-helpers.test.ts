@@ -1,12 +1,8 @@
 /**
- * The router's exported helpers, tested against their PUBLIC contract.
- *
- * All four are heavily used inside the router, so they were already covered
- * incidentally - but a preset author calls `routerError()` directly (that is
- * how `router-fetch` reports `router:failed:loader`), a Blade shell computes its base
- * with `normalizeBase`/`stripBase`, and `HARD_NAV_CODES` decides whether a
- * failed navigation hands the URL back to the server. Incidental coverage
- * pins none of that: it would stay green while the shape changed underneath.
+ * The router's exported helpers (routerError, isRouterError, HARD_NAV_CODES, normalizeBase, stripBase), against their public contract.
+ * Why: a preset author calls routerError() directly, a Blade shell computes its base with normalizeBase/stripBase, and HARD_NAV_CODES decides whether a failed navigation hands the URL to the server; a changed shape would break them without failing the router's own tests.
+ * Shows: routerError builds a narrowable error with code, cause and to; isRouterError rejects look-alikes; HARD_NAV_CODES is exactly the recoverable set; the base helpers normalise and strip as specified.
+ * See: tests/router/router-codes.test.ts
  */
 import { describe, expect, it } from 'vitest';
 import { BusError } from '../../src/failure';
@@ -49,10 +45,7 @@ describe('routerError - the error constructor presets use', () => {
 
 describe('HARD_NAV_CODES - which failures the server gets the last word on', () => {
   it('contains exactly the codes a full page load can recover', () => {
-    // Adding or removing a code here silently changes navigation behaviour:
-    // members hand the URL to the server, everything else stays client-side.
-    // Plan 8d.2's rule: a route, component or server HTML missing or failed
-    // (tests/router/router-codes.test.ts derives it from the registry).
+    // Members hand the URL to the server, everything else stays client-side; the rule is a route, component or server HTML missing or failed.
     expect([...HARD_NAV_CODES].sort()).toEqual(['router:failed:blade', 'router:failed:component', 'router:missing:component', 'router:missing:route']);
   });
 
@@ -72,7 +65,7 @@ describe('normalizeBase', () => {
   });
 
   it('collapses root-ish values to the empty base', () => {
-    // '' rather than '/', so `base + path` never double-slashes.
+    // '' rather than '/' so `base + path` never double-slashes.
     expect(normalizeBase('')).toBe('');
     expect(normalizeBase('/')).toBe('');
   });
@@ -90,7 +83,7 @@ describe('stripBase', () => {
   });
 
   it('returns null when the path is outside the base', () => {
-    // This is what tells link interception "not ours - let the browser have it".
+    // null tells link interception to leave the link to the browser.
     expect(stripBase('/other/items', '/admin')).toBeNull();
     expect(stripBase('/administrator', '/admin')).toBeNull(); // prefix, not a segment
   });

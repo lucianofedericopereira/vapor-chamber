@@ -1,4 +1,13 @@
-
+/**
+ * httpTransport (csrf, signals, batch) and wsTransport guards.
+ * Why: a transport must forward csrf, abort when either the call or the transport signal aborts, and never
+ * send a command whose signal is already aborted, or a cancelled dispatch would still reach the server. Also the only
+ * file reaching those already-aborted arms, a results-less batch and connect() with no WebSocket, so the 100% floor needs it.
+ * Shows: csrf reaches the client with and without batch, merged signals trip from each source, batched commands
+ * carry their own idempotency key, a results-less batch fails every entry, a pattern-limited transport never
+ * sends other actions, and wsTransport connect() is a no-op without WebSocket and opens no socket for an aborted command.
+ * See: docs/rc-alignment-log.md s35.124
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Command, CommandResult } from '../src/index';
 import { createAsyncCommandBus } from '../src/index';
@@ -16,10 +25,6 @@ function callSend(transport: Transport, cmd: Partial<Command>): Promise<CommandR
   const full = { action: 'x', target: {}, payload: undefined, meta: {}, ...cmd } as Command;
   return Promise.resolve(transport.send(full, async () => ({ ok: true, value: 'local' }) as CommandResult));
 }
-
-// ---------------------------------------------------------------------------
-// csrf forwarding + signal merging ('inertia' removed, log s35.124)
-// ---------------------------------------------------------------------------
 
 describe('csrf forwarding and signal merging', () => {
   it('passes csrf through to the client, with and without batch', async () => {
@@ -40,7 +45,6 @@ describe('csrf forwarding and signal merging', () => {
     await bus.dispatch('save', {});
     const sent: AbortSignal = httpClient.post.mock.calls[0]![2].signal;
     expect(sent.aborted).toBe(false);
-    // Either source aborting must trip the merged signal.
     scope.abort();
     expect(sent.aborted).toBe(true);
   });
@@ -72,10 +76,6 @@ describe('csrf forwarding and signal merging', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// httpTransport with batch
-// ---------------------------------------------------------------------------
-
 describe('httpTransport with batch', () => {
   it('forwards a stamped idempotency key per batched command', async () => {
     const httpClient = {
@@ -88,7 +88,7 @@ describe('httpTransport with batch', () => {
     } as any;
 
     const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc/batch', httpClient, batch: {} }) });
-    // Stamp meta ahead of the transport, the way `idempotent` does.
+    // Stamp meta ahead of the transport, as `idempotent` does.
     bus.use({ started: (cmd) => { if (cmd.meta && cmd.action === 'pay') cmd.meta.idempotencyKey = 'key-1'; } });
 
     const [pay, look] = await Promise.all([bus.dispatch('pay', {}), bus.dispatch('look', {})]);
@@ -131,10 +131,6 @@ describe('httpTransport with batch', () => {
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// wsTransport
-// ---------------------------------------------------------------------------
 
 describe('wsTransport guards', () => {
   it('connect() is a no-op when WebSocket is undefined', () => {

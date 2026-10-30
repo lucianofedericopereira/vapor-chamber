@@ -1,4 +1,9 @@
-/** isLoading's key equality: what shares a flag and what does not. The long note is at the end. */
+/**
+ * isLoading's key equality: which action and target pairs share a flag and which do not.
+ * Why: the target part of a key must match commandKey (String(target) for a primitive, canonical JSON for an object), and the action and target must stay separate parts, or one command would light another's flag.
+ * Shows: 1 and '1', null and 'null', undefined, booleans, and key-order-insensitive objects share a flag with their string form, while (a:b, c) and (a, b:c) do not light each other; each flag is dark again after the dispatch.
+ * See: log s35.60.
+ */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
@@ -37,15 +42,3 @@ describe('isLoading keys', () => {
     expect(litDuring('a:b', 'c', [['a:b', 'c'], ['a', 'b:c']])).toEqual([true, false]);
   });
 });
-
-/*
- * perf-1.26 item 4, option a (log s35.60). isLoading's slots were keyed by
- * `commandKey(action, target)`, one string `action:target` built per dispatch.
- * They are now a map by action, then by the target's key, so a dispatch builds
- * no string. The first three tests pin the equalities that must not move:
- * the target part is exactly commandKey's (`String(target)` for a primitive,
- * the canonical JSON for an object), so 1 and '1' still share a flag. The last
- * test is the one change, approved by the owner: joined by ':', the action
- * 'a:b' with target 'c' and the action 'a' with target 'b:c' were one key and
- * lit each other's flag. It failed before the change.
- */

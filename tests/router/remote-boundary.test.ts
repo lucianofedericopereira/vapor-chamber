@@ -1,18 +1,8 @@
 /**
- * http boundary regression - the base `vapor-chamber/router` entry must not
- * drag the chamber http client in.
- *
- * Two optional features need one: a `{ url }` route table and blade rows. The
- * client - the whole multi-method client, CSRF and retry and cache included -
- * lives in `vapor-chamber/router/remote`, the same subpath-per-cost shape
- * `./vdom` and `./vapor` use, so a consumer that calls neither carries none.
- *
- * That is a property of the import graph, not of anyone's discipline, so it is
- * asserted the way the renderer boundaries are: build a consumer that calls
- * `createRouter()` and nothing else, and look at what came with it.
- *
- * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
- * esbuild is unavailable.
+ * The base `vapor-chamber/router` entry does not pull in the chamber http client; `vapor-chamber/router/remote` does.
+ * Why: only a `{ url }` route table and blade rows need the client (CSRF, retry, cache included), so a consumer using neither would carry its bytes anyway.
+ * Shows: an esbuild bundle of a consumer calling only `createRouter()` reaches no dist/http module while still bundling the router; a bundle of the remote entry does reach one. Needs dist/ built (tests/require-dist.ts); skipped when esbuild is unavailable.
+ * See: tests/router/vdom-boundary.test.ts
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,10 +23,7 @@ try {
 
 /**
  * Bundle a consumer and report every dist module that ended up reachable.
- *
- * `splitting: true` for the same reason vdom-boundary.test.ts uses it: without
- * it esbuild inlines dynamic `import()` back into one output, which would make
- * an on-demand module look statically retained and this assertion meaningless.
+ * `splitting: true`: without it esbuild inlines dynamic `import()`, making an on-demand module look statically retained.
  */
 async function modulesOf(source: string): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-remote-'));
@@ -69,11 +56,9 @@ describe.skipIf(!esbuild)('http boundary', () => {
       `import { createRouter } from ${JSON.stringify(routerEntry)};\nglobalThis.__probe = createRouter;\n`,
     );
 
-    // The client and everything it drags with it: cache, query helpers, error
-    // mapping. Before the move, all four rode along with every router.
+    // The client and what it drags with it: cache, query helpers, error mapping.
     expect(modules.filter((m) => /dist\/http(-|\.)/.test(m))).toEqual([]);
-    // Sanity: the probe really did bundle the router, so an empty result above
-    // cannot be an empty build passing vacuously.
+    // The probe bundled the router, so the empty result above is not an empty build.
     expect(modules.some((m) => m.includes('dist/router'))).toBe(true);
   });
 

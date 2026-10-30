@@ -1,11 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * examples/vue-vapor-component.vue, compiled and mounted (handoff finding 19,
- * log s35.125) as a VDOM component, the form its header names: it renders,
- * adds, and undoes and redoes through the store. The Vapor mount runs in a
- * Vite host (.probes/step-9-pickup.md, Batch 2); this project has no Vapor Vue.
- * Its package imports are pointed at the source, so the composables, the store
- * and the root share one shared bus, as they do in an app.
+ * examples/vue-vapor-component.vue compiled and mounted as a VDOM component, the form its header names; this project has no Vapor Vue.
+ * Why: the example is what a reader copies; its package imports point at the source, so composables, store and root share one bus, as in an app.
+ * Shows: it renders, adds, undoes and redoes through the store; the validator refuses an empty todo and shows why; unmount takes the validator off, so mounts do not stack.
+ * See: log s35.125.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';

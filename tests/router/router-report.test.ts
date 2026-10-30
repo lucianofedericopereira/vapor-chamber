@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** The default onError reports a navigation's failure under its own code, or router:failed:navigation for a throw that is not a router error. The long note is at the end. */
+/**
+ * The router's default onError reports a navigation failure under its own code, or router:failed:navigation for a throw that is not a router error.
+ * Why: a non-router throw (such as a TypeError from an unreadable location) would go unreported or lose its code, and a router error would be recoded.
+ * Shows: pushing null reports one router:failed:navigation whose error is a TypeError; an unknown route name reports router:missing:record.
+ * See: log s36.120
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRouter } from '@router/index';
 import { createWebHistory } from '@router/history';
@@ -31,8 +36,3 @@ describe('the default onError', () => {
     router.dispose();
   });
 });
-
-// `router.push(null)` reaches the location reader with no location, which throws a
-// TypeError, not a router error: the default onError reports it as
-// router:failed:navigation (log 36.120), where a router error reports under
-// its own code. Found unreached at step 8's close.

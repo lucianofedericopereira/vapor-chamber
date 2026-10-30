@@ -1,15 +1,7 @@
 /**
- * FormBus - reset() while submit() is still validating.
- *
- * submit() validates a snapshot and awaits the async rules. A reset() in that
- * window restored the initial values and cleared the errors, and then the
- * validation of the discarded snapshot was written over them: a pristine form
- * showed errors for values it no longer held and read invalid. When the
- * snapshot was valid, onSubmit then sent the values the user had discarded.
- *
- * A reset now cancels a submit that has not reached onSubmit: its validation
- * is dropped, onSubmit does not run, and submit() returns false. A submit
- * already in onSubmit is unchanged (first write wins: it may have been sent).
+ * FormBus reset() while submit() is still validating async rules.
+ * Why: submit() validates a snapshot; if its result were written after reset(), a pristine form would show errors for values it no longer holds, and onSubmit would send values the user discarded.
+ * Shows: a reset before onSubmit starts drops the validation, never calls onSubmit and makes submit() resolve false; a plain submit sends; a reset after onSubmit started does not cancel it (it may already have been sent).
  */
 import { describe, expect, it } from 'vitest';
 import { createFormBus } from '../src/form';

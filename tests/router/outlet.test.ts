@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/outlet.ts - <RouterOutlet> renders the matched component at
- * its depth, falls back to the default slot when nothing matches, and requires
- * an installed router.
+ * <RouterOutlet> renders the matched component at its depth, falls back to the default slot when nothing matches, and requires an installed router.
+ * Why: a layout would show the wrong child or crash when no child route is selected, and a missing router would fail without a code handlers can switch on.
+ * Shows: the matched component renders; the default slot renders when there is nothing at this depth; mounting without a router throws a coded router:missing:router; a nested outlet with no slot mounts without throwing.
  */
-
 import { describe, expect, it } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
 import { isRouterError } from '@router/errors';
@@ -40,7 +39,7 @@ describe('RouterOutlet', () => {
 
   it('renders the default slot when nothing matches at this depth', () => {
     const router = makeRouter();
-    // Not started -> START_LOCATION, render[] is empty at depth 0.
+    // Not started: START_LOCATION leaves render[] empty at depth 0.
     const host = document.createElement('div');
     const app = createApp({
       render: () => h(RouterOutlet, null, { default: () => h('em', 'fallback') }),
@@ -61,8 +60,7 @@ describe('RouterOutlet', () => {
   it('reports that failure with a code, not just a message', () => {
     const host = document.createElement('div');
     const app = createApp({ render: () => h(RouterOutlet) });
-    // Handlers switch on `code` everywhere in this router, so this throw is
-    // coded too.
+    // Handlers switch on `code`, so this throw is coded like the rest.
     let caught: unknown;
     try {
       app.mount(host);
@@ -75,8 +73,7 @@ describe('RouterOutlet', () => {
 
 describe('RouterOutlet - default slot', () => {
   it('renders the default slot when nothing matches at this depth', async () => {
-    // A nested outlet past the end of the render chain: the fallback is what a
-    // layout uses for "no child route selected".
+    // A nested outlet past the end of the render chain: the fallback is a layout's "no child route selected".
     const router = fixtureRouter({
       base: '',
       routes: [{ name: 'home', path: '/', component: 'Home' }],
@@ -100,7 +97,7 @@ describe('RouterOutlet - nothing to render and no slot', () => {
     const router = fixtureRouter({
       base: '',
       routes: [{ name: 'home', path: '/', component: 'Home' }],
-      components: { Home: defineComponent({ render: () => h(RouterOutlet) }) }, // nested, past the chain,
+      components: { Home: defineComponent({ render: () => h(RouterOutlet) }) }, // nested past the chain, no slot
     });
     await router.isReady();
 

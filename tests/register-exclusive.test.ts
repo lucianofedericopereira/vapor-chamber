@@ -1,4 +1,9 @@
-/** `register(action, handler, { exclusive })`: commands with one key never overlap, in order, on the bus or across tabs. The long note is at the end. */
+/**
+ * `register(action, handler, { exclusive })`: commands with one key never overlap, in order, on the bus or across tabs.
+ * Why: two withdrawals on one account must not run at once; a failure must not stall the key, and a retried command must keep its turn so the next one waits for the retry's end.
+ * Shows: first in first out per key (default key is the action, `null` opts out, a throwing key fails that dispatch alone); `scope: 'cross-tab'` asks `navigator.locks` for `vapor-chamber:exclusive:<key>` and orders on this bus without it; the declaration leaves and returns with its registration; a query of an exclusive action waits; an action without it runs commands at once.
+ * See: log s36.79
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { supersede } from '../src/plugins-extra';
@@ -193,7 +198,7 @@ describe('exclusive: edges', () => {
     const bus = createAsyncCommandBus({ retry: false });
     const waiting: Array<() => void> = [];
     bus.register('accountWithdraw', () => new Promise((r) => { waiting.push(() => r('A')); }), { exclusive: {} });
-    const off = bus.register('accountWithdraw', async (cmd) => cmd.target); // covers A: its declaration with it
+    const off = bus.register('accountWithdraw', async (cmd) => cmd.target); // replaces A, and A's declaration with it
     expect((await Promise.all([bus.dispatch('accountWithdraw', 1), bus.dispatch('accountWithdraw', 2)])).map((r) => r.value)).toEqual([1, 2]);
     off();
     const one = bus.dispatch('accountWithdraw', 1);
@@ -228,13 +233,3 @@ describe('control: an action without it', () => {
     for (const r of g.releases) r();
   });
 });
-
-/*
- * Plan 1.32 step 4k, owner 2026-10-20: the `serialize` plugin goes; the action declares
- * `exclusive`, the Web Locks API's word for one holder at a time. Same key, one command at a
- * time, first in first out; a failure never stalls the key; `null` opts a command out; the
- * key defaults to the action. Held around the bus's retry, as serialize sat outside it, so a
- * retried command keeps its turn. `scope: 'cross-tab'` asks `navigator.locks` for
- * `vapor-chamber:exclusive:<key>` (or `lockPrefix`), and orders on this bus where the API is
- * absent. A sync handler runs to its end before the next, so the sync bus already holds it.
- */

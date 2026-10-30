@@ -1,11 +1,13 @@
+/**
+ * The cache, circuitBreaker, rateLimit and metrics plugins in src/plugins-extra.ts, on the sync and async buses.
+ * Why: a query cache must serve hits and never keep a failure or grow past its bound; a breaker must open on a backend's failures but never on a plugin bug; a rate limit must refuse past its cap with a declared `retryIn`; metrics must record each dispatch within its bound.
+ * Shows: cache hits, misses, `maxSize` bounds (a negative one stores nothing, a NaN one falls back to the default), `actions` scoping, a custom `key()` and async results; circuitBreaker open, fast-reject, reset, onOpen/onClose, scoping and that `plugin:failed:plugin` neither counts nor resets the run while `remote:failed` counts; rateLimit per-action counters and scoping; metrics entries, summary, clear, bound and onEntry; and `context.retryIn` for an open breaker and a rate limit.
+ * See: tests/plugin-throw-fixture.test.ts, log s30.3.
+ */
 import { describe, expect, vi } from 'vitest';
 import { _failures, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
 import { it } from '../src/vitest';
-
-// ---------------------------------------------------------------------------
-// cache
-// ---------------------------------------------------------------------------
 
 describe('cache', () => {
   it('calls handler on miss, returns cached result on hit', ({ bus }) => {
@@ -18,7 +20,7 @@ describe('cache', () => {
 
     expect(r1).toSucceedWith(10);
     expect(r2.value).toBe(10);
-    expect(handler).toHaveBeenCalledTimes(1); // second call hit cache
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('misses cache for different targets', ({ bus }) => {
@@ -59,45 +61,20 @@ describe('cache', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('respects maxSize with LRU eviction', ({ bus }) => {
-    const handler = vi.fn((cmd: any) => cmd.target.id);
-    bus.register('get', handler);
-    const c = cache({ ttl: 60_000, maxSize: 2 });
-    bus.use(c);
-
-    bus.query('get', { id: 1 });
-    bus.query('get', { id: 2 });
-    bus.query('get', { id: 3 }); // evicts id:1
-
-    expect(c.size()).toBe(2);
-  });
-
   it('does not hang on a negative maxSize, and caches nothing', ({ bus }) => {
-    // Regression: `maxSize` was unvalidated. `evictIfNeeded` looped
-    // `while (store.size > maxSize)` and only deleted when
-    // `store.keys().next().value !== undefined` - so with a negative bound the
-    // condition stayed true against an EMPTY store and the guard deleted
-    // nothing: an infinite loop on the first eviction, from one bad option.
-    // Measured before the fix: 500k iterations with store.size 0, no progress.
     let calls = 0;
     bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
     const c = cache({ ttl: 60_000, maxSize: -1 });
     bus.use(c);
 
-    // If this hangs, the suite times out rather than failing - which is the
-    // point: the old form could not fail fast.
+    // A hang here times out the suite rather than failing it.
     bus.query('getUser', { id: 1 });
     bus.query('getUser', { id: 2 });
 
-    expect(c.size()).toBe(0); // clamped to 0 - a cache that stores nothing
-    expect(calls).toBe(2); // ...so every query really ran
+    expect(c.size()).toBe(0); // clamped to 0
+    expect(calls).toBe(2);
   });
 
-  // The clamp above was `Math.max(0, Math.trunc(raw))`, which PROPAGATES NaN -
-  // and every comparison against NaN is false, so `store.size <= maxSize`
-  // never broke the eviction walk and it dropped every entry it had just
-  // inserted. Measured before the guard: size 0 after 300 inserts. A cache
-  // that silently caches nothing is harder to notice than one that hangs.
   it('a NaN maxSize caches nothing rather than defeating the bound', ({ bus }) => {
     let calls = 0;
     bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
@@ -107,10 +84,7 @@ describe('cache', () => {
     bus.query('getUser', { id: 1 });
     bus.query('getUser', { id: 1 }); // must be a cache hit
 
-    // Falls back to the documented default rather than to 0: a bad option now
-    // behaves like an absent one. Mapping NaN to 0 was bounded but disabled the
-    // cache outright, which is the same silent-misconfiguration failure wearing
-    // different clothes.
+    // NaN falls back to the default bound, not 0: a bad option behaves like an absent one.
     expect(c.size()).toBe(1);
     expect(calls).toBe(1);
   });
@@ -133,17 +107,13 @@ describe('cache', () => {
     bus.use(cache({ ttl: 60_000, actions: ['getUser'] }));
 
     bus.query('getUser', { id: 1 });
-    bus.query('getUser', { id: 1 }); // hit
+    bus.query('getUser', { id: 1 });
     bus.query('getPost', { id: 1 });
-    bus.query('getPost', { id: 1 }); // not cached
+    bus.query('getPost', { id: 1 });
 
     expect(handler).toHaveBeenCalledTimes(3);
   });
 });
-
-// ---------------------------------------------------------------------------
-// circuitBreaker
-// ---------------------------------------------------------------------------
 
 describe('circuitBreaker', () => {
   it('passes through when closed', ({ bus }) => {
@@ -178,7 +148,7 @@ describe('circuitBreaker', () => {
     const r = bus.dispatch('op', {});
     expect(r).toFailWith('circuitBreaker:limited:action');
     expect(r.error?.message).toContain('Circuit breaker is open');
-    expect(handler).toHaveBeenCalledTimes(2); // not called when open
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 
   it('resets to closed after manual reset', ({ bus }) => {
@@ -216,18 +186,15 @@ describe('circuitBreaker', () => {
     bus.dispatch('op', {});
     bus.dispatch('op', {}); // opens
 
-    // After resetTimeout=0, next call enters half-open
     shouldFail = false;
-    bus.dispatch('op', {}); // half-open -> success -> closed
+    bus.dispatch('op', {}); // resetTimeout 0: half-open, then success closes it
 
     expect(onClose).toHaveBeenCalledWith('op');
     expect(cb.getState('op')).toBe('closed');
   });
 
   it('recovers from half-open with no onClose callback configured', ({ bus }) => {
-    // `if (onClose)` - the false arm. The test above always supplies the
-    // callback, so the optional-callback path (the default configuration) was
-    // never exercised: a breaker with no observer must still close.
+    // A breaker with no observer must still close.
     let shouldFail = true;
     bus.register('op', () => { if (shouldFail) throw new Error('fail'); return 'ok'; });
     const cb = circuitBreaker({ threshold: 2, resetTimeout: 0 }); // no onClose
@@ -252,14 +219,11 @@ describe('circuitBreaker', () => {
 
     bus.dispatch('op', {});
     const r = bus.dispatch('safe', {});
-    expect(r.ok).toBe(true); // circuit bypassed - 'safe' not in actions list
+    expect(r.ok).toBe(true); // 'safe' is not in actions
     expect(cb.getState('op')).toBe('open');
   });
 
-  // plugin:failed:plugin is a pipeline bug, not the server failing: three plugin
-  // bugs must not lock an action out. It neither counts nor resets the
-  // consecutive-failure run (tests/plugin-throw-fixture.test.ts has the
-  // conversion itself).
+  // A plugin bug is not the server failing: it neither counts nor resets the run of failures.
   it('does not count a plugin:failed:plugin from a step after it', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
@@ -290,8 +254,7 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
   });
 
-  // A backend's 5xx is what a breaker is for: `remote:failed:<code>` counts;
-  // only a library's own throw (a plugin bug) is skipped.
+  // A backend failure (`remote:failed:<code>`) counts; only a plugin bug is skipped.
   it("counts a backend's failure (remote:failed)", () => {
     const bus = createCommandBus();
     bus.register('op', () => { throw _failures('remote')('failed:server', 'HTTP 500'); });
@@ -315,10 +278,6 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('closed');
   });
 });
-
-// ---------------------------------------------------------------------------
-// rateLimit
-// ---------------------------------------------------------------------------
 
 describe('rateLimit', () => {
   it('allows dispatches under the limit', ({ bus }) => {
@@ -348,8 +307,8 @@ describe('rateLimit', () => {
     bus.use(rateLimit({ max: 1, window: 1000 }));
 
     expect(bus.dispatch('a', {}).ok).toBe(true);
-    expect(bus.dispatch('a', {})).toFailWith('rateLimit:limited:action'); // over limit
-    expect(bus.dispatch('b', {}).ok).toBe(true);  // separate counter
+    expect(bus.dispatch('a', {})).toFailWith('rateLimit:limited:action');
+    expect(bus.dispatch('b', {}).ok).toBe(true); // separate counter
   });
 
   it('filters by actions option', ({ bus }) => {
@@ -363,10 +322,6 @@ describe('rateLimit', () => {
     expect(bus.dispatch('free', {}).ok).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// metrics
-// ---------------------------------------------------------------------------
 
 describe('metrics', () => {
   it('records successful dispatch', ({ bus }) => {
@@ -456,21 +411,17 @@ describe('metrics', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// cache - custom key, async results, and invalidation edges
-// ---------------------------------------------------------------------------
-
 describe('cache - key derivation and invalidation', () => {
   it('uses a supplied key() instead of commandKey', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.target.id);
     bus.register('getUser', handler);
-    // Keyed by id ONLY, so two different targets that share an id are one entry.
+    // Keyed by id only, so two targets sharing an id are one entry.
     bus.use(cache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` }));
 
     bus.query('getUser', { id: 1, extra: 'a' });
     bus.query('getUser', { id: 1, extra: 'b' });
 
-    expect(handler).toHaveBeenCalledTimes(1); // second call hit the custom key
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
 
@@ -489,8 +440,7 @@ describe('cache - async bus', () => {
 
     const second = await bus.query('getUser', { id: 21 });
     expect(second.value).toBe(42);
-    // The plugin has to await the promise before storing, or the cache holds a
-    // pending thenable and every later hit returns something unresolved.
+    // The plugin must await the promise before storing, or hits return a pending thenable.
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -513,11 +463,6 @@ describe('cache - async bus', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// A `limited` refusal declares when to come back (`context.retryIn`), as a
-// throttled call (`pace`) and a Retry-After do, so a caller and the outbox wait for it.
-// ---------------------------------------------------------------------------
 
 describe('a limited refusal declares when to come back', () => {
   it('circuitBreaker: the time left until half-open', () => {

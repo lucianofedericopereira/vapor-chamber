@@ -1,4 +1,9 @@
-/** One undo reverses a command and the recorded commands it caused; one redo replays them (I2). The long note is at the end. */
+/**
+ * history undo and redo of a command together with the recorded commands it caused, on the sync and async bus.
+ * Why: a reaction chain is one user action; if undo reversed only part of it, or reached across an unrelated command, the app state would be half undone.
+ * Shows: a reaction chain or fan-out undoes and redoes as one step; plain clicks stay separate; an unrelated command, another cause, a canUndo false member or a transport-carried member ends the step; a member refused at run time moves back while the undone ones stay undone; an emit follow-up stays its own step; derived store state is right at every press; useCommandHistory follows the same press.
+ * See: tests/history-child-redo.test.ts.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { _appliedRemotely } from '../src/applied-remotely';
 import { type BaseBus, type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -206,13 +211,3 @@ describe('the async bus: a follow-up that settles after an unrelated command', (
     expect(n).toEqual({ click: 1, slow: 0, other: 1 });
   });
 });
-
-/*
- * Interop plan I2, owner D3 2026-10-13, in 1.32 by Q4 (2026-10-19). Read from the stacks at
- * press time, the record path unchanged. An undo reverses the top step and, while the new top
- * caused a reversed member or shares a defined cause with one, that step too. A redo replays the
- * top and each next step a member replayed in the same press caused, while each lands. A step
- * that cannot be undone (its `canUndo`, a transport carried it) or is refused when it runs ends
- * the press, and the members already moved stay moved. A follow-up an emit's listener dispatches
- * carries no cause (an emit stamps no meta), so it stays its own step: B3 owns a handler's child.
- */

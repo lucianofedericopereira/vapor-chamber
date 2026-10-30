@@ -1,30 +1,8 @@
 /**
- * FIXTURE - `vapor-chamber/vapor` wires a REAL Vapor registry, statically.
- *
- * Runs under the aliased project (`vitest.vapor.config.ts`), where `vue`
- * resolves to the with-vapor dist - which is what a real Vapor app's bundler
- * resolves it to, and the only configuration in which `src/vapor.ts`'s static
- * imports have anything to import.
- *
- * WHAT IT PINS, and the first assertion is the load-bearing one:
- *
- *   1. The registry is seeded at MODULE-EVALUATION time, so the wiring is the
- *      static import rather than the runtime probe. This is the entire reason
- *      the subpath exists: the probe is a bare dynamic `import()` that resolves
- *      under a dev server and CANNOT resolve in a production bundle, which is
- *      how `createVaporChamberApp()` came to throw "No Vue detected" on a page
- *      with Vapor bundled into it (`tests/vapor-sfc-prod-detection.test.ts`).
- *      A static import has no such failure mode - but proving that it is what
- *      ran needs the observation to happen before any dynamic import could have
- *      settled, which is why it is taken in a helper module's body rather than
- *      here. See `vapor-subpath-at-module-scope.ts`.
- *
- *   2. The consumer-facing contract: `createVaporChamberApp` mounts a real
- *      Vapor app with NO `configureVue()` call anywhere in user code. That one
- *      manual chapter 1, the entry to import from this file. Every other Vapor
- * fixture in this repo calls it (see `tests/keepalive-input-scope-fixture.test.ts`,
- * which must, because it hands the chamber a dist it imported itself). If that
- * call ever becomes necessary here, the subpath has stopped doing its job.
+ * `vapor-chamber/vapor` (src/vapor.ts) wires a real Vapor registry by static import, under the with-vapor `vue` alias.
+ * Why: the runtime probe is a bare dynamic `import()` that cannot resolve in a production bundle, so without the static wiring `createVaporChamberApp()` would throw "No Vue detected" in a built Vapor app.
+ * Shows: the registry is seeded during module evaluation, a Vapor app mounts with no `configureVue()` call, root props follow Vue's raw-props contract, and the KeepAlive guard keeps a dispatch into a deactivated view out of command history.
+ * See: tests/vapor-sfc-prod-detection.test.ts, tests/vapor/vapor-subpath-at-module-scope.ts, tests/vue-subpath-wiring-fixture.test.ts
  */
 
 import { describe, expect, it } from 'vitest';
@@ -42,8 +20,7 @@ describe('vapor-chamber/vapor under a real with-vapor Vue', () => {
     const App = defineVaporComponent({
       setup: () => v.template('<div id="mounted">vapor</div>', true)(),
     });
-    // The wrappers' documented null path must be unreachable here - the
-    // registry was seeded above, so this is a real component, not `null`.
+    // The wrappers' null path (no registry) must be unreachable here.
     expect(App).not.toBeNull();
 
     const host = document.createElement('div');
@@ -59,9 +36,7 @@ describe('vapor-chamber/vapor under a real with-vapor Vue', () => {
     host.remove();
   });
 
-  // Vue's raw-props contract, passed through unchanged, and the opposite of a
-  // widget PROPERTY (tests/vapor/widget-shape.test.ts), which is why it is
-  // written down: a function root prop is a getter, so a callback is wrapped.
+  // Vue's raw-props contract, unchanged and the opposite of a widget property (tests/vapor/widget-shape.test.ts): a function root prop is a getter, so a callback is wrapped.
   it('root props: a function is a getter, so a callback is passed as () => fn', async () => {
     const { createVaporChamberApp, defineVaporComponent } = await import('../../src/vapor');
     const v = (await import('vue')) as any;
@@ -100,18 +75,9 @@ describe('vapor-chamber/vapor under a real with-vapor Vue', () => {
   });
 
   it('the KeepAlive guard works through this entry, with nothing hand-wired', async () => {
-    // `hasInjectionContext` missing from the /vue wiring list silently
-    // disables this guard in production bundles
-    // (`tests/vue-subpath-wiring-fixture.test.ts`). Since /vapor re-exports and
-    // evaluates /vue, that name arrives through this entry too - and this is
-    // the assertion that notices if it ever stops.
+    // /vapor evaluates /vue, so `hasInjectionContext` (which the guard needs in production bundles) must arrive through this entry too.
     const { useCommandHistory } = await import('../../src/vapor');
-    // Bus accessors come from the ROOT, not from this entry - deliberately.
-    // `/vapor` mirrors `/vue`'s scope: the Vue-dependent surface, because that
-    // is the surface whose import must double as the wiring. `getCommandBus` is
-    // framework-agnostic and the root carries it with no Vue in the tree, so
-    // duplicating it here would widen the entry for no benefit. Documented in
-    // `src/vapor.ts` §"WHAT IT DOES NOT RE-EXPORT".
+    // Bus accessors come from the root: /vapor re-exports only the Vue-dependent surface.
     const { setCommandBus, getCommandBus } = await import('../../src/chamber');
     const { createCommandBus } = await import('../../src/command-bus');
     const v = (await import('vue')) as any;

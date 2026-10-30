@@ -1,4 +1,8 @@
-/** A `$onField` subscriber that throws is logged; the write and the other subscribers go on. Rationale at the end. */
+/**
+ * A `$onField` subscriber that throws is logged; the write and the other subscribers go on.
+ * Why: a throwing subscriber would fail a dispatch whose write already happened, so history would not record it, a persist would not save it, and later subscribers would miss it.
+ * Shows: on both runtimes the dispatch is ok, the state is written, history records the command, later subscribers run, and the throw is logged once with the error as its own argument; the async bus behaves the same.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type CommandResult } from '../src/command-bus';
 import { defineChamberStore as defineVue } from '../src/store';
@@ -52,14 +56,3 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
     });
   });
 }
-
-/*
- * Before, the throw left `notify` mid-loop: on the core runtime it escaped the
- * cell's setter, on the Vue runtime the sync effect, and either way the
- * handler that had just written the state threw. The dispatch returned
- * `ok: false` for a write that happened, so history did not record it and a
- * persist did not save it, and every subscriber after the throwing one missed
- * the write. A subscriber is now isolated as a bus listener is
- * (`fanOutListeners`): its throw is logged with the error as its own argument,
- * and the write goes on.
- */

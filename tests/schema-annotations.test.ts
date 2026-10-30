@@ -1,4 +1,9 @@
-/** ActionSchema.annotations: MCP ToolAnnotations on the action, read by tools/list and by the retry (log s35.178). Rationale at the end. */
+/**
+ * ActionSchema.annotations: MCP ToolAnnotations declared once on an action, read by tools/list and by the retry.
+ * Why: if the hints were not read, MCP clients would see none, and an action declared idempotent or read-only would not be re-sent after an uncertain failure; an explicit retry setting must still win as policy.
+ * Shows: tools/list carries the annotations; idempotentHint or readOnlyHint with no retry set gives 3 runs; an explicit retry or the bus map gives 1; no annotations give 1 run, and the Anthropic and OpenAI tool lists carry no hint.
+ * See: log s35.178, RFC 9110 9.2.2
+ */
 import { describe, expect, it } from 'vitest';
 import { BusError } from '../src/command-bus';
 import { createActionFilter } from '../src/action-filter';
@@ -46,16 +51,3 @@ describe('controls', () => {
     expect(JSON.stringify(bus.toTools('openai'))).not.toContain('Hint');
   });
 });
-
-/*
- * One fact, declared once, read by every consumer: MCP schema 2025-06-18's
- * ToolAnnotations (`title`, `readOnlyHint`, `destructiveHint`,
- * `idempotentHint`, `openWorldHint`; hints) sit on the action, `tools/list`
- * emits them, and the retry reads them. RFC 9110 9.2.2 makes idempotency a
- * property of the operation; Smithy's `readonly` and `idempotent` traits are
- * "considered idempotent", and Protocol Buffers' NO_SIDE_EFFECTS "implies
- * idempotent". So either hint, with no `retry` set, reads as `retry:
- * 'idempotent'`; an explicit `retry` is policy and wins, and the bus's own
- * map wins over both, as released. The server reads its own declaration, not
- * a client trusting a server's hints. Log s35.178.
- */

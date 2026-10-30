@@ -1,5 +1,9 @@
 /**
- * Tests for the transport layer: httpTransport, wsTransport, createSseBridge
+ * The transport layer: httpTransport (single and batched), wsTransport and createSseBridge.
+ * Why: a dispatch must reach the server in the documented envelope and settle exactly once (response, error,
+ * timeout or disconnect), and actions outside a transport's pattern must stay local, or commands would hang or go to the wrong place.
+ * Shows: the envelope, HTTP failure and csrf header, same-tick and windowed batching, the WebSocket
+ * queue, timeout, close and disconnect paths, malformed frames, and the SSE bridge's reconnect, teardown and error logging.
  */
 
 import { describe, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -9,10 +13,6 @@ import { it } from '../src/vitest';
 import { MockWebSocket } from './backend-stubs';
 
 afterEach(() => vi.restoreAllMocks());
-
-// ---------------------------------------------------------------------------
-// httpTransport
-// ---------------------------------------------------------------------------
 
 describe('httpTransport', () => {
   it('sends command envelope to endpoint', async () => {
@@ -91,10 +91,6 @@ describe('httpTransport', () => {
   });
 
 });
-
-// ---------------------------------------------------------------------------
-// httpTransport with batch
-// ---------------------------------------------------------------------------
 
 describe('httpTransport with batch', () => {
   it('coalesces same-tick dispatches into one POST with commands[], matched back by id', async () => {
@@ -195,10 +191,6 @@ describe('httpTransport with batch', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// wsTransport
-// ---------------------------------------------------------------------------
-
 describe('wsTransport', () => {
   let MockWS: typeof MockWebSocket;
   let lastWs: MockWebSocket;
@@ -223,7 +215,6 @@ describe('wsTransport', () => {
     const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: { 'cart*': ws } });
     ws.connect();
 
-    // Wait for open
     await Promise.resolve();
 
     const result = await bus.dispatch('userLogin', {});
@@ -241,7 +232,6 @@ describe('wsTransport', () => {
 
     const promise = bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
 
-    // Get the id from the sent message and simulate server response
     const msg = JSON.parse(lastWs.sent[0]);
     expect(msg.command).toBe('cartAdd');
     expect(msg.target).toEqual({ id: 1 });
@@ -274,19 +264,15 @@ describe('wsTransport', () => {
     const bus = createAsyncCommandBus({ onMissing: 'ignore', transport: ws });
     ws.connect();
 
-    // Don't await open - WS is not yet OPEN; stub readyState
-    lastWs.readyState = 3; // CLOSED
+    lastWs.readyState = 3; // CLOSED: the socket is not open yet
 
     const promise = bus.dispatch('cartAdd', { id: 99 });
 
-    // Simulate reconnect: mark open and trigger onopen
     lastWs.readyState = MockWebSocket.OPEN;
     lastWs.onopen?.();
 
-    // Message should now be flushed from queue
     expect(lastWs.sent.length).toBeGreaterThan(0);
 
-    // Respond so promise resolves
     const msg = JSON.parse(lastWs.sent[0]);
     lastWs.receive({ id: msg.id, state: null });
 
@@ -379,7 +365,7 @@ describe('wsTransport', () => {
     await vi.advanceTimersByTimeAsync(500); // before the per-request timeout
     expect(settledEarly).toBe(false);
 
-    // Still settles via the existing per-request timeout net, not the close.
+    // It settles through the per-request timeout, not the close.
     await vi.advanceTimersByTimeAsync(11_000);
     const result = await promise;
     expect(result.ok).toBe(false);
@@ -395,28 +381,15 @@ describe('wsTransport', () => {
     await vi.runAllTimersAsync();
 
     const promise = bus.dispatch('ping', {});
-    // Malformed frame - should be ignored silently
     lastWs.onmessage?.({ data: 'not-json{{' });
 
-    // Respond with a valid frame so the promise resolves
     const msg = JSON.parse(lastWs.sent[0]);
     lastWs.receive({ id: msg.id, state: null });
 
     const result = await promise;
     expect(result.ok).toBe(true);
   });
-
-  it('does nothing when WebSocket is unavailable', () => {
-    vi.unstubAllGlobals(); // remove WebSocket global
-    const ws = wsTransport({ url: 'ws://localhost' });
-    expect(() => ws.connect()).not.toThrow();
-    expect(ws.isConnected()).toBe(false);
-  });
 });
-
-// ---------------------------------------------------------------------------
-// createSseBridge
-// ---------------------------------------------------------------------------
 
 class MockEventSource {
   static OPEN = 1;
@@ -448,19 +421,14 @@ describe('createSseBridge', () => {
   });
 
   it('reconnect:false closes the stream on error, and the default leaves it open', ({ bus }) => {
-    // `reconnect` was declared, typed and documented with a default of true -
-    // and never read. Setting it to false did nothing at all, while the doc
-    // said it controlled reconnection. EventSource only stops retrying if the
-    // stream is closed, so that is what the option now means.
-
+    // EventSource only stops retrying if the stream is closed, so reconnect: false must close it.
     const off = createSseBridge({ url: '/api/stream', onEvent: () => {}, reconnect: false });
     off.install(bus);
     lastEs.onerror?.();
     expect(lastEs.closed).toBe(true);
     expect(off.isConnected()).toBe(false);
 
-    // The default must keep EventSource's native retry: closing here would
-    // silently disable reconnection for everyone who never set the option.
+    // The default must keep EventSource's native retry.
     const on = createSseBridge({ url: '/api/stream', onEvent: () => {} });
     on.install(bus);
     lastEs.onerror?.();

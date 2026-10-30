@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/history.ts - createWebHistory (browser path, exercised under
- * happy-dom) and the createMemoryHistory state()/dispose() branches.
+ * createWebHistory and createMemoryHistory in src/router/history.ts, and resolveBase's window default.
+ * Why: a wrong popstate delta would send Back and Forward the wrong way, a foreign history state would poison later deltas
+ * with NaN, a throttled pushState (Safari) would throw instead of falling back to a full navigation, and a pathname outside
+ * the base must not break location().
+ * Shows: location, push, replace, createHref and state strip and re-apply the base; popstate deltas are computed from the
+ * stored position (non-numeric or missing __vr counts as 0) and stop after unlisten; go delegates; a throwing pushState or
+ * replaceState falls back to location.assign or location.replace; memory history clears listeners on dispose;
+ * resolveBase reads window.location.pathname.
  */
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createWebHistory } from '@router/history';
 
@@ -40,7 +45,6 @@ describe('createWebHistory (happy-dom)', () => {
     expect(cb.mock.calls[0][1].delta).toBe(-1);
 
     off();
-    // after unlisten, further popstates are ignored
     window.dispatchEvent(new PopStateEvent('popstate', { state: { __vr: 0 } }));
     expect(cb).toHaveBeenCalledTimes(1);
 
@@ -48,17 +52,12 @@ describe('createWebHistory (happy-dom)', () => {
   });
 
   it('treats a non-numeric __vr already in history state as position 0', () => {
-    // The `: 0` arm of position(). The boot stamp on line 124 only fires when
-    // `__vr` is UNDEFINED, so a foreign or corrupted value (another router, a
-    // server-rendered state blob) survives it and reaches position() as-is -
-    // where it must degrade to 0 rather than poison every later delta with NaN.
+    // The boot stamp fires only when `__vr` is undefined, so a foreign value reaches position() as-is and must degrade to 0, not NaN.
     window.history.replaceState({ __vr: 'corrupt' }, '', '/admin/');
 
     const h = createWebHistory('/admin');
-    // Not stamped over, precisely because it was not undefined.
     expect(window.history.state.__vr).toBe('corrupt');
 
-    // lastPosition resolved to 0, so the next push is 1 - not NaN.
     h.push('/a');
     expect(window.history.state.__vr).toBe(1);
 
@@ -122,22 +121,16 @@ describe('createMemoryHistory - state() and dispose()', () => {
 
     const cb = vi.fn();
     h.listen(cb);
-    h.dispose(); // clears listeners
-    h.go(-1); // no listeners left -> cb never fires
+    h.dispose();
+    h.go(-1);
     expect(cb).not.toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Branches: outside-base fallback, non-__vr state,
-// resolveBase window-pathname default
-// ---------------------------------------------------------------------------
 
 describe('createWebHistory - fallback branches', () => {
   it('location() falls back to "/" when the current pathname is outside the base', () => {
     window.history.replaceState(null, '', '/elsewhere/page');
     const history = createWebHistory('/app');
-    // '/elsewhere/page' does not start with '/app' -> stripBase null -> '/'
     expect(history.location()).toBe('/');
     history.dispose();
   });
@@ -149,7 +142,7 @@ describe('createWebHistory - fallback branches', () => {
     history.listen((_p, info) => seen.push({ delta: info.delta }));
 
     history.push('/a'); // position 1
-    // Simulate a popstate to an entry created OUTSIDE the router (no __vr):
+    // An entry created outside the router carries no __vr.
     window.dispatchEvent(new PopStateEvent('popstate', { state: { foreign: true } }));
 
     expect(seen).toHaveLength(1);

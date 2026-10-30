@@ -1,18 +1,13 @@
 /**
- * src/dev.ts - the DEV constant's four resolution paths.
- *
- * DEV is a build-time answer with a runtime fallback, and the fallback is the
- * only path the rest of the suite ever exercises, because vitest supplies no
- * `__VC_DEV__` define. The whole thing is ONE expression, so a line- or
- * statement-based reading of this file can never distinguish its four
- * resolutions - only exercising them can.
- *
- * Each case re-imports the module after arranging globals, because DEV is
- * evaluated once at module scope.
+ * src/dev.ts: the DEV constant's resolution paths, and the expression the ESM build emits in its place.
+ * Why: DEV is one expression whose paths only exercising can tell apart, vitest defines no __VC_DEV__, and the ESM expression lives in a build script coverage cannot see.
+ * Shows: the __VC_DEV__ define beats NODE_ENV; the fallback reads NODE_ENV and survives no `process`; the ESM expression folds, agrees, is false with no bundler and true under a dev server.
+ * See: scripts/build.mjs, scripts/check-env-guards.mjs, tests/dev-esm-consumers.test.ts.
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
+/** DEV is evaluated once at module scope, so each case re-imports it after arranging globals. */
 async function freshDEV(): Promise<boolean> {
   vi.resetModules();
   return (await import('../src/dev')).DEV;
@@ -66,25 +61,7 @@ describe('DEV - runtime fallback when no define exists', () => {
   });
 });
 
-/**
- * THE ESM ARTIFACT'S DEV, and the reason it is not the same text as above.
- *
- * `src/dev.ts` keeps a build define plus a runtime fallback, and the six
- * branches of that expression are what the tests above cover. That shape is
- * also why the ESM build never folded: a consumer's bundler cannot evaluate
- * `typeof __VC_DEV__ !== 'undefined'`, so the ternary survived minification and
- * carried every dev-only diagnostic string into production. Measured on a real
- * Vite APP build consuming this package: 14,037 -> 12,764 raw, 4,453 -> 3,999
- * brotli, about 10%.
- *
- * `scripts/build.mjs` therefore emits a resolved expression into the ESM
- * artifact, once per importing module. That puts one line of behaviour in a
- * build script, where coverage cannot see it - so it is pinned here instead:
- * evaluated against the cases the module above is tested for, plus the two a
- * browser adds - a page under a bundler's dev server, which has
- * `import.meta.env.DEV` and a substituted NODE_ENV but no `process`, and a
- * no-bundler page, which has neither.
- */
+/** The ESM build emits a resolved expression a consumer's bundler can fold (it cannot evaluate `typeof __VC_DEV__`). */
 describe('DEV - the expression the ESM build emits', () => {
   // Evaluated as a function body, so `import.meta` (module-only syntax) becomes
   // a parameter; a bundler's NODE_ENV define is applied as text, which is how
@@ -95,9 +72,7 @@ describe('DEV - the expression the ESM build emits', () => {
     return new Function('process', 'meta', body.split('import.meta').join('meta'))(processRef, meta) as boolean;
   };
 
-  // First case in the file to import scripts/build.mjs, so it pays for pulling
-  // esbuild through the coverage transform - seconds, and not a measure of
-  // anything this asserts. The cases below reuse the module cache.
+  // The first import of scripts/build.mjs pulls esbuild through the coverage transform: slow, not what this asserts.
   it('is a bare, foldable expression - no `__VC_DEV__`, both arms false under a production define', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
     expect(DEV_ESM_SOURCE).not.toContain('__VC_DEV__');

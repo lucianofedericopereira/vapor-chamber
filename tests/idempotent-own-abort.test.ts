@@ -1,13 +1,7 @@
 /**
- * idempotent() - each caller's abort is its own.
- *
- * A concurrent duplicate joined the first dispatch's promise, so when the
- * first caller aborted, the handler was cancelled with its signal and the
- * duplicate - which never aborted - settled core:aborted:dispatch too. The
- * HTTP client's joined GETs already keep each caller's signal its own (1.29);
- * this is the same rule: a caller's abort settles that caller, and the shared
- * work is cancelled only once every caller holding it has aborted. A caller
- * with no signal holds it until it lands.
+ * idempotent(): each caller's abort settles only that caller.
+ * Why: a duplicate that joined a shared dispatch must not be aborted by another caller's signal; the shared work is cancelled only once every caller holding it has aborted, and a caller with no signal holds it until it lands.
+ * Shows: aborting the first or the duplicate caller settles only that caller with core:aborted:dispatch, the handler runs once and is cancelled only when all signals abort, a lone abort cancels its handler, and a duplicate aborted before joining settles aborted while the first run lands.
  */
 import { describe, expect, it } from 'vitest';
 import { type BusError, createAsyncCommandBus, idempotent } from '../src/index';
@@ -79,8 +73,7 @@ describe('idempotent() - abort per caller', () => {
 describe('idempotent() - a duplicate whose signal aborted on the way in', () => {
   it('settles that caller aborted at once, and the first run lands', async () => {
     const bus = createAsyncCommandBus({ retry: false });
-    // A rule that awaits: the dispatch's pre-flight abort check has already
-    // passed when the signal aborts, so idempotent sees it aborted.
+    // An awaiting rule lets the pre-flight abort check pass before the signal aborts, so idempotent sees it aborted.
     bus.use({ validate: () => async () => { await Promise.resolve(); return undefined; } });
     bus.use(idempotent({ actions: ['*'] }));
     let runs = 0;

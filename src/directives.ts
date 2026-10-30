@@ -146,7 +146,9 @@ export function vcCommandVapor(
     }
     return;
   }
-  _mountCommand(el, String(value()), modifiers, value, getCommandBus);
+  // The action is read at each press, so not here: an expression that cannot be
+  // read yet (`s.a.name` before `s.a` exists) must not stop the mount.
+  _mountCommand(el, '', modifiers, value, getCommandBus);
   return () => _unmountCommand(el);
 }
 

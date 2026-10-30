@@ -44,7 +44,11 @@ export function stringifyQuery(query: QueryValues | Record<string, unknown>): st
     const value = (query as Record<string, unknown>)[key];
     if (value === null || value === undefined) continue;
     const encodedKey = encodeQueryPart(key);
-    for (const v of Array.isArray(value) ? value : [value]) {
+    if (!Array.isArray(value)) {
+      parts.push(value === '' ? encodedKey : `${encodedKey}=${encodeQueryPart(String(value))}`);
+      continue;
+    }
+    for (const v of value) {
       if (v === null || v === undefined) continue;
       parts.push(v === '' ? encodedKey : `${encodedKey}=${encodeQueryPart(String(v))}`);
     }
@@ -63,7 +67,8 @@ function decodeQueryPart(part: string): string {
 function encodeQueryPart(part: string): string {
   // encodeURIComponent, relaxed for characters safe inside a query that keep
   // URLs readable.
-  return encodeURIComponent(part).replace(/%2C/g, ',').replace(/%3A/g, ':').replace(/%2F/g, '/');
+  const encoded = encodeURIComponent(part);
+  return encoded.indexOf('%') === -1 ? encoded : encoded.replace(/%2C/g, ',').replace(/%3A/g, ':').replace(/%2F/g, '/');
 }
 
 /** Decode one raw query value through its declaration; falls back to
@@ -116,6 +121,11 @@ function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+const noTrailingSlash = (path: string): string => {
+  const end = path.length - 1;
+  return end < 0 ? '/' : path.charCodeAt(end) !== 47 ? path : end === 0 ? '/' : path.slice(0, end);
+};
+
 /**
  * Shared active/exact semantics for a link target against the current path -
  * `data-active` stamping (dom.ts) and useMenu() both go through here, so a
@@ -124,8 +134,8 @@ function sameStringArray(a: string[], b: string[]): boolean {
  * ('/' is never a prefix-active catch-all).
  */
 export function pathActivity(targetPath: string, currentPath: string): { active: boolean; exact: boolean } {
-  const target = targetPath.replace(/\/$/, '') || '/';
-  const current = currentPath.replace(/\/$/, '') || '/';
+  const target = noTrailingSlash(targetPath);
+  const current = noTrailingSlash(currentPath);
   const exact = target === current;
   return { exact, active: exact || (target !== '/' && current.startsWith(`${target}/`)) };
 }

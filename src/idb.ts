@@ -17,15 +17,17 @@ export function _idbStore(dbName: string, storeName: string) {
       dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
         const idb: IDBFactory | undefined = (globalThis as any).indexedDB;
         if (!idb) {
-          dbPromise = null; // don't cache the failure - a later call may run where IDB exists
           reject(new Error('indexedDB is not available in this environment'));
           return;
         }
         const req = idb.open(dbName, 1);
         req.onupgradeneeded = () => { req.result.createObjectStore(storeName); };
         req.onsuccess = () => resolve(req.result);
-        req.onerror = () => { dbPromise = null; reject(req.error ?? new Error('indexedDB open failed')); };
+        req.onerror = () => reject(req.error ?? new Error('indexedDB open failed'));
       });
+      // Don't cache the failure: a later call may run where IDB exists. Written
+      // here, not in the executor, which runs before the assignment above lands.
+      dbPromise.catch(() => { dbPromise = null; });
     }
     return dbPromise;
   }

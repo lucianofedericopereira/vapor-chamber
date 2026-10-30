@@ -1,4 +1,9 @@
-// A handler a transport would shadow is refused at register(): it would never run. Rationale at the end.
+/**
+ * A handler a transport would shadow is refused at register() with `core:invalid:handler`.
+ * Why: a handler for an action a transport sends would never run, so it is refused in every build at the line that registers; it stays allowed where it can run (`optimistic`, or a transport with `localFallback`).
+ * Shows: http, ws, outbox-wrapped and test-bus transports refuse a handler while an uncovered action registers and runs; `null` declares a sent action's options (answer, undo, store reducer) and is refused where no transport sends; production messages state the fact; a store function reducer for a sent action is refused naming the action.
+ * See: log s35.41, log s35.75, log s36.F25
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type CommandResult } from '../src/command-bus';
 import { createOutbox } from '../src/outbox';
@@ -195,16 +200,3 @@ describe('a store behind a transport', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Decision 9 of the 1.26 list (log s35.41, s35.75) pinned a transport
- * shadowing a local handler as expected-to-fail, to be refused at seal().
- * In 1.32 the transport is declared at the bus's creation, so register()
- * knows which transport covers the action, and seal() is optional. A handler
- * is work: where it can never run it is refused, in every build, as an
- * `optimistic` without an `undo` is. It can run with `optimistic` (the change
- * shown) or under a transport that declares `localFallback` (its send calls
- * `local()`). `null` declares a sent action's options (answer, exclusive,
- * undo, cache groups) with no handler, and a store's `null` reducer is that.
- * The refusal is at the line that registered, not at seal().
- */

@@ -1,13 +1,8 @@
 /**
- * Overlapping queries through one composable.
- *
- * `loading` was one boolean written per dispatch, so the first query to
- * settle cleared it while another still ran; and useCommandQuery's `data` took
- * every answer in the order they landed, so an older query answering last
- * overwrote the latest (search-as-you-type showed "ab" results under "abc").
- * Now `loading` holds while any query is in flight and `data` is the latest
- * query's answer. A command's busy state is the bus's `pending` per key
- * (tests/usecommand-pending.test.ts), so only the query composable counts.
+ * Overlapping queries through one useCommandQuery: `loading` and `data` while several are in flight.
+ * Why: the first query to settle must not clear loading while another runs, and an older answer landing last must not overwrite the latest.
+ * Shows: loading holds until the last query settles; data is the latest query's answer; a failure keeps loading and hands no data on; a nested sync query too.
+ * See: tests/usecommand-pending.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';

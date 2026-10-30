@@ -136,9 +136,12 @@ A rule added after rule 18 takes the next number, so a cited number never moves.
       `tests/ab-tool.test.ts`, each seeded red).
     - The arms come from `npm run ab:dists`, and the workloads live in `scripts/ab/workloads/`.
     - CI runs it on every push to main and every pull request against it, base against head
-      (`perf-ab`, `npm run ab:ci`). With no base commit to build, it skips with a notice.
-    - A counted "slower" fails the build, and so does a run in which no control passed.
-17. **Measure a session, not a moment, on a shared Mac.** `npm run ab:session` demotes the user's
+      (`perf-ab`, `npm run ab:ci`). With no base commit to build, or no source change since it, it
+      skips with a notice.
+    - A counted "slower" fails the job, and so does a run in which no control passed. The job is
+      advisory (`continue-on-error`), so the run stays green and the report is attached.
+17. **Measure on the machine as it is; demote only when asked.** Plain `npm run ab` is the default
+    (TESTING_PROCEDURE step 7). `npm run ab:session`, only when asked, demotes the user's
     other busy processes to background QoS for the session (`taskpolicy -b -p`, undone with
     `-B`). That keeps them on the efficiency cores while their work goes on. It never demotes the
     measuring shell's ancestry, whose children would inherit it. Keep the machine awake

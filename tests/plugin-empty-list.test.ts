@@ -1,4 +1,9 @@
-/** An ActionScope filter: absent or [] is every action, read by the bus alone (log s35.148). */
+/**
+ * An ActionScope filter: absent, `[]` or `null` is every action, and the bus alone reads it.
+ * Why: if `[]` meant no action, a plugin given an empty list would silently do nothing, and if a plugin read its own scope the filters could disagree.
+ * Shows: cache and rateLimit with `actions: []` act on every action; metrics declares the scope it was given; a plain-JS plugin declaring `actions: null` runs on every action; among src files only command-bus.ts reads a plugin's `actions`.
+ * See: log s35.148, s35.146
+ */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -54,27 +59,7 @@ describe('one reader of an ActionScope', () => {
       }
     };
     walk(root);
-    // command-bus.ts is the reader (perAction); it also matches on a doc
-    // example of inspectBus().actions, the registered names.
+    // command-bus.ts reads it in `_scoped`; it also matches a doc example of inspectBus().actions, the registered names.
     expect(readers.sort()).toEqual(['command-bus.ts']);
   });
 });
-
-/*
- * An ActionScope is a plugin's action FILTER: the `actions` option of
- *   cache, circuitBreaker, rateLimit, metrics, idempotent,
- *   supersede and the outbox, and the `actions`
- *   a plugin declares to the bus. Absent or `[]` is every action ("Default:
- *   all", 1.25 and 1.26). The bus reads it, alone. The required lists of the
- * debounce and throttle plugins (an ActionList, where `[]` was none) left with
- * the plugins: pacing is the sender's (`pace`, step 6a).
- *
- * createMcpHandler's `actions` was a third meaning, an allowlist where `[]`
- * exposed none: s35.180 removed it, and `actionFilter` is its one selection
- * (tests/mcp-allowlist.test.ts).
- *
- * Log s35.146 first made `[]` none everywhere; that removed the filters'
- * behaviour instead of fixing the three plugins, and s35.148 restores it
- * (owner: stop killing features). The guard test fails if a plugin reads its
- * own scope again; seeded with a failure when it was written (s35.146).
- */

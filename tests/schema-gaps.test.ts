@@ -1,16 +1,7 @@
 /**
- * Supplemental coverage for src/schema.ts.
- *
- * `defineSchema` is the headline: an exported public API with no test calling
- * it at all - the identity helper every typed-bus consumer starts from.
- *
- * Also here:
- *  - toProps' absent-FieldMap guard - an action with only a target, or
- *    only a payload.
- *  - schemaLogger's validated-payload arm and its result line.
- *  - synthesize with a tool_use block carrying no `input`.
- *  - describeSchema for a bare action (no target/payload/description) and for
- *    a fully-specified one.
+ * The schema helpers in src/schema.ts: defineSchema, partial-action tool mapping, schemaLogger, synthesize and describeSchema.
+ * Why: these feed a typed bus, the tool lists a model reads and the logs a developer reads, so a copied schema, a wrong tool shape or a mislabelled log line would mislead them. Also the only file reaching defineSchema and the partial-action arms of the tool mapping and describeSchema, so the 100% floor needs it.
+ * Shows: defineSchema returns its argument by identity; an action with only a target or only a payload maps to the matching Anthropic tool shape; schemaLogger marks a valid payload, flags an invalid one and logs a handler error; synthesize defaults a missing input to an empty target and requires an adapter; describeSchema renders bare, full and payload-only actions.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
@@ -23,11 +14,6 @@ import {
 } from '../src/schema';
 import type { BusSchema } from '../src/schema';
 
-
-// ---------------------------------------------------------------------------
-// defineSchema
-// ---------------------------------------------------------------------------
-
 describe('defineSchema', () => {
   it('returns the schema object it was given, by identity', () => {
     const schema = {
@@ -35,7 +21,7 @@ describe('defineSchema', () => {
     } as const;
 
     const defined = defineSchema(schema);
-    expect(defined).toBe(schema); // identity helper - no copying, no mutation
+    expect(defined).toBe(schema);
   });
 
   it('feeds the rest of the schema surface unchanged', () => {
@@ -44,10 +30,6 @@ describe('defineSchema', () => {
     expect(describeSchema(schema as unknown as BusSchema)).toContain('ping');
   });
 });
-
-// ---------------------------------------------------------------------------
-// toProps - absent FieldMap
-// ---------------------------------------------------------------------------
 
 describe('tool mapping with a partial action', () => {
   it('gives an empty properties object for an action with no target', () => {
@@ -67,10 +49,6 @@ describe('tool mapping with a partial action', () => {
     expect(tool!.input_schema.properties.target!.properties.id).toEqual({ type: 'number' });
   });
 });
-
-// ---------------------------------------------------------------------------
-// schemaLogger
-// ---------------------------------------------------------------------------
 
 describe('schemaLogger', () => {
   it('validates and logs a schema-declared payload, then the result', () => {
@@ -97,7 +75,7 @@ describe('schemaLogger', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const schema = { cartAdd: { target: { id: 'number' }, payload: { qty: 'number' } } } as unknown as BusSchema;
-    // Validator off - the logger is what reports here, so the dispatch lands.
+    // Validator off, so the dispatch lands and only the logger reports.
     const bus = createSchemaCommandBus(schema as any, { validate: false } as any);
     bus.use(schemaLogger(schema));
     bus.register('cartAdd', () => 'added');
@@ -126,10 +104,6 @@ describe('schemaLogger', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// synthesize - tool_use with no input
-// ---------------------------------------------------------------------------
-
 describe('synthesize', () => {
   const schema = { cartAdd: { target: { id: 'number' }, payload: { qty: 'number' } } } as unknown as BusSchema;
 
@@ -157,10 +131,6 @@ describe('synthesize', () => {
     expect(result.error?.message).toContain('adapter is required');
   });
 });
-
-// ---------------------------------------------------------------------------
-// describeSchema
-// ---------------------------------------------------------------------------
 
 describe('describeSchema', () => {
   it('omits the signature and description for a bare action', () => {

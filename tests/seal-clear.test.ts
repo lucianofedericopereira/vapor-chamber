@@ -1,17 +1,8 @@
 /**
- * seal() is a commit: a sealed bus refuses clear().
- *
- * seal() exists for the command LEDGER - dispatch is the "do", the undo
- * handler the rollback - and for SECURITY: authGuard and every other plugin
- * stay in place. A clear() that succeeded on a sealed bus would delete the undo
- * handlers and every plugin with nothing able to put them back, and
- * history().undo() would find no inverse and fall back to a data-only pop:
- * the ledger would record a rollback that never ran.
- *
- * dispose() is teardown, not reconfiguration: it still works on a sealed bus
- * and leaves it sealed. The TestBus behaves the same way (a double that
- * unsealed would pass a test the real bus fails), and unsealBus() reopens it,
- * as it reopens a real bus.
+ * A sealed bus refuses clear(); dispose() still tears it down and leaves it sealed; unsealBus() reopens it.
+ * Why: a clear() that succeeded on a sealed bus would delete the undo handlers and every plugin (authGuard included), and history().undo() would then record a rollback that never ran.
+ * Shows: clear() throws core:refused:bus and keeps handlers, undo handlers and plugins; undo() still runs the inverse after a refused clear(); the TestBus behaves the same way.
+ * See: src/command-bus.ts
  */
 import { describe, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, unsealBus, inspectBus, type BusError } from '../src/command-bus';
@@ -72,7 +63,7 @@ describe('the ledger case: a stray clear() cannot turn a rollback into a no-op',
     expect(balance).toBe(10);
     expect(thrownCode(() => bus.clear())).toBe('core:refused:bus');
     h.undo();
-    expect(balance).toBe(0); // the rollback ran
+    expect(balance).toBe(0);
   });
 });
 

@@ -1,5 +1,13 @@
 // @vitest-environment happy-dom
-// A page's loader runs once while its code is loading, whoever asked for it first. The long note is at the end.
+/**
+ * A lazy page's component loader runs once while a load is in flight, whoever asked first (hover, idle, click, push).
+ * Why: a second caller during a load would call the app's loader again, and a failed shared load would report the
+ * warm-up's target (the page on screen) instead of the caller's own, or stay cached and block a retry.
+ * Shows: the loader is called once for a click during a hover or idle warm-up and for two navigations; a failed load joined
+ * by a click reports router:failed:component with the click's /list in context.to; after a failed warm-up the next
+ * navigation calls the loader again.
+ * See: log s36.19
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { stubGlobal } from '../../src/vitest-pure';
@@ -134,8 +142,8 @@ describe('what a shared load keeps', () => {
       await router.isReady();
       const a = link();
       hover(a);
-      await sleep(150);
-      expect(loader).toHaveBeenCalledTimes(1); // the warm-up started the load, so the click joins it
+      await sleep(150); // past the hover delay: the warm-up, not the click, starts the load
+      expect(loader).toHaveBeenCalledTimes(1);
       click(a);
       await sleep(10);
       reject(new Error('Failed to fetch dynamically imported module'));
@@ -168,20 +176,3 @@ describe('what a shared load keeps', () => {
     }
   });
 });
-
-// The note.
-//
-// Log 36.19 item 1. A lazy component was cached only once its load resolved,
-// and nothing recorded a load in flight. So a second caller while the first
-// load ran called the app's loader again: a click during a hover or idle
-// warm-up, or two navigations to the page. Now the promise the app's loader
-// returned is shared, by component key, until it settles.
-//
-// Red before: the first four tests, each read 2 loader calls for 1.
-// Pins, green before and after. A failed shared load reports each caller's own
-// target in `context.to`: sharing loadComponent's own promise instead would
-// report the warm-up's target, the page on screen. That shape was seeded once
-// and turned the first pin red. The pin waits past the hover delay and checks
-// the warm-up started the load: a click inside the delay creates the load
-// itself, and then every shape answers its own page. A failed load leaves the
-// map, so the next navigation calls the loader again.

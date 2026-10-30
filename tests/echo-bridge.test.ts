@@ -1,7 +1,7 @@
 /**
- * Tests for createEchoBridge - Laravel Echo / Reverb realtime -> bus. Uses a
- * mock Echo that mirrors the laravel-echo API (channel/private/join + listen +
- * here/joining/leaving + leave), so no laravel-echo dependency is needed.
+ * createEchoBridge: Laravel Echo / Reverb broadcasts onto the bus, against a mock of the laravel-echo API, so no dependency is needed.
+ * Why: a broadcast must reach the app as a bus event on the right channel kind, and a throwing listener must not escape into Echo.
+ * Shows: public, private and presence channels emit; onBroadcast can dispatch instead; a listener error is caught; teardown leaves every channel.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';

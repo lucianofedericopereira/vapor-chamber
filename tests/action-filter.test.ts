@@ -1,4 +1,9 @@
-/** `createActionFilter`: CloudEvents Subscriptions API 3.2.4 filter expressions over a command's action, and `actionFilter`. Log s35.152. */
+/**
+ * `createActionFilter`: CloudEvents Subscriptions API 3.2.4 filter expressions over a command's action, and `actionFilter`.
+ * Why: plugins and the MCP handler select commands by one standard filter; a malformed one must fail when created, not match silently.
+ * Shows: the six dialects as the spec defines them, every MUST-reject case refused, plugins and MCP honour it, asked once per action.
+ * See: log s35.152, log s35.172.
+ */
 import { describe, expect, it } from 'vitest';
 import { createActionFilter, type ActionFilterExpression } from '../src/action-filter';
 import { BusError, createCommandBus } from '../src/command-bus';
@@ -112,6 +117,6 @@ describe('createMcpHandler({ actionFilter })', () => {
     expect(await names({ actionFilter: reads })).toEqual(['cartGet', 'userGet']);
     const handle = createMcpHandler(createSchemaCommandBus(schema), { actionFilter: reads });
     const reply = (await handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cartAdd' } })) as { error?: { code: number } };
-    expect(reply.error?.code).toBe(-32602); // not listed: a protocol error (s35.172)
+    expect(reply.error?.code).toBe(-32602); // not listed: a protocol error
   });
 });

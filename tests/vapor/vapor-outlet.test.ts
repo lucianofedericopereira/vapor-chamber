@@ -1,24 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `vapor-chamber/router/vapor`'s outlet, mounted on a real
- * `createVaporApp` with NO `vaporInteropPlugin` installed.
- *
- * Every behaviour is asserted twice, against the SAME assertion function: once
- * in-process under vitest, and once against an esbuild bundle built with
- * production defines and executed. A dev-only pass has not tested the premise
- * - the slot-fallback path was prod-only broken upstream until `2473b78`, and
- * this repo's own bug history is dev-correct/prod-broken twice over.
- *
- * WHICH `vue` EACH ARM RESOLVES, since the answer differs per arm and the
- * feasibility claim turns on it:
- *   - in-process: `vitest.vapor.config.ts` aliases bare `vue` to
- *     `vue/dist/vue.runtime-with-vapor.esm-browser.js`, a DEV build. Asserted
- *     below rather than assumed.
- *   - the production arm: esbuild with `platform: 'browser'` resolves bare
- *     `vue` through the package exports map to `vue.runtime.esm-bundler.js`,
- *     whose `export * from "@vue/runtime-vapor"` is what makes the outlet's
- *     static helper imports resolve at all. Under raw Node ESM they would not.
- * Both are real consumer configurations; neither alone tests the premise.
+ * The Vapor RouterOutlet (`vapor-chamber/router/vapor`) on a real `createVaporApp` with no `vaporInteropPlugin`, in dev and in a production build.
+ * Why: the outlet must behave the same in a production build as in dev, or consumers see output that only breaks after `vite build`.
+ * Shows: one assertion function (depth, empty branch, slot fallback, instance reuse, dropped attrs, mode guard, live and late default slots) passes in-process against the with-vapor dev dist and against an executed esbuild production bundle.
+ * See: tests/vapor/vapor-outlet-fixture.ts
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -38,11 +23,7 @@ try {
   esbuild = null;
 }
 
-/**
- * Production defines, as a real Vite production build sets them: NODE_ENV plus
- * Vue's three feature flags. Shared by every arm, so no arm can be measured
- * under different dead-code elimination than another.
- */
+// Production defines as a Vite production build sets them: NODE_ENV plus Vue's three feature flags.
 const PROD_DEFINE = {
   'process.env.NODE_ENV': '"production"',
   __VUE_OPTIONS_API__: 'false',
@@ -50,74 +31,46 @@ const PROD_DEFINE = {
   __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
 };
 
-/**
- * The whole behavioural contract, applied identically to the dev and
- * production arms.
- */
+// The whole behavioural contract, applied identically to the dev and production arms.
 function assertBehaviours(o: OutletObservations) {
-  // (a) nested depth through the OUTLET_DEPTH_KEY ladder. A failed depth read
-  // renders the layout again at depth 1, so the occurrence counts are the
-  // discriminator, not the visible text.
+  // Nested depth: a failed depth read renders the layout again at depth 1, so occurrence counts discriminate, not the text.
   expect(o.depth.layoutOccurrences).toBe(1);
   expect(o.depth.userOccurrences).toBe(1);
   expect(o.depth.text).toBe('user');
 
-  // (b) a null entry is a true empty branch: no element, no text, and the only
-  // node left is the outlet's own fragment anchor. Asserted on node KIND and
-  // never on markup - the anchor is a labelled comment in dev and an empty
-  // text node under production defines, so any innerHTML assertion here would
-  // be dev/prod divergent by construction.
+  // A null entry is a true empty branch. Asserted on node kind, not markup: the anchor is a comment in dev and an empty text node in production.
   expect(o.nullBranch.elementCount).toBe(0);
   expect(o.nullBranch.text).toBe('');
   expect(o.nullBranch.residual).toHaveLength(1);
   expect(o.nullBranch.residual[0]).toMatch(/^anchor:/);
 
-  // (c) default-slot fallback at a depth with no entry. The slot branch exists
-  // only when a slot was passed; the no-slot case above must stay a literal
-  // null, which is why (b) and (c) are separate scenarios.
+  // Default-slot fallback at a depth with no entry; the no-slot case above must stay a literal null.
   expect(o.fallback.text).toBe('no child route');
   expect(o.fallback.elementCount).toBe(1);
 
-  // (d) the reuse contract, the one place a perf regression could hide from
-  // every size measurement. Keyless on purpose: the branch swaps on resolved
-  // COMPONENT identity, so param-only and query-only navigations keep the
-  // instance and a record change replaces it.
+  // Reuse is keyless: the branch swaps on resolved component identity, so param-only and query-only navigations keep the instance and a record change replaces it.
   expect(o.reuse.setupsAfterFirstUser).toBe(1);
   expect(o.reuse.setupsAfterParamSwap).toBe(1);
   expect(o.reuse.sameElementAcrossParamSwap).toBe(true);
   expect(o.reuse.setupsAfterQuerySwap).toBe(1);
   expect(o.reuse.textAfterRecordSwap).toBe('about');
   expect(o.reuse.setupsAfterReturningToUser).toBe(2);
-  // Two DIFFERENT records resolving to the SAME component reuse, by design.
-  // "record identity implies reuse" is shorthand for the vDOM outlet too,
-  // which reuses on vnode type; this pins that the shorthand is not the
-  // mechanism, so neither outlet may quietly start keying on the record.
+  // Two different records resolving to the same component reuse the instance: the outlet must not key on the record.
   expect(o.reuse.setupsAcrossTwinRecords).toBe(2);
   expect(o.reuse.sameElementAcrossTwinRecords).toBe(true);
 
-  // (e) attrs placed on the outlet. PINNED, NOT DESIGNED, and the distinction
-  // matters: neither outlet ever documented a fallthrough contract, and rc.5
-  // reworked fallthrough resolution three ways in a single cycle (`293ca1c`,
-  // `be7157e`, `10f666e`). Measured today, identically on both arms: an attr
-  // put on the outlet is DROPPED - it does not reach the route component's
-  // root - while the route component itself still renders normally. That is
-  // recorded here so the next upstream rework fails loudly instead of
-  // silently changing what consumers get. If this breaks, decide the contract
-  // deliberately; do not just update the expectation to match.
+  // Pinned, not designed: no fallthrough contract is documented. An attr put on the outlet is dropped on both arms while the route component renders normally.
+  // If this breaks, decide the contract deliberately instead of updating the expectation.
   expect(o.attrs.markedTag).toBeNull();
   expect(o.attrs.outletChildTag).toBe('SPAN');
 
-  // (f) the mode guard, both causes. Asserted on `code` and never on message
-  // text, per the router's error convention.
+  // The mode guard, both causes; asserted on `code`, never on message text.
   expect(o.guard.vdom.name).toBe('BusError');
   expect(o.guard.vdom.code).toBe('router:invalid:component');
   expect(o.guard.blade.name).toBe('BusError');
   expect(o.guard.blade.code).toBe('router:invalid:component');
 
-  // (g) a reactive default slot stays reactive across a child route. It was
-  // built once in setup and handed back after Vue had removed it, and removing
-  // a fragment stops its scope: the slot came back as its last DOM, with the
-  // value it had when it left and no effect behind it.
+  // A reactive default slot stays reactive across a child route: removing a fragment stops its scope, so the slot must be rebuilt on return.
   expect(o.liveSlot.beforeChild).toBe('on');
   expect(o.liveSlot.flippedBeforeChild).toBe('off');
   expect(o.liveSlot.whileChild).toBe('about');
@@ -126,10 +79,7 @@ function assertBehaviours(o: OutletObservations) {
   expect(o.liveSlot.afterSecondRoundTrip).toBe('on');
   expect(o.liveSlot.slotElements).toBe(1);
 
-  // (h) a conditional default slot that is off when the outlet is created
-  // shows once its condition turns on. The outlet used to read `slots.default`
-  // once, in setup, and a conditional slot is a dynamic source: undefined
-  // while off, so the outlet took the no-slot path for its whole life.
+  // A conditional default slot that is off at creation is a dynamic source (`slots.default` undefined); it must show once its condition turns on.
   expect(o.lateSlot.offAtMount).toEqual({ text: '', elements: 0 });
   expect(o.lateSlot.turnedOn).toBe('late fallback');
   expect(o.lateSlot.whileChild).toBe('about');
@@ -137,17 +87,8 @@ function assertBehaviours(o: OutletObservations) {
   expect(o.lateSlot.turnedOnAgain).toBe('late fallback');
 }
 
-/**
- * Bundles the scenarios under production defines and runs them, so the
- * assertions see prod dead-code elimination and the prod `vue` rather than the
- * dev dist the vitest alias supplies.
- *
- * CJS + `createRequire`, not `import()`: the bundle lands outside the project
- * root, where vitest's module runner refuses to resolve a file URL. Node's own
- * loader has no such boundary, and the bundle is self-contained (`vue` is
- * bundled into it), so nothing crosses back into the runner's graph. The DOM
- * it renders into is the happy-dom one on `globalThis`, shared with the tests.
- */
+// Bundles the scenarios under production defines, so the assertions see the production `vue`, not the dev dist the vitest alias supplies.
+// CJS + `createRequire`, not `import()`: the bundle lands outside the project root, where vitest's module runner refuses a file URL.
 async function runUnderProductionBuild(): Promise<OutletObservations> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-outlet-prod-'));
   const out = join(dir, 'outlet.prod.cjs');
@@ -174,8 +115,6 @@ async function runUnderProductionBuild(): Promise<OutletObservations> {
 
 describe('Vapor outlet', () => {
   it('the in-process arm runs on a with-vapor build (guards the harness itself)', () => {
-    // Without the alias these would be undefined and every assertion below
-    // would be measuring the harness rather than the outlet.
     expect(typeof createVaporApp).toBe('function');
     expect(typeof defineVaporComponent).toBe('function');
   });

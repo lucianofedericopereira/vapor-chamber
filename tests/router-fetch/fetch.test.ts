@@ -1,3 +1,8 @@
+/**
+ * fetchLoaders, the in-box router loader preset built on the HttpClient: interpolation, errors, retry, cache and stale-while-revalidate.
+ * Why: a loader that bypassed the HttpClient would lose its retry, timeout and cache handling, and a failed or stale read would commit wrong data to the route.
+ * Shows: bare JSON lands in route data; a non-2xx push returns router:failed:loader and stays on the old route; a 503 is retried once; cache is off by default, serves fresh hits, and meta.cache overrides the preset; a stale hit commits at once with isRevalidating true and the refresh patches the snapshot; navigating away leaves the router on home with isRevalidating false.
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../../src/index';
 import { createMemoryHistory, createRouter, isRouterError } from '@router/index';
@@ -57,9 +62,7 @@ describe('fetchLoaders', () => {
       history: createMemoryHistory(),
       routes: ROWS,
       components: { Home: { name: 'Home' }, Items: { name: 'Items' } },
-      // retry: 0 keeps this deterministic and fast - the default client
-      // (createHttpClient()'s own retry: 2 for GET) behaves the same, just
-      // after its own backoff delays, which real consumers get for free.
+      // retry: false keeps this deterministic and fast.
       loaders: fetchLoaders({ http: createHttpClient({ retry: false }) }),
       onError: () => {},
     });
@@ -95,11 +98,6 @@ describe('fetchLoaders', () => {
     vi.useRealTimers();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Loader caching (item 2) - the http client's cache engine sits directly
-// underneath every loader read; before this it was unreachable from here.
-// ---------------------------------------------------------------------------
 
 describe('fetchLoaders - cache', () => {
   const CACHE_ROWS = [
@@ -184,12 +182,6 @@ describe('fetchLoaders - cache', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Stale-while-revalidate (item 2a) - the third lane. A stale hit commits
-// instantly; the refresh behind it has to reach the snapshot, and has to be
-// distinguishable from "loading".
-// ---------------------------------------------------------------------------
-
 describe('fetchLoaders - stale-while-revalidate', () => {
   const SWR_ROWS = [
     { name: 'home', path: '/', component: 'Home' },
@@ -198,9 +190,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
   const COMPONENTS = { Home: { name: 'Home' }, Items: { name: 'Items' } };
 
   it('commits stale data, then patches the fresh value into the snapshot', async () => {
-    // The revalidation response is held open so the stale-commit moment is
-    // observable - with an instantly-resolving mock the refresh lands before
-    // the push() await returns and there is nothing to assert about.
+    // The refresh response is held open so the stale-commit moment is observable.
     let calls = 0;
     let releaseRefresh: (() => void) | null = null as (() => void) | null;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -215,7 +205,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
       history: createMemoryHistory(),
       routes: SWR_ROWS,
       components: COMPONENTS,
-      // ttl 0 -> the entry is past-fresh immediately, staleTtl keeps it servable.
+      // ttl 0: past-fresh at once; staleTtl keeps the entry servable.
       loaders: fetchLoaders({
         cache: { ttl: 0, staleTtl: 60_000 },
         http: createHttpClient({ retry: false }),
@@ -234,7 +224,6 @@ describe('fetchLoaders - stale-while-revalidate', () => {
 
     releaseRefresh?.();
     await vi.waitFor(() => expect(router.isRevalidating.value).toBe(false));
-    // The background response reached the page, not just the HTTP cache.
     expect(router.currentRoute.value.data.get('items')).toEqual({ version: 2 });
   });
 

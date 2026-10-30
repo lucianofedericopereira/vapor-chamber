@@ -1,4 +1,9 @@
-/** createReaction: maxHops counts across every reaction on a bus, so an indirect cycle stops (log s35.171). Rationale at the end. */
+/**
+ * createReaction: maxHops counts across every reaction on a bus, so an indirect cycle (A->B, B->A) stops.
+ * Why: no install-time check sees an indirect cycle, so with per-reaction counts it would run to the dispatch depth bound (16) instead of maxHops.
+ * Shows: a two-reaction cycle runs maxHops + 1 times on a sync and an async bus; a self loop, unrelated chains and separate buses keep their own counts; a self loop with a huge maxHops stops at depth 16 on both buses.
+ * See: log s35.171
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createReaction } from '../src/utilities';
@@ -81,6 +86,7 @@ describe('controls', () => {
     bus.register('cartRecalculate', async () => { runs++; });
     createReaction('cart*', 'cartRecalculate', { allowSelfMatch: true, maxHops: 100_000 }).install(bus);
     await bus.dispatch('cartRecalculate', {});
+    // The listener re-dispatches synchronously, so MAX_DISPATCH_DEPTH bounds it; one that re-dispatches after an await would escape.
     await tick(100);
     const settled = runs;
     await tick(100);
@@ -100,19 +106,3 @@ describe('controls', () => {
     vi.restoreAllMocks();
   });
 });
-
-/*
- * `maxHops` "Catches INDIRECT cycles (A->B, B->A), which no install-time check
- * can see". Each reaction kept its own hop map, so reaction B->A never found
- * the id reaction A->B recorded, every hop read 1, and a two-reaction cycle
- * ran to the dispatch depth bound (16) instead of maxHops (audit B3, probe
- * p-reaction). Now every reaction installed on a bus shares one hop map (a
- * WeakMap keyed by the bus, read at install). Its cap and eviction are
- * unchanged.
- *
- * D12: the docs said an async self loop is unbounded. A reaction re-dispatches
- * synchronously from its listener, and the async fan-out runs at the
- * dispatch's depth, so MAX_DISPATCH_DEPTH stops it at 16 on both buses (probe
- * p-loop-hook). Only a listener that re-dispatches after an await escapes the
- * depth bound (p-loop-ctl); maxHops does not see that either. Log s35.171.
- */

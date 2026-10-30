@@ -1,22 +1,8 @@
 /**
- * V8 alignment: every CommandResult the library hands back shares ONE hidden
- * class - `okResult`/`errResult`'s `{ ok, value, error }`.
- *
- * while ~30 sites outside the bus
- * built their own literal: `{ ok: false, error }` (two fields),
- * `{ ok: true, value }` (two fields), and `{ ok: false, error, value }` (three
- * fields, another order). Each is a different map, so a `result.ok` site that
- * saw a validator rejection, an HTTP bridge result and a plain dispatch was
- * polymorphic. Measured with %HaveSameMap before the fix: validator, authGuard,
- * the debounce plugin (now `pace`) and async optimisticUndo (now the optimistic option) results all differed from the bus's own.
- *
- * The check is the engine's own, not a proxy: `sameMap` (tests/v8.ts) is
- * V8's `%HaveSameMap`. A key-order comparison would pass for maps V8 still
- * keeps apart.
- *
- * The last test pins the sync COMMAND's map the same way: dispatch, query
- * and request build one map, and the `signal` option request() takes settles
- * the request without becoming a field on it.
+ * Every CommandResult, Command, meta, hook entry and transport object the library builds shares one hidden class per kind, checked with V8's own %HaveSameMap.
+ * Why: a read-many object built from literals with another field count or order is another map, so a site that reads results from a validator, an HTTP bridge and a plain dispatch would turn polymorphic.
+ * Shows: the bus's own results, plugin-built results (validator, authGuard, pace, optimistic), schema rejections and HTTP bridge results share one map; commands from both buses and every entry point share one map; a meta keeps its map when an idempotency key, a bridge response or a plugin request is added; a command from another tab keeps its map; src builds no CommandResult literal outside okResult and errResult; hook state, hook entries and transports share their maps; each control tells another shape apart.
+ * See: docs/V8-RULES.md, tests/v8.ts, log s36.F56, log s36.F30, log s35.209
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -108,10 +94,7 @@ describe('CommandResult hidden class', () => {
   });
 
   it('every command shares one map: both buses, dispatch, query, batch, request, a replay and the test bus', async ({ bus }) => {
-    // Every literal carries `signal`, `undefined` where nothing sets it, so a
-    // site that reads commands from both buses stays monomorphic (log 36.F56).
-    // On the sync bus a request()'s own signal still settles the request's
-    // promise and never reaches the command.
+    // Every command literal carries `signal`, undefined when unset; request()'s own signal settles its promise and never reaches the command.
     const seen: object[] = [];
     bus.register('t', (cmd) => { seen.push(cmd); return 1; });
     bus.respond('q', (cmd) => { seen.push(cmd); return 1; });
@@ -141,9 +124,7 @@ describe('CommandResult hidden class', () => {
   });
 
   it('a command\'s meta keeps one map when an idempotency key is stamped later', async () => {
-    // stampMeta's literal holds `idempotencyKey` from the start, so the
-    // plugins that stamp it (idempotent, the outbox, the retry) fill a slot
-    // instead of adding a property (a hidden-class transition, V8 rule 2).
+    // stampMeta's literal holds `idempotencyKey` from the start, so stamping it later fills a slot instead of adding a property (V8 rule 2).
     const seen: object[] = [];
     const plain = createAsyncCommandBus();
     plain.register('t', async (cmd) => { seen.push(cmd.meta!); return 1; });
@@ -215,12 +196,7 @@ describe('CommandResult hidden class', () => {
   });
 
   it('src/ builds no CommandResult literal of its own', () => {
-    // The discipline the maps above depend on: results come from
-    // okResult/errResult (`_okResult`/`_errResult` outside command-bus.ts).
-    // Batch and workflow results are other types (they carry `results`), and
-    // testing.ts is the test double, excluded from the shipped surface.
-    // EMIT_RESULT is exempt: it is frozen, and a frozen object has its own
-    // map whatever its keys - one shared singleton, documented at its site.
+    // Results come from okResult/errResult (`_okResult`/`_errResult` outside command-bus.ts); excluded: batch and workflow results (they carry `results`), the testing.ts double, and the frozen EMIT_RESULT singleton (a frozen object has its own map).
     const root = resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string): void => {
@@ -240,8 +216,7 @@ describe('CommandResult hidden class', () => {
           offenders.push(`${f.slice(root.length + 1)}:${i + 1}: ${line.trim()}`);
         }
       });
-      // The same literal split over lines (`{` then `ok: false,` below it),
-      // which the line scan above cannot see: three sites hid there.
+      // The same literal split over lines (`{` then `ok: false,` below it), which the line scan cannot see.
       for (const m of text.matchAll(/\{[ \t]*\n[ \t]*ok:[ \t]*(true|false)[ \t]*,/g)) {
         const line = text.slice(0, m.index).split('\n').length;
         offenders.push(`${f.slice(root.length + 1)}:${line}: (a literal over several lines)`);
@@ -251,8 +226,7 @@ describe('CommandResult hidden class', () => {
   });
 });
 
-// The bus state and its hook entries (log s35.209): a removal assigns a new
-// array to the state, and every hook entry is built by one literal.
+// A removal assigns a new array to the bus state, and every hook entry is built by one literal.
 describe('hook lists', () => {
   const stateOf = (bus: object): Record<string, unknown> => {
     const key = Object.getOwnPropertySymbols(bus).find((s) => s.description === 'vapor-chamber:inspect')!;

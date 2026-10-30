@@ -1,16 +1,14 @@
 /**
- * Standard Schema validator plugin - works with any schema lib that
- * implements [Standard Schema v1](https://standardschema.dev/) - Zod,
- * Valibot, ArkType, Effect Schema. We test with hand-rolled fakes so the
- * lib stays schema-lib-agnostic and the test doesn't depend on any of
- * those packages being installed.
+ * validateSchemas and validateSchemasAsync: the Standard Schema v1 validator plugins, tested with hand-rolled fakes.
+ * Why: an invalid target or payload must be refused as `validateSchemas:invalid:payload` before the handler runs, and the handler must always get the command as dispatched, never a schema's coerced output; the fakes keep the library independent of any schema package.
+ * Shows: reject mode refuses and warn mode logs once and lets the dispatch through, actions without a schema pass, `field` selects payload or a custom slice, an async schema on the sync plugin is refused with an "async schema" message, the async plugin awaits schemas, and neither mode passes the schema output to the handler.
+ * See: https://standardschema.dev/.
  */
 import { describe, expect } from 'vitest';
 import { BusError } from '../src/command-bus';
 import { validateSchemas, validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
 
-// Minimal Standard-Schema-shaped fake. Real schemas (Zod, Valibot, ...)
-// expose the same `'~standard'` interop surface.
+// Minimal fakes exposing the `'~standard'` interop surface real schemas expose.
 function fakeSync<T>(predicate: (v: unknown) => v is T, message: string): StandardSchemaV1<T> {
   return {
     '~standard': {
@@ -143,6 +141,5 @@ describe('validateSchemasAsync - async bus', () => {
   });
 });
 
-// Pull vi for the warn spy
 import { vi } from 'vitest';
 import { it } from '../src/vitest';

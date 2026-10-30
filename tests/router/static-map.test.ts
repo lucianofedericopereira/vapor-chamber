@@ -1,3 +1,8 @@
+/**
+ * The route table's static-path fast path resolves the same row the linear scan would, and a timing run reports its cost.
+ * Why: if a static row jumped ahead of an earlier parameterised row, or the map changed the scan's rules, a URL would open a different route than the server's priority gives.
+ * Shows: an earlier `:id` row wins over a later static row, a static row wins when first; matching is case-insensitive with an optional trailing slash, and groups never match; a static hit carries empty params. The opt-in timing test also asserts the rows it measures resolve correctly.
+ */
 import { describe, expect, it } from 'vitest';
 import { createRouteTable } from '@router/table';
 import type { RouteRecord } from '@router/types';
@@ -10,7 +15,7 @@ describe('static fast path - correctness', () => {
       { name: 'product', path: '/products/:id', parent: 'shell', component: 'P' },
       { name: 'new', path: '/products/new', parent: 'shell', component: 'N' }, // later, shadowed
     ]);
-    // server priority says :id wins - the map must not change that
+    // Server priority: the earlier :id row wins.
     expect(table.resolve('/products/new')?.record.name).toBe('product');
     expect(table.resolve('/products/new')?.record.paramTypes).toEqual({});
     expect(table.resolve('/products/7')?.record.name).toBe('product');
@@ -44,19 +49,7 @@ describe('static fast path - correctness', () => {
 });
 
 describe('static fast path - cost', () => {
-  // No assertion here beyond `expect(true)` - this only logs numbers for a
-  // human to read. It runs 200 table builds plus 80,000 resolves (many
-  // against the param/miss linear-scan fallback, ~300 regex tests each), so
-  // it can clear vitest's default 5000ms budget on slower or shared CI
-  // hardware without anything actually being wrong.
-  //
-  // Skip under `npm run test:coverage`: same root cause as
-  // tests/signal-shallow-ab.test.ts - V8 coverage instrumentation slows the
-  // resolve loops enough to blow even the generous 20s override below, and
-  // the printed numbers wouldn't be real timings anyway (instrumented code
-  // paths, not the fast path being measured). The timeout, not the
-  // assertion, was the source of the flake. It asserts the resolves it
-  // performs, so the reporter can fail.
+  // Opt-in (VC_TIMING=1) and never under coverage: instrumented code gives no real timings.
   it.skipIf(!runTiming)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {
@@ -81,19 +74,12 @@ describe('static fast path - cost', () => {
     console.log(
       `[301 rows] build ${build.toFixed(2)}ms | ${N} resolves - first ${timeIt('/section0/page').toFixed(1)}ms, last ${timeIt('/section299/page').toFixed(1)}ms, param ${timeIt('/thing/9').toFixed(1)}ms, miss ${timeIt('/nope/nope').toFixed(1)}ms`,
     );
-    // The table this measured must also be CORRECT - the loop above resolves
-    // these exact paths 20k times each, so asserting them costs nothing and
-    // turns a pure reporter into a reporter that can fail.
+    // The measured table must also be correct, so the reporter can fail.
     expect(table.resolve('/section0/page')?.record.name).toBe('r0');
     expect(table.resolve('/section299/page')?.record.name).toBe('r299');
     expect(table.resolve('/thing/9')?.record.name).toBe('p');
-    // '9', not 9: the row declares no `params: { id: 'int' }`, so nothing
-    // casts it. Asserting the cast was my first guess and it was wrong.
+    // '9', not 9: the row declares no `params: { id: 'int' }`, so nothing casts it.
     expect(table.resolve('/thing/9')?.params.id).toBe('9');
     expect(table.resolve('/nope/nope')).toBeNull();
-    // A cost test, so it gets the measurement budget rather than the suite
-    // default: 20 000 ms was authored against a machine where this work took a
-    // second or two. Under full-suite load it reported `param 11292 ms, miss
-    // 13010 ms` - 24 s of real measurement - and was killed mid-run.
   });
 });

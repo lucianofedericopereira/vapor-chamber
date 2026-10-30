@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// The command binding's edges in the node suite: keyboard, form controls, teardown, owners, DEV off (audit B4). Rationale at the end.
+/**
+ * The command binding's edges in happy-dom: keyboard, form controls, a press, owners, the Vapor directive, DEV off.
+ * Why: coverage: the browser suite proves these paths in Chromium but the v8 gate does not count it; without this file command-binding.ts falls far below 100.
+ * Shows: a role="button" gets Enter and Space as a button does, native controls keep theirs; select and textarea send right; aria-disabled restored; unbind leaves other owners.
+ * See: audit B4, tests/browser/bind-commands.browser.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setAnnouncer } from '../src/a11y';
 import { bindCommands } from '../src/command-binding';
@@ -273,21 +278,3 @@ describe('DEV off', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 });
-
-/*
- * src/command-binding.ts was excluded from coverage by the directives.ts ruling that moved
- * with the code in 1.32 step 6b: its keyboard and delegation paths ran only in the browser
- * suite (tests/browser/*), which the v8 gate does not count. Audit B4 brings it under the
- * gate, 100 on all four axes, with no exclusion.
- *
- * These cases reach in happy-dom what the browser suite proves in real Chromium: the
- * keyboard of a role="button" element (WCAG 2.1.1, the ARIA button pattern), the
- * controls that keep their own keyboard, a select's change, a stray compositionend,
- * teardown, an aria-disabled the page set, a failure with no message, a paced refusal
- * with an optimistic change, and an unbind that leaves another owner's binding.
- *
- * The guards no API reaches became the invariants they stood for: teardown reads the
- * delegated document it recorded, the delegated count is there while an element is
- * mounted, a failed CommandResult carries its error, the handler slot holds a function
- * from the literal on, and `_mountAttribute` passes no action because the press reads it.
- */

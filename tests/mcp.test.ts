@@ -1,5 +1,7 @@
 /**
- * Tests for the MCP layer: busToMcpTools, createMcpHandler, the agent origin, serveMcpStdio
+ * The MCP layer: busToMcpTools, createMcpHandler, the agent origin, serveMcpStdio.
+ * Why: an agent client would see wrong tool definitions, get wrong protocol replies, or dispatch commands that carry no agent attribution.
+ * Shows: schema-to-tool mapping, JSON-RPC replies and error codes, tools/call results, `meta.origin = 'agent'` on MCP dispatches only, stdio line framing, and the handler defaults.
  */
 
 import { readFileSync } from 'node:fs';
@@ -35,10 +37,6 @@ function makeBus() {
   return bus;
 }
 
-// ---------------------------------------------------------------------------
-// busToMcpTools
-// ---------------------------------------------------------------------------
-
 describe('busToMcpTools', () => {
   it('maps schema actions to MCP tool definitions', () => {
     const tools = busToMcpTools(cartSchema);
@@ -71,10 +69,6 @@ describe('busToMcpTools', () => {
     expect(ping.inputSchema).toEqual({ type: 'object', properties: {} });
   });
 });
-
-// ---------------------------------------------------------------------------
-// createMcpHandler - protocol methods
-// ---------------------------------------------------------------------------
 
 describe('createMcpHandler - protocol', () => {
   it("initialize echoes the client's protocolVersion and reports serverInfo", async () => {
@@ -127,7 +121,6 @@ describe('createMcpHandler - protocol', () => {
 
     expect(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
     expect(await handle({ jsonrpc: '2.0', method: 'notifications/cancelled', params: {} })).toBeNull();
-    // Unknown notification method: still no reply.
     expect(await handle({ jsonrpc: '2.0', method: 'nope/nothing' })).toBeNull();
   });
 
@@ -156,10 +149,6 @@ describe('createMcpHandler - protocol', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createMcpHandler - tools/call
-// ---------------------------------------------------------------------------
-
 describe('createMcpHandler - tools/call', () => {
   it('dispatches on a real schema bus and returns the value as JSON text', async () => {
     const mcp = mcpClient(createMcpHandler(makeBus()));
@@ -171,13 +160,7 @@ describe('createMcpHandler - tools/call', () => {
   });
 
   it('never lets an MCP dispatch reach a handler unattributed', async () => {
-    // `meta.origin` is derived by stampMeta from a `__origin` key in the
-    // PAYLOAD, so it can only mark objects. A non-object payload must be
-    // refused: schema.ts checks payload shape only when the action DECLARES
-    // payload fields (`cartClear` declares none), so it would dispatch with
-    // `meta.origin === undefined` - an agent command an audit filter on
-    // `origin === 'agent'` cannot see. MCP clients are untrusted by
-    // construction, so that gap is the security-relevant one.
+    // The origin marker rides in the payload, so only an object payload can carry it; a non-object one must be refused.
     const seen: Array<{ action: string; origin: unknown }> = [];
     const bus = createSchemaCommandBus(cartSchema);
     bus.register('cartClear', (cmd: any) => {
@@ -188,18 +171,13 @@ describe('createMcpHandler - tools/call', () => {
 
     const call = (payloadArgs: object) => mcp.call('cartClear', { target: { force: true }, ...payloadArgs });
 
-    // Markable shapes still dispatch, and carry the marker.
     expect(await call({ payload: { a: 1 } })).toBeToolResult();
     expect(await call({})).toBeToolResult();
 
-    // Unmarkable shapes are refused at the boundary rather than dispatched
-    // without attribution. `payload` is only ever advertised as
-    // `{ type: 'object' }`, so none of these were ever on-contract.
     for (const bad of ['bare-string', 42, true, ['a', 'b']]) {
       expect(await call({ payload: bad })).toBeToolError(/payload must be an object/);
     }
 
-    // The invariant: every command that DID reach a handler is attributed.
     expect(seen).toHaveLength(2);
     expect(seen.every((s) => s.origin === 'agent')).toBe(true);
   });
@@ -265,10 +243,6 @@ describe('createMcpHandler - tools/call', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// meta.origin = 'agent'
-// ---------------------------------------------------------------------------
-
 describe("meta.origin = 'agent'", () => {
   it("stamps meta.origin='agent' on MCP-driven dispatches only", async () => {
     const bus = makeBus();
@@ -276,11 +250,8 @@ describe("meta.origin = 'agent'", () => {
     bus.on('cartAdd', (cmd) => origins.push(cmd.meta?.origin));
     const mcp = mcpClient(createMcpHandler(bus));
 
-    // Direct dispatch - no stamp.
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
-    // MCP-driven dispatch - stamped.
     await mcp.call('cartAdd', { target: { id: 2 }, payload: { qty: 2 } });
-    // Direct dispatch after the MCP call - no stamp.
     bus.dispatch('cartAdd', { id: 3 }, { qty: 3 });
 
     expect(origins).toEqual([undefined, 'agent', undefined]);
@@ -302,10 +273,6 @@ describe("meta.origin = 'agent'", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// serveMcpStdio
-// ---------------------------------------------------------------------------
-
 describe('serveMcpStdio', () => {
   it('answers newline-delimited JSON-RPC on stdin via stdout and stops cleanly', async () => {
     const writes: string[] = [];
@@ -321,7 +288,7 @@ describe('serveMcpStdio', () => {
       process.stdin.emit('data', Buffer.from('{"jsonrpc":"2.0","id":1,"method":"ping"}\n'));
       process.stdin.emit('data', Buffer.from('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'));
       process.stdin.emit('data', Buffer.from('not json\n'));
-      // Split across chunks to exercise the line buffer.
+      // One message split across two chunks exercises the line buffer.
       process.stdin.emit('data', Buffer.from('{"jsonrpc":"2.0","id":2,'));
       process.stdin.emit('data', Buffer.from('"method":"tools/list"}\n'));
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -334,8 +301,7 @@ describe('serveMcpStdio', () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith('{"jsonrpc"'))
       .map((line) => JSON.parse(line));
-    // Parse errors are written synchronously, handler replies on a microtask -
-    // so match by id rather than arrival order.
+    // Parse errors are written synchronously, handler replies on a microtask: match by id, not order.
     expect(replies).toHaveLength(3); // ping + parse error + tools/list; the notification got no reply
     expect(replies.find((r) => r.id === 1)).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
     expect(replies.find((r) => r.error)?.error.code).toBe(-32700);
@@ -344,16 +310,9 @@ describe('serveMcpStdio', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Item 17 - the two defaults.
-// ---------------------------------------------------------------------------
-
 describe('createMcpHandler defaults', () => {
   it('the advertised server version tracks package.json', async () => {
-    // A hardcoded version goes stale with the next release, and every
-    // `initialize` handshake then reports a version that does not exist. This
-    // assertion is the release checklist: bump the package, this fails until
-    // the constant follows.
+    // Fails after a package bump until the constant follows, so `initialize` never reports a stale version.
     const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'));
     expect(MCP_SERVER_VERSION).toBe(pkg.version);
   });

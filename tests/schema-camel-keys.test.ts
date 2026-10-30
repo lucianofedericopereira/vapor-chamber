@@ -1,4 +1,9 @@
-/** Schema keys: the camelCase name the bus validates is the typed name; a raw one warns in development (log s35.175). Two keys with one camel name throw at creation (D13 G8). Rationale at the end. */
+/**
+ * Schema keys: the camelCase name the bus validates is the typed name, and two keys with one camel name are refused.
+ * Why: if the typed name differed from the run-time name, typed code would register a name the validator and MCP do not know, so validation would be skipped; a lost key definition would go unnoticed.
+ * Shows: InferMap has the camel names only; a raw key validates under its camel name; development warns once per raw key at creation and production does not; colliding keys throw schema:already:action on both buses in development and production, naming both keys, and the code is catalogued.
+ * See: log s35.175
+ */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createAsyncSchemaCommandBus, createSchemaCommandBus, type InferMap } from '../src/schema';
 import { ERROR_CODE_REGISTRY } from '../src/error-registry';
@@ -95,16 +100,3 @@ describe('two keys, one camel name', () => {
     expect(ERROR_CODE_REGISTRY.some((e) => e.code === 'schema:already:action')).toBe(true);
   });
 });
-
-/*
- * normalizeSchema camel-cases every key at run time (`cart_add` becomes
- * `cartAdd`), but InferMap typed the bus with the raw keys. The typed code
- * registered and dispatched `cart_add`, which the validator, getSchema and
- * MCP know as `cartAdd`: validation was skipped, and MCP listed a tool the
- * code never registered (audit B12, probe P11). InferMap now carries each
- * key's camelCase name (ToCamel, toCamel's rules at the type level), so
- * the name that validates is the typed name.
- * The one warning stays where the rename happens, at bus creation, and now
- * says to register and dispatch the camel name. It printed in production
- * and is DEV-only now. No register wrapper: one fact, one place. Log s35.175.
- */

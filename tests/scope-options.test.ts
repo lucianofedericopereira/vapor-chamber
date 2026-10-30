@@ -1,4 +1,9 @@
-/** One scope for every plugin and recorder: `actions` and `actionFilter`, read in one place, asked once per action. The long note is at the end. */
+/**
+ * The `actions` and `actionFilter` scope options of logger, history, useCommandHistory and useCommandError.
+ * Why: every scoped plugin must read the one scope the same way, or the same options would select different actions in different plugins.
+ * Shows: each reader keeps only the actions its scope selects, an empty or absent scope keeps all, `actionFilter` is never asked about an action the `actions` patterns leave out, and the compiled patterns agree with matchesPattern.
+ * See: log s36.100, tests/option-types.test-d.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus, _scoped } from '../src/command-bus';
 import { matchesPattern } from '../src/pattern';
@@ -170,18 +175,3 @@ describe('useCommandError', () => {
     expect(errors.value).toHaveLength(2);
   });
 });
-
-/*
- * Plan 1.32 step 7c (.probes/step-7-pickup.md, plan G). Two ways to scope a
- * plugin read as two spellings of one thing: `actions` and `actionFilter` on
- * the parts the bus reads, and a `filter(cmd)` option the plugin called on
- * every command. Every `filter` read only `cmd.action`, so it goes: `logger`,
- * `history`, `useCommandHistory` and `useCommandError` take `actions` (an
- * ActionScope, absent or [] is every action) and `actionFilter` (a predicate
- * of the action name), the same two names `metrics`, `cache` and the others
- * take, read by the one `_scoped`. The patterns are classified once into names
- * and prefixes, so a command costs a few comparisons; an `actionFilter` is a
- * plain predicate of the name and is called as it is (a map lookup per command
- * cost a scoped history record +19.5 ns, measured). That a filter option is gone
- * is pinned by tests/option-types.test-d.ts.
- */

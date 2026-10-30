@@ -1,21 +1,7 @@
 /**
- * No hardcoded vapor-chamber version in the examples or docs.
- *
- * WHY. The CDN snippets carried `vapor-chamber@1.9` (five places) and
- * `vapor-chamber@1.12` (two) while the package was at 1.14.0 and not yet
- * published - so every one of them pointed at something older than the code it
- * sat next to, and two pointed at a version a reader could not install. Nothing
- * failed, because a stale doc is invisible to a test suite: it only misleads
- * the person copying it.
- *
- * The advice those snippets give is right and stays - an UNPINNED CDN URL
- * (`npm/vapor-chamber/...`) resolves to whatever is published now and is
- * edge-cached, which is worse. So they keep recommending a pin, written as the
- * placeholder `vapor-chamber@<version>` for the reader to substitute. A
- * placeholder cannot go stale; a literal number silently does, every release.
- *
- * This test is the ratchet: reintroducing a literal pin fails here rather than
- * being noticed three releases later.
+ * No hardcoded vapor-chamber version in the examples or docs, unless it is the current one.
+ * Why: a literal pin silently goes stale every release and misleads whoever copies it; the placeholder `vapor-chamber@<version>` cannot.
+ * Shows: the walker scans a real set of files; any literal pin equals package.json's version.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -48,12 +34,7 @@ describe('docs and examples carry no hardcoded vapor-chamber version', () => {
   });
 
   it('any literal pin matches package.json - no drift', () => {
-    // Deliberately not "no pins allowed". Once the package is published a real
-    // number is useful, and a rule that bans it would just be worked around.
-    // The rule that actually holds is: if you write a version, it must be THE
-    // version - tied to the same source of truth `scripts/measure-size.mjs`
-    // stamps into docs/BUNDLE-SIZES.md, so it cannot drift silently the way
-    // @1.9 and @1.12 did.
+    // Not "no pins": once published a real number is useful, so a written version must be THE version.
     const current = `vapor-chamber@${version}`;
     const stale: string[] = [];
     for (const file of files) {
@@ -64,9 +45,7 @@ describe('docs and examples carry no hardcoded vapor-chamber version', () => {
         }
       });
     }
-    // If this fires: either bump the literal to the current version, or use the
-    // placeholder `vapor-chamber@<version>` - correct before a release, since a
-    // CDN URL for an unpublished version 404s for the reader.
+    // To fix: bump the literal, or use the placeholder; a CDN URL for an unpublished version 404s.
     expect(stale).toEqual([]);
   });
 });

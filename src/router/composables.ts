@@ -128,7 +128,9 @@ export function useRouteError(): { latestError: { readonly value: unknown }; cle
  */
 export function useMenu(): { readonly value: readonly MenuItem[] } {
   const router = useRouter();
-  return computed(() => buildMenu(router.routes.value, router.currentRoute.value.location.path, router.base));
+  // The path alone: a query commit (`setQuery` per keystroke) leaves the menu's array as it is.
+  const path = computed(() => router.currentRoute.value.location.path);
+  return computed(() => buildMenu(router.routes.value, path.value, router.base));
 }
 
 /**
@@ -217,8 +219,8 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
   // and a route that declares nothing still reads `?page=2` as 2.
   const page = bindQueryParam<number>(router, key, undefined, { type: 'int', default: 1 });
 
-  const pick = <R>(read: ((data: any) => R) | undefined, fallback: (data: any) => R): Ref<R> =>
-    computed(() => (read ?? fallback)(data.value ?? {}));
+  const pick = <R>(read: ((data: any) => R) | undefined, fallback: (data: any) => R): R =>
+    (read ?? fallback)(data.value ?? {});
 
   /**
    * Every number here comes from a BACKEND RESPONSE, and the extractors are
@@ -240,19 +242,19 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
 
-  const items = pick<readonly T[]>(options.items, (d) => d.items ?? d.data ?? []);
+  const items: Ref<readonly T[]> = computed(() => pick<readonly T[]>(options.items, (d) => d.items ?? d.data ?? []));
   const total = computed(() =>
-    finite(pick<number>(options.total, (d) => d.total ?? d.meta?.total ?? items.value.length).value, items.value.length),
+    finite(pick<number>(options.total, (d) => d.total ?? d.meta?.total ?? items.value.length), items.value.length),
   );
   const perPage = computed(() =>
     positive(
-      pick<number>(options.perPage, (d) => d.per_page ?? d.perPage ?? d.meta?.per_page ?? d.meta?.perPage).value,
+      pick<number>(options.perPage, (d) => d.per_page ?? d.perPage ?? d.meta?.per_page ?? d.meta?.perPage),
       items.value.length || 1,
     ),
   );
   const lastPage = computed(() =>
     positive(
-      pick<number>(options.lastPage, (d) => d.last_page ?? d.lastPage ?? d.meta?.last_page ?? d.meta?.lastPage).value,
+      pick<number>(options.lastPage, (d) => d.last_page ?? d.lastPage ?? d.meta?.last_page ?? d.meta?.lastPage),
       Math.max(1, Math.ceil(finite(total.value, 0) / perPage.value)),
     ),
   );

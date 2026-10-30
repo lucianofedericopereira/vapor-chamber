@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** A plugin part that throws, or answers a rejected promise, becomes `plugin:failed:plugin`; the long note is at the end. */
+/**
+ * A plugin part (rule or step) of an id-less plugin that throws or answers a rejected promise becomes `plugin:failed:plugin` on the sync, async and test buses.
+ * Why: dispatch always returns a result, so a plugin throw must never escape into the caller (a click handler, a read gate) and must reach after-hooks, `on('*')`, the command state and `pending`; `onMissing: 'throw'` is the one error that keeps throwing, by contract.
+ * Shows: the result carries the original as `cause` and the part name in `context`; query and request() take the same path; a non-Error throw is kept verbatim; DEV logs the throw and production logs nothing; `onMissing: 'throw'` still throws or rejects `core:missing:handler`, settled once; `pending` returns to false and the shared error observer records the result. Runs on the real buses and the with-vapor browser dist through `configureVue()`.
+ * See: log s36.108.
+ */
 
 import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { configureVue, useSharedCommandState } from '../src/chamber';
@@ -165,7 +170,7 @@ describe('async bus - a throwing or rejecting part', () => {
     const star: CommandResult[] = [];
     const after: CommandResult[] = [];
     bus.on('*', (_c, r) => { star.push(r); });
-    // An async after-hook: the settle awaits it before re-throwing.
+    // The settle awaits an async after-hook before re-throwing.
     bus.onAfter(async (_c, r) => { after.push(r); });
     await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'core:missing:handler' });
     expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
@@ -186,19 +191,3 @@ describe('async bus - a throwing or rejecting part', () => {
     shared.dispose();
   });
 });
-
-/*
- * The bus's contract is "dispatch always returns a result". A plugin part
- * that throws or rejects (a rule, a work step) becomes its plugin's
- * `failed:plugin`, `context.part` naming the part, before the settle, so
- * after-hooks, `on('*')`, the command state and `pending` all see it, and the
- * throw never escapes into the caller (a click handler, a read gate).
- * Development logs it once. One error is NOT relabeled: `onMissing: 'throw'`
- * throws (sync bus) or rejects (async bus) from the work by contract, and
- * reaches the caller as itself, settled once (a step's ticket lands with it).
- * Before plan 1.32 step 8d this file pinned the chain's boundary: an outer
- * plugin saw the failure through `next()`. No part holds `next` now, so that
- * half went with the chain. Everything runs on the real buses and, for the
- * loading and error observers, the real `useSharedCommandState` on the
- * with-vapor browser dist through `configureVue()`.
- */

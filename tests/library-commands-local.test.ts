@@ -1,4 +1,12 @@
-/** The library's `$` commands (`<action>$undo`, `<id>$reset`) stay local: no transport sends them, the outbox never queues them. Log s35.114. */
+/**
+ * The library's `$` commands (`<action>$undo`, `<id>$reset`) stay local: no transport sends them and the outbox never queues them.
+ * Why: a rollback or reset sent to the server would fail there (or be queued offline) while the local
+ * state never changed.
+ * Shows: with a `cart*` transport (plain, batching and WebSocket) a store `$reset`, an optimistic
+ * rollback and a `$undo` run their local handlers and nothing is posted or sent, and the outbox
+ * queues nothing for a `$undo`.
+ * See: log s35.114
+ */
 import { afterEach, describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createOutbox } from '../src/outbox';
@@ -44,7 +52,7 @@ describe("a transport for cart* does not send the library's $ commands", () => {
     const useCart = defineChamberStore('cart', { state: () => ({ n: 0 }), reducers: { set: null }, undo: true });
     const cart = useCart(bus);
     bus.register('cartLocal', null, { undo: () => {} });
-    await bus.dispatch('cartLocal', null); // recorded locally: the transport sends it and the server fails it
+    await bus.dispatch('cartLocal', null); // control: an app command under `cart*` is sent
     expect(posted).toEqual(['cartLocal']);
     await cart.$reset();
     expect(posted).toEqual(['cartLocal']);

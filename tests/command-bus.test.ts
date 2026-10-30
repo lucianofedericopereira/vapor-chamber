@@ -1,3 +1,9 @@
+/**
+ * The command bus's core: dispatch, register, parts, after-hooks, listener fan-out, on()/once() options, the async bus, query, offAll, an aborted batch, DEV-only warnings.
+ * Why: every module builds on these; a listener change mid-dispatch must neither skip nor re-run a listener, and dev warnings must fold away in production.
+ * Shows: failures are results; parts and hooks run in order, hook errors are caught; fan-out survives removals and additions; signal and `using` unsubscribe; aborted batches roll back in reverse.
+ * See: log s35.67, src/dev.ts, tests/dev-flag.test.ts, tests/echo-bridge.test.ts.
+ */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 import { stubEnv, stubGlobal } from '../src/vitest-pure';
@@ -188,7 +194,6 @@ describe('concurrent dispatches', () => {
 });
 
 describe('listener fan-out with in-flight unsubscribe', () => {
-  // The self-removal case the lenBefore/i-- guard was written for.
   it('a listener that removes itself does not skip its neighbour', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
@@ -204,9 +209,6 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['first', 'second', 'third']);
   });
 
-  // The case that guard got WRONG: removing a peer that has not run yet
-  // shrinks the array without moving the cursor, so decrementing re-invoked
-  // the listener that had just finished.
   it('a listener that removes a LATER peer does not re-run itself', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
@@ -220,7 +222,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     bus.on('act', () => seen.push('third'));
 
     bus.dispatch('act', {});
-    expect(seen).toEqual(['first', 'third']); // was ['first', 'first', 'third']
+    expect(seen).toEqual(['first', 'third']);
   });
 
   it('the same holds for wildcard listeners', ({ bus }) => {
@@ -256,9 +258,6 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['first', 'fourth']);
   });
 
-  // Removing an EARLIER peer and adding one in the same call left the length
-  // unchanged, so the cursor was not corrected and the next listener was
-  // skipped (log s35.67).
   for (const [kind, pattern, action] of [['exact', 'act', 'act'], ['wildcard', 'act*', 'actX']] as const) {
     it(`${kind}: a listener that removes an earlier peer and adds one does not skip the next`, ({ bus }) => {
       bus.register(action, () => 1);
@@ -274,8 +273,6 @@ describe('listener fan-out with in-flight unsubscribe', () => {
       expect(seen.filter((x) => x !== 'added')).toEqual(['first', 'second', 'third']);
     });
 
-    // Removing itself and a LATER peer shrank the length by two, and the
-    // cursor stepped back two: the listener before it ran again.
     it(`${kind}: a listener that removes itself and a later peer does not re-run the one before`, ({ bus }) => {
       bus.register(action, () => 1);
       const seen: string[] = [];
@@ -303,9 +300,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['exact 1', 'all', 'all']);
   });
 
-  // The exact-match catch (fanOutListeners' first loop) is covered by
-  // tests/echo-bridge.test.ts; the wildcard loop has its own try/catch and
-  // was never exercised with a throwing listener.
+  // The wildcard loop has its own catch; the exact-match one is tested in tests/echo-bridge.test.ts.
   it('a throwing wildcard listener is caught and logged, and its neighbour still runs', ({ bus }) => {
     bus.register('cartAdd', () => 1);
     using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -478,10 +473,6 @@ describe('createAsyncCommandBus', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// configureUid
-// ---------------------------------------------------------------------------
-
 describe('configureUid', () => {
   it('replaces the id generator used by stampMeta', () => {
     let counter = 0;
@@ -499,10 +490,6 @@ describe('configureUid', () => {
     expect(r2.value).toBe('test-2');
   });
 });
-
-// ---------------------------------------------------------------------------
-// syncQuery bare-bus fast path (no plugins/hooks/listeners)
-// ---------------------------------------------------------------------------
 
 describe('syncQuery bare-bus fast path', () => {
   it('returns handler result with no plugins installed', ({ bus }) => {
@@ -526,10 +513,6 @@ describe('syncQuery bare-bus fast path', () => {
     expect(begin).toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// listenerOffAll with wildcard pattern
-// ---------------------------------------------------------------------------
 
 describe('listenerOffAll with wildcard pattern', () => {
   it('removes only the matching wildcard listener', ({ bus }) => {
@@ -558,29 +541,9 @@ describe('listenerOffAll with wildcard pattern', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// asyncDispatchBatch mid-flight abort with transactional rollback
-// ---------------------------------------------------------------------------
-
 describe('asyncDispatchBatch mid-flight abort', () => {
-  // Assertions here are derived from the DOCUMENTED BatchOptions contract, not
-  // from what the implementation happens to do:
-  //   transactional - "All-or-nothing semantics: if any command fails,
-  //     automatically run the registered undo handler for every command that
-  //     already succeeded (in reverse order) ... Commands without an undo
-  //     handler are skipped during rollback."
-  //   signal - "aborting mid-flight stops further commands from dispatching
-  //     (the in-flight one runs to completion) and the batch result is
-  //     { ok: false, error: BusError('core:aborted:dispatch'), results: [...partial] }".
-  //     (That doc line said `AbortError` until this pass - `abortedResult`
-  //     deliberately substitutes a BusError so the code is queryable, and the
-  //     doc had never been corrected to match. Fixed with this rewrite.)
-  //
-  // The previous version of this block passed `transactional: false` and
-  // asserted only that 'c' never ran, so the branch its title named was never
-  // entered; and its 'undoA' was registered as a plain ACTION, while rollback
-  // only ever consults handlers registered with `{ undo }` - so even flipped
-  // to true it would have proved nothing.
+  // From the documented BatchOptions: transactional undoes succeeded commands in reverse, skipping any without undo;
+  // an abort lets the in-flight one finish, stops the rest, and fails core:aborted:dispatch with partial results.
   it('rolls back every succeeded command, in reverse order, when the signal aborts mid-batch', async ({ asyncBus: bus }) => {
     const log: string[] = [];
     const ac = new AbortController();
@@ -611,7 +574,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   });
 
   it('skips commands with no undo handler, and reports the rollbacks it did run', async ({ asyncBus: bus }) => {
-    // The documented skip behaviour - the honest caveat in BatchOptions.
+    // The documented skip: a command without an undo is not rolled back.
     const log: string[] = [];
     const ac = new AbortController();
 
@@ -694,10 +657,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
   });
 
-  // The test above only proves the warning FIRES when DEV is true (the
-  // vitest default). It never proves silence in production, on either of
-  // DEV's two resolution paths - same gap class devWarnThenableResult and
-  // the buffer's overflow warning had. Closing both here.
+  // Production must be silent on both DEV paths: the __VC_DEV__ define and NODE_ENV.
 
   it('warnBatchOptionConflict is silent when __VC_DEV__=false (IIFE build path)', async () => {
     using _VC_DEV = stubGlobal('__VC_DEV__', false);
@@ -738,11 +698,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
 
 
 describe('devWarnThenableResult - folds away in production, both DEV paths', () => {
-  // DEV is a module-level const captured at import time (see src/dev.ts and
-  // tests/dev-flag.test.ts), so flipping it means stubbing the build-time
-  // global (or the NODE_ENV fallback) and re-importing fresh - vitest
-  // supplies no __VC_DEV__ define, so every other test in this file runs
-  // with the runtime fallback (DEV: true).
+  // DEV is captured at import and vitest defines no __VC_DEV__, so each case stubs it and re-imports.
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

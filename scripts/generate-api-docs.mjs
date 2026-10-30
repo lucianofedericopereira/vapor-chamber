@@ -43,9 +43,9 @@
  * Run: node scripts/generate-api-docs.mjs         write docs/api/
  *      node scripts/generate-api-docs.mjs --list  entry points, no write
  *
- * CI runs `npm run docs` and then `git diff --exit-code docs/api`; `npm run gate`
- * applies the same pattern to docs/BUNDLE-SIZES.md and to the other generators'
- * output.
+ * On a pull request CI runs `npm run docs` and then `git diff --exit-code docs/api`;
+ * on a push to main it commits the regenerated files. `npm run gate` applies the
+ * diff to docs/BUNDLE-SIZES.md and to the other generators' output.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

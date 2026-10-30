@@ -17,7 +17,7 @@ What it needs:
 
 - **Node 24**, 24.5 or later. No other major is tested.
 - **Vue is an optional peer:** 3.5 or later for the composables,
-  <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
+  <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
 - **Vite 5+ and `@vitejs/plugin-vue` 5+** only for the `vapor-chamber/vite` plugins (HMR,
   `vaporChamberWire()`) and Vapor SFC support.
 - **ESM only**, no CJS build. Node 24 `import`, bundlers and `<script type="module">` all work.
@@ -300,8 +300,8 @@ The **core** imports no framework and no dependency, and it is the only part an 
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4866<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->466<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4867<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->472<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
 `npm run test:coverage` for live numbers.
 
 Next: [2. Commands, results and failures](./02-commands.md).

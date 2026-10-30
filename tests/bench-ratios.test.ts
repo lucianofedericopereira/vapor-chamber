@@ -1,4 +1,8 @@
-// The bench ratios: rows exist where the reporter reads them, and bands are published by kind.
+/**
+ * The bench ratios: rows exist where the reporter reads them, and bands are published by kind.
+ * Why: a bench run takes minutes and is not in `test:run`, so a renamed row would leave its published marker silently stale.
+ * Shows: every RATIOS and COSTS row is in tests/perf.bench.ts and a rename is caught; own ratios publish a median, peer ratios a band, costs ns and calls per frame.
+ */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +14,7 @@ type Ratios = Record<string, Ratio>;
 
 const SRC = readFileSync(resolve(__dirname, 'perf.bench.ts'), 'utf8');
 
-/** Each ratio whose group, or a row inside that group, is not in the bench source. */
+/** Each ratio whose group, or a row inside it, is not in the bench source; a group spans its `describe(` to the next one. */
 function missingRows(src: string, ratios: Ratios): string[] {
   const missing: string[] = [];
   for (const [name, { group, fast, slow }] of Object.entries(ratios)) {
@@ -120,9 +124,3 @@ describe('bench bands: published by kind', () => {
     for (const g of groups) expect([g, re.test(`${g} compare`)]).toEqual([g, wanted.has(g)]);
   });
 });
-
-// The test file the reporter matches against is the bench source itself, read
-// as text: a bench run takes minutes and is not part of `test:run`, so a row
-// renamed in `tests/perf.bench.ts` used to surface only as a marker that
-// silently kept its old value. `missingRows` reads each group's span from its
-// `describe(` to the next top-level one, which is how the file is laid out.

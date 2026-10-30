@@ -1,4 +1,12 @@
-/** A `$` command never meets an app's memory: not through a custom key, not through a run in flight (log s35.182). Rationale at the end. */
+/**
+ * A `$` command never meets an app's memory: not through a custom `key`, not through a run in flight.
+ * Why: a custom key that ignores the action gives `load(null)` and `cart$reset` the same key, so a
+ * reset would get `load`'s stored answer and never run. idempotent would also hand a second reset the
+ * first one's in-flight promise, so a write between them would survive the second reset.
+ * Shows: a reset still resets under cache and idempotent with a target-only key, overlapping
+ * write/reset calls end with an empty store, and app commands are still cached and joined.
+ * See: log s35.182, log s35.150
+ */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, idempotent } from '../src/plugins-extra';
@@ -66,15 +74,3 @@ describe('F6c: idempotent never joins a $ command to one in flight', () => {
     expect([runs, a.value, b.value]).toEqual([1, 1, 1]);
   });
 });
-
-/*
- * Item 6's rule: a `$` command (a reset, an undo, a tab's sync) is a state
- * change, never answered from memory. cache and idempotent already never
- * store a `$` result (log s35.150). Two paths were left (findings F6b, F6c).
- * A custom `key` that ignores the action gave `load(null)` and `cart$reset`
- * the same key "null", so the reset got `load`'s stored answer and never ran.
- * A `$` command now takes the default key, which holds its `$` name. And
- * idempotent put every key in flight, so a second reset sent while the first
- * was in flight got the first's promise: the write between them survived the
- * second reset. A `$` command is no longer put in flight. Log s35.182.
- */

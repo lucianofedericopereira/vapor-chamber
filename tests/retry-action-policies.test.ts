@@ -1,4 +1,9 @@
-/** retry.actionPolicies: the most specific match wins, whatever the written order (log s35.179). Rationale at the end. */
+/**
+ * retry.actionPolicies: the most specific match wins, whatever the written order.
+ * Why: if the first match in object order won, `{ 'cart*': 'idempotent', cartAdd: false }` would re-send `cartAdd` after a lost reply, and a declared `false` re-sent is a double apply; integer-like keys would also jump the order. Keys are ranked once at creation (exact name, then longest prefix, then `*`) and each action's policy is resolved once and cached.
+ * Shows: an exact name beats a pattern in either written order, a longer prefix beats a shorter one and any prefix beats `*`, an integer-like exact name wins, single policies and an unnamed action behave as declared, the cache is read again on a second dispatch and restarts past 512 actions, and a schema's exact name beats the bus's pattern while the bus's exact name beats the schema's.
+ * See: log s35.179
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, type RetryPolicy } from '../src/command-bus';
 import { createAsyncSchemaCommandBus } from '../src/schema';
@@ -69,17 +74,3 @@ describe('controls', () => {
     vi.restoreAllMocks();
   });
 });
-
-/*
- * gRPC service_config.proto: "When determining which MethodConfig to use
- * for a given RPC, the most specific match wins", and each name is unique.
- * The map read its keys in object order, the first match winning, so `{
- * 'cart*': 'idempotent', cartAdd: false }` re-sent `cartAdd` after a lost
- * reply: a declared `false` re-sent is a double apply (audit B16). Object
- * order also puts integer-like keys first. The keys are now ranked once at
- * creation (an exact name, then the longest prefix, then `*`) and each
- * action's policy is resolved once and cached, which also removes the
- * per-dispatch scan (measured M1, decl50 0.48x). The map is named by
- * Apollo's key-kind and value-kind rule (`typePolicies`) and gRPC's
- * `retryPolicy`: `actionPolicies`, values `RetryPolicy`. Log s35.179.
- */

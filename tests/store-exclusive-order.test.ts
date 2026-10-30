@@ -1,4 +1,9 @@
-// A store's sent commands in order with `exclusive: true`, local actions at once; rationale at the end.
+/**
+ * A store with `exclusive: true` sends its transport-covered commands one at a time; local actions run at once.
+ * Why: two writes of one store could be answered out of order, and a read in flight across a write could land after the write's answer and put the older state back (`version` orders answers only, not that read); a local action must never wait on a sent command, and a command waiting for its turn still reads as loading from its dispatch.
+ * Shows: without `exclusive` the older answer wins and the stale read overwrites the write; with it the commands go out in order and the store ends on the write's state; a local action runs while a sent command holds the key; a waiting write reads as loading before it is sent.
+ * See: log s36.81
+ */
 import { describe, expect, vi } from 'vitest';
 import { it } from '../src/vitest';
 import { useSharedCommandState } from '../src/chamber';
@@ -21,7 +26,7 @@ const define = (exclusive: boolean) => defineChamberStore('cart', {
   exclusive,
 });
 
-/** A client whose replies the test releases by hand, by command, and which records what was sent. */
+// A client whose replies the test releases by hand, by command, and which records what was sent.
 function heldClient(replies: Record<string, object>) {
   const held = new Map<string, () => void>();
   const sent: string[] = [];
@@ -37,7 +42,7 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 // The server applied cartAdd first, then cartClear; the read fetched the cart before the write committed.
 const REPLIES = { cartAdd: { state: { items: ['milk'] } }, cartClear: { state: { items: [] } }, cartLoad: { state: { items: [] } } };
 
-/** A bus whose transport sends the store's add, clear and load; `note` stays local. */
+// A bus whose transport sends the store's add, clear and load; `note` stays local.
 function app(exclusive: boolean) {
   const { client, sent, release } = heldClient(REPLIES);
   const t = httpTransport({ endpoint: '/vc', httpClient: client });
@@ -153,16 +158,3 @@ describe('a command waiting for its turn', () => {
     expect(await waitingWrite(false)).toEqual({ during: { sent: ['cartLoad', 'cartAdd'], loading: true }, after: false });
   });
 });
-
-/*
- * tests/store-serialize-order.test.ts, moved to the store's `exclusive: true` in step 4k (log
- * 36.81). Its subjects stay: two writes of one store answer in order; a read in flight across
- * a write cannot land after the write's answer and put the older state back (`version`
- * covers answers only, not that read); a command waiting for its turn reads as loading from
- * its dispatch, since the before-hooks run first. In 1.32 the transport is the work, so the
- * read is a sent action whose answer writes the state. The `serialize` key function had to
- * name the server commands by hand, and a broad key caught a reducer the read wrote through,
- * which then waited for ever (awaited) or landed late (not awaited), cases d and e. Under
- * `exclusive: true` only the actions a transport sends take the store's key, so a local action
- * runs at once by construction: one case pins that.
- */

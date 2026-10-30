@@ -1,13 +1,8 @@
 /**
- * FIXTURE - the wire contract's failure, an RFC 9457 problem with the members
- * it uses (docs/contract.md 4), through the real client
- * and every bridge, only `fetch` and the socket stubbed.
- *
- * The HTTP client parses `application/problem+json` (any `+json` suffix) and
- * asks for it in `Accept`. Every bridge reads the same failure the same way:
- * `remote:<condition of its status>:<code>`, `detail` the message, the rest in
- * `context`, whether it came as a non-2xx, a batched result, a whole-batch
- * failure or a WebSocket frame.
+ * An RFC 9457 problem document read by the real HTTP client and the router-fetch loader, with only `fetch` stubbed.
+ * Why: a failure must reach callers as `remote:<condition>:<code>` with `detail` as its message; otherwise the code and message are lost.
+ * Shows: the client parses `+json` problem types and asks for them in `Accept`; the error carries code, message and problem; the loader wraps it as `router:failed:loader` with the problem on `cause`.
+ * See: docs/contract.md, RFC 9457
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -1,9 +1,14 @@
-/** Inside a hot update the Vite plugin marks, a handler registered again is the update, not a clash: no warning. Rationale at the end. */
+/**
+ * Inside a hot update the Vite plugin marks, a handler registered again is the update, not a clash: no warning.
+ * Why: Vite re-runs an edited module without a `hot.dispose`, so the app cannot unregister first; a warning per action on every edit would be a false alarm, while a real clash outside an update must still warn.
+ * Shows: with `__VAPOR_CHAMBER_HOT__` set, re-registering on the sync bus, the async bus and a store warns nothing and the new handler runs; the re-run replaces the old registration; outside the mark an overwrite warns once with its code.
+ * See: log s36.F22, tests/vite-hmr.test.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
 
-// The mark vaporChamberHMR's shim sets from `vite:beforeUpdate` to `vite:afterUpdate`.
+// The mark vaporChamberHMR's shim holds from `vite:beforeUpdate` to `vite:afterUpdate`.
 const HOT = '__VAPOR_CHAMBER_HOT__';
 const marked = <T>(fn: () => T): T => {
   (globalThis as Record<string, unknown>)[HOT] = new WeakMap();
@@ -72,14 +77,3 @@ describe('register() inside a hot update', () => {
     expect(overwrites(warn)).toEqual([]);
   });
 });
-
-/*
- * The mark is `globalThis.__VAPOR_CHAMBER_HOT__`, which the plugin's shim sets
- * for the length of one hot update (tests/vite-hmr.test.ts pins the set and
- * the clear). Vite re-runs an edited module inside it, and the module registers
- * its handlers and its store's actions again. Vite calls no `hot.dispose` for a
- * module with no accept, so the app cannot unregister first: the warning was a
- * false alarm on every edit, one per action (step 9, Batch 2, finding 1, run in
- * a real Vite dev server). A real clash outside an update still warns, and two
- * modules that clash inside one warn on the next full load, which has no mark.
- */

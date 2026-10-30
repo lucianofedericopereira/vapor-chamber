@@ -1,4 +1,9 @@
-/** The state half alone: one watcher feeds persist, share and field events; dispose stops them. Rationale at the end. */
+/**
+ * _stateHalf alone: one watcher on the cell feeds persist's save, share's send and the field events; dispose stops them.
+ * Why: the library's own queues (the outbox) use a state half with no store and no bus, so persist, cross-tab share and field events must work from it alone, and `ready` must tell an outbox when an async stored queue has landed.
+ * Shows: saves once per microtask and reloads the saved state, an async read resolves `ready`, another tab's state arrives and stops on dispose, an answer to another tab's ask is not taken, an uncloneable state stays in its tab (warning in development only).
+ * See: log s36.F4, tests/store-one-watcher.test.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _stateHalf, type HalfOwner } from '../src/store-base';
 import { _plainRuntime } from '../src/store/core';
@@ -139,13 +144,3 @@ describe('a state half shared by whole states (the outbox queue)', () => {
     }
   });
 });
-
-// Rationale.
-// Plan 1.32 4.2 and step 4a: the store splits into a state half (a cell, its
-// one watcher, and what the watcher feeds: persist's save, share's send, the
-// field events) and a command half. The 1-7 fix-up (audit M1, coordinator
-// 2026-10-21) extracts the state half as one function, `_stateHalf`, so the
-// library's own queues use it with no registration and nothing on a bus. A
-// store builds its command half on it (tests/store-one-watcher.test.ts covers
-// the store's side). `ready` is persist's: an outbox holds its sends until the
-// stored queue lands.

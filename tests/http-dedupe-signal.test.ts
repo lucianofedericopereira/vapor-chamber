@@ -1,4 +1,9 @@
-// A deduped GET: each caller's own signal governs its own promise, never another's.
+/**
+ * A deduped GET: each caller's own signal governs its own promise, never another's.
+ * Why: a caller joined onto another caller's request would be cancelled by that caller's abort, and could not cancel with its own signal; the shared request is aborted only when every holder has aborted.
+ * Shows: an abort by a leader, a follower, or a signal-less holder rejects only that caller, and the server sees one request and no abort; when all holders abort the request is aborted and the next caller fetches fresh; dedupe: false keeps requests separate; supersede answers the newer dispatch.
+ * See: log s35.65
+ */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -6,11 +11,9 @@ import { createHttpClient } from '../src/http';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { supersede } from '../src/plugins-extra';
 
-// A real server and Node's real fetch: it answers { n } after DELAY ms, n = requests
-// so far, and counts the requests a client aborted before the answer.
-// An abort is counted only if it reaches the server before the answer, so DELAY
-// is the window a loaded machine has between a request arriving and the test's
-// abort(); 40 ms lost that race once under a throttled gate (log s35.65).
+// Real server and real fetch, so the server's counters show what went out and what was aborted.
+// It answers { n } (n = requests so far) after DELAY ms; an abort counts only if it arrives
+// before the answer, so DELAY must outlast a loaded machine's gap between request and abort().
 const DELAY = 250;
 let server: Server;
 let base = '';
@@ -165,16 +168,3 @@ describe('supersede with a handler that passes cmd.signal to the client', () => 
     expect(y.value).toEqual({ n: requests });
   });
 });
-
-// Long form. Before this fix the dedupe key (method, responseType, URL) let a second
-// caller return the first caller's promise as is: the follower's signal was never
-// read, and the leader's signal aborted the one request both were waiting on. So a
-// follower was cancelled by someone else's abort and could not cancel with its own.
-// supersede hit it on every use: the handler's http.get under the second dispatch
-// joined the request the plugin had just aborted. The documented `signal` is per
-// request ("External abort signal (e.g. from component unmount)"), so sharing the
-// abort was never the contract; sharing the outcome is (the serveStaleOnError
-// follower test in http-client.test.ts). Found downstream, 2026-10-01.
-// Real fetch against a real server, not a stub: the server's own counters say how
-// many requests went out and which were aborted mid-flight, so no fake Response or
-// fake abort behaviour can make a case pass that the platform would fail.

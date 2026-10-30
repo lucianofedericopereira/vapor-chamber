@@ -146,14 +146,15 @@ export function dispatchFrom<T>(
   action: string,
   source: Observable<T>,
 ): Subscription {
+  const failed = (err: unknown): void => { bus.emit(`${action}:error`, err); };
   return source.subscribe({
     next(value) {
       const result = bus.dispatch(action, value as any);
       if (result != null && typeof (result as { then?: unknown }).then === 'function') {
-        (result as Promise<unknown>).catch((err) => { bus.emit(`${action}:error`, err); });
+        (result as Promise<unknown>).catch(failed);
       }
     },
-    error(err) { bus.emit(`${action}:error`, err); },
+    error: failed,
     complete() { bus.emit(`${action}:complete`, undefined); },
   });
 }

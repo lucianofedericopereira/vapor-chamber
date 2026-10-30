@@ -1,13 +1,8 @@
 /**
- * circuitBreaker - a failed half-open probe opens the circuit again.
- *
- * Past `resetTimeout` the circuit goes half-open and lets a dispatch through
- * to probe the backend. A failed probe raised `failCount`, but the trip was
- * gated on `state === 'closed'`, so the circuit stayed half-open: half-open
- * is not `open`, so every later dispatch went through to the failing backend
- * and the circuit never opened again until one succeeded. A failed probe now
- * opens it for another `resetTimeout`, as the reference model in
- * tests/plugins-utilities-verify.ts does.
+ * circuitBreaker: a failed half-open probe opens the circuit again.
+ * Why: a circuit left half-open after a failed probe sends every later dispatch to the failing backend until one succeeds.
+ * Shows: after resetTimeout the probe runs and fails, the circuit is open again (onOpen twice), and the next dispatch is refused without a call.
+ * See: tests/plugins-utilities-verify.ts.
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { BusError } from '../src/command-bus';

@@ -1,8 +1,13 @@
-// examples/custom-plugins.ts, imported for real: its demo runs, then its exported bus is probed.
+/**
+ * examples/custom-plugins.ts imported for real: its demo runs, then its exported bus is probed.
+ * Why: the example is what a reader copies, and its plugins are local functions, so only the import shows them in the example's order.
+ * Shows: the sender mints the timestamp; a prototype-named action reaches no rule; the rate limiter counts only its action; the demo prints what it claims, kept or rolled back.
+ * See: audit CU-6, audit CU-10.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandBus, CommandResult } from '../../src/command-bus';
 
-/** Imports the example fresh, with only `Date` faked so the rate-limit window stands still. */
+/** Imports the example fresh, with only `Date` faked: the rate limiter reads Date.now(), so its window stands still. */
 async function loadExample(): Promise<{ bus: CommandBus; addItem: (item: object, payload: object) => CommandResult; logs: string[] }> {
   vi.resetModules();
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -68,13 +73,3 @@ describe('the demo output', () => {
     expect((await loadExample()).logs).toContain('rolled back -> 0');
   });
 });
-
-/*
- * Why the real module: the example is what a reader copies, and the plugins
- * are its local functions, not exports (the sender `addItem` is exported).
- * Importing it runs its demo and gives the bus with every plugin installed in
- * the example's order, so a probe sees exactly what the demo does. Only Date
- * is faked: the rate limiter reads Date.now(), and a frozen clock keeps its
- * window full for the probes. Rows CU-6 and CU-10 of the 2026-10-12 release
- * audit.
- */

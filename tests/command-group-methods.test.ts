@@ -1,7 +1,7 @@
 /**
- * Coverage + behavior for the less-exercised useCommandGroup methods -
- * query, emit, use(plugin), on(pattern) (both the namespaced-prefix and the
- * '*' -> '<ns>*' wildcard branch), and dispose() unhooking everything.
+ * useCommandGroup's query, emit, use, on and dispose, inside its namespace.
+ * Why: a group keeps everything it touches inside its prefix, and dispose takes back all it installed.
+ * Shows: query and emit are namespaced; on('add') is the exact event, on('*') the whole namespace; use installs a plugin; dispose unhooks all three.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useCommandGroup, setCommandBus, resetCommandBus, getCommandBus } from '../src/chamber';

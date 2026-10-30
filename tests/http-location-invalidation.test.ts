@@ -1,4 +1,9 @@
-/** A write's answer also invalidates the Location and Content-Location it names, on its own origin (log s35.187). Rationale at the end. */
+/**
+ * A write's answer also invalidates the Location and Content-Location it names, on its own origin.
+ * Why: a POST that creates /api/items/1 and names it in Location would leave a cached GET of it answering stale; invalidating a URI on another origin would let one server purge entries of another (RFC 9111 4.4 forbids it).
+ * Shows: absolute, relative and fragment Location, and Content-Location, force a refetch (2 GETs); a cached relative URL resolves against the page location; a read in flight is not joined after the write; with no Location, another origin, or a failed write the cache serves (1 GET); without a page location a relative Location does not match a cached relative URL; a read in flight is still joined when the answer has no Location.
+ * See: RFC 9111 4.4, RFC 9110 10.2.2, audit S5, log s35.187, log s35.169, tests/http-cache-writes.test.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 
@@ -112,18 +117,3 @@ describe('controls', () => {
     expect(s.gets).toBe(1);
   });
 });
-
-/*
- * RFC 9111 4.4: a cache MUST invalidate the target URI on a non-error answer
- * to an unsafe method (the client did, tests/http-cache-writes.test.ts), and
- * MAY invalidate the URIs in Location and Content-Location, but MUST NOT when
- * their origin differs from the target's ("This helps prevent
- * denial-of-service attacks"). A POST that creates /api/items/1 and says so
- * in Location left a cached GET of it answering from before (audit S5, probe
- * L2). A relative value resolves against the target URI (RFC 9110 10.2.2,
- * 8.7); a cached relative URL against the base fetch itself uses. Outside a
- * browser there is no base and fetch refuses a relative URL, so only the
- * released target match applies there. The matcher is the one invalidation
- * already uses for entries, read tickets and reads in flight (log s35.169),
- * so a named URI is treated exactly like the target. Log s35.187.
- */

@@ -1,4 +1,9 @@
-/** One reader for a response's declared wait: every bridge and the client's failure carry the wait the client sleeps (log 36.42). Rationale at the end. */
+/**
+ * One reader for a response's declared wait: every bridge and the client's failure carry the wait the client sleeps.
+ * Why: the wait is Retry-After, else RateLimit `t` with no quota left, else X-RateLimit-Reset; a bridge reading less re-sends inside the server's window.
+ * Shows: each source and its precedence sets retryIn, on single, batched and app-client bridges, the outbox and postCommand; the bus and the client wait it, not a backoff.
+ * See: docs/retry.md, log 36.42, RFC 9110 10.2.3, RFC 6585 4, draft-ietf-httpapi-ratelimit-headers-11.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BusError, createAsyncCommandBus, type CommandResult } from '../src/command-bus';
 import { invalidateCsrfCache, postCommand } from '../src/http';
@@ -8,7 +13,7 @@ import { batchServer, singleServer } from './backend-stubs';
 
 /** 2026-10-14 12:00:00 UTC, a whole second. */
 const NOW = Date.UTC(2026, 9, 14, 12);
-/** A Unix time `s` seconds after NOW, as Laravel's and GitHub's X-RateLimit-Reset is written. */
+/** A Unix time `s` seconds after NOW, as Laravel and GitHub write X-RateLimit-Reset; digits a timer can wait read as delay seconds. */
 const unix = (s: number) => String(NOW / 1000 + s);
 
 /** A fetch answering each call from `answers` (the last one repeats), a 429 or a 200. */
@@ -176,23 +181,3 @@ describe("the HTTP client's failure carries the wait it slept", () => {
     expect(calls).toHaveLength(2);
   });
 });
-
-/*
- * docs/retry.md: a declared wait (`context.retryIn`) is Retry-After, else the
- * RateLimit field's `t` for a policy with no quota left, else
- * X-RateLimit-Reset. Only the client's own re-send read all three: the
- * failure it threw, and every bridge's, read Retry-After alone, so a bridged
- * 429 with only a RateLimit field was re-sent after the bus's 200 ms backoff,
- * inside the server's window. One reader in the HTTP layer now sets
- * `retryIn`, and the client sleeps that same value.
- *
- * RFC 9110 10.2.3: Retry-After is "how long the user agent ought to wait".
- * RFC 6585 4: a 429 "MAY include a Retry-After". draft-ietf-httpapi-
- * ratelimit-headers-11 4.1.2: `t` is delay-seconds; 7: Retry-After "MUST take
- * precedence". X-RateLimit-Reset has no standard, and the draft's appendix
- * lists four readings of it. Laravel 13 sends it as a Unix timestamp
- * (ThrottleRequests::getHeaders, InteractsWithTime::availableAt), and so does
- * GitHub. Read as delay seconds, such a value is about 1.76e12 ms, past any
- * timer, and was dropped. Digits a timer can wait are delay seconds, larger
- * ones Unix seconds: the bound is the timer's own (MAX_TIMEOUT_MS, 24.8 days).
- */

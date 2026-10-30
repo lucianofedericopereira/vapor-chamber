@@ -1,4 +1,9 @@
-/** A cancel whose reason is the caller's own Error is read as a cancel (audit D4). Rationale at the end. */
+/**
+ * A cancel whose reason is the caller's own Error, read by failureCondition and the async retry budget.
+ * Why: a failure is a cancel when it IS the signal's reason; read by name, it counts as a failure and spends retry tokens.
+ * Shows: the own-Error reason reads as aborted given the signal, a different Error stays failed, cancels spend no retry token.
+ * See: audit D4, src/failure.ts, tests/circuit-breaker-cancel.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { BusError, createAsyncCommandBus, failureCondition, type Command } from '../src/command-bus';
 
@@ -64,18 +69,3 @@ describe('the async retry budget', () => {
     expect({ ok: saved.ok, calls }).toEqual({ ok: true, calls: 2 });
   });
 });
-
-/*
- * An abort with the caller's own Error comes back as that Error (abortedResult,
- * docs/performance.md), so its name is the app's, not `AbortError`. Every
- * reader that told a cancel by name took it for a failure: failureCondition
- * answered `failed`, the async retry loop counted it uncertain and spent a
- * token on each one (eight cancels left a real 503 un-retried), and
- * circuitBreaker counted it (tests/circuit-breaker-cancel.test.ts).
- *
- * The rule is the platform's: a failure is the caller's cancel when it IS the
- * signal's reason. `throwIfAborted()` and Fetch reject with `signal.reason`
- * itself. Identity, not "the signal is aborted": a real failure that lands
- * after an abort is not the reason, and it still counts (the control in the
- * breaker file). One reader, `_isCancel` in src/failure.ts, used at each site.
- */

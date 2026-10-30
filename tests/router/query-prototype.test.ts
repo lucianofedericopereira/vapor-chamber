@@ -1,27 +1,9 @@
 /**
- * Query objects must not inherit from Object.prototype.
- *
- * `parseQuery` built into a `{}` and then read `query[key]` to detect a repeated
- * key. On a plain object that read walks the prototype chain, so any query key
- * named after an Object.prototype member came back DEFINED and took the
- * "repeated key" branch - turning a scalar into an array whose first element was
- * the inherited function. `?__proto__=` was worse: the assignment went through
- * the `__proto__` setter, so the key never became an own property and the parsed
- * object's prototype was replaced.
- *
- * Reachable from a plain link - no privileged caller required. Same bug class
- * as the MCP `tools/call` gate (`Object.hasOwn`, src/dict.ts), which is why
- * this one is pinned rather than trusted to review.
- *
- * THE SECOND HALF OF THIS FILE exists because pinning `parseQuery` alone was
- * not enough: `setQuery` rebuilt the merged query with a SPREAD, and spreading
- * a null-prototype object produces a plain one. So the property held after
- * `navigate()` and was lost after the first typed query write - the two arms
- * disagreeing is exactly what the engine says must never happen. Asserted
- * through the REAL router (real table, real engine, memory history) rather
- * than against the helper, because the helper was never the part that broke.
+ * Query objects must not inherit from Object.prototype, on every path that builds them.
+ * Why: a link such as `?constructor=1` or `?__proto__=` must not turn a scalar into an array holding an inherited function, replace the query's prototype, force a loader refetch, or be lost on a typed query write; no privileged caller is needed to reach it.
+ * Shows: parseQuery and setQuery give null-prototype queries, treat polluting keys as ordinary own keys and pollute nothing; defaultAffects ignores undeclared polluting keys; START_LOCATION has a prototype-free query and is frozen all the way down. Router cases run through a real router with memory history.
+ * See: src/dict.ts
  */
-
 import { describe, expect, it } from 'vitest';
 import { START_LOCATION } from '@router/engine';
 import { createMemoryHistory } from '@router/history';
@@ -40,7 +22,6 @@ describe('parseQuery - prototype safety', () => {
 
   it.each(POLLUTING_KEYS)('treats ?%s= as an ordinary scalar key', (key) => {
     const query = parseQuery(`?${key}=1`);
-    // The assertion that fails against the pre-fix code: it produced [fn, '1'].
     expect(query[key]).toBe('1');
     expect(Array.isArray(query[key])).toBe(false);
     expect(Object.hasOwn(query, key)).toBe(true);
@@ -65,8 +46,7 @@ describe('parseQuery - prototype safety', () => {
   });
 
   it('round-trips a polluting key back through stringifyQuery', () => {
-    // stringifyQuery uses Object.keys (own, enumerable), so a null-prototype
-    // object serialises exactly like a plain one - no key gained or lost.
+    // stringifyQuery uses Object.keys, so a null-prototype object serialises like a plain one.
     expect(stringifyQuery(parseQuery('?constructor=1&page=2'))).toBe('constructor=1&page=2');
   });
 
@@ -83,8 +63,7 @@ describe('defaultAffects - an undeclared query key must not force a refetch', ()
   const handlers = { prefixes: { 'rows:': () => [] } } as never;
 
   it.each(POLLUTING_KEYS)('does not treat ?%s= as a declared param', (key) => {
-    // Pre-fix this used `key in record.queryDefs`, which walks the prototype
-    // chain, so any of these reported true and refetched the record's loader.
+    // Membership must be an own-key test: `in` walks the prototype chain.
     expect(defaultAffects(record, [key], handlers)).toBe(false);
   });
 
@@ -128,7 +107,6 @@ describe('location.query prototype - uniform across BOTH commit paths', () => {
     await router.isReady();
     await router.push('/products');
     router.setQuery({ page: 3 });
-    // Pre-fix this was Object.prototype: setQuery spread the query into a `{}`.
     expect(Object.getPrototypeOf(router.currentRoute.value.location.query)).toBe(null);
   });
 
@@ -138,7 +116,6 @@ describe('location.query prototype - uniform across BOTH commit paths', () => {
     await router.push('/products');
     router.setQuery({ page: 3 });
     const query = router.currentRoute.value.location.query as Record<string, unknown>;
-    // Pre-fix: [Function Object].
     expect(query.constructor).toBeUndefined();
     expect(query.toString).toBeUndefined();
   });
@@ -147,14 +124,9 @@ describe('location.query prototype - uniform across BOTH commit paths', () => {
     const router = makeRouter();
     await router.isReady();
     await router.push('/products');
-    // COMPUTED key, deliberately: a `{ __proto__: 'x' }` literal is the
-    // prototype-setting syntax and never creates a key at all. `useQueryParam`
-    // writes `{ [key]: value }`, so a computed key is the shape that actually
-    // reaches setQuery from the public surface.
+    // Computed key on purpose: a `{ __proto__: 'x' }` literal sets the prototype and creates no key; useQueryParam writes `{ [key]: value }`.
     router.setQuery({ ['__proto__']: 'x' });
     const query = router.currentRoute.value.location.query;
-    // Pre-fix the inherited setter swallowed the write: no own key, and the
-    // value never reached the URL.
     expect(Object.hasOwn(query, '__proto__')).toBe(true);
     expect(Object.getPrototypeOf(query)).toBe(null);
     expect(router.currentRoute.value.location.fullPath).toContain('__proto__=x');
@@ -170,20 +142,8 @@ describe('location.query prototype - uniform across BOTH commit paths', () => {
   });
 });
 
-/**
- * The third arm, and the one the module SHIPS: START_LOCATION.
- *
- * Both arms of resolveLocation, cleanQueryPatch and setQuery go out of their way
- * to stay prototype-free, on the stated grounds that "a consumer must not have
- * to know which branch built the query". The location every router starts on was
- * a literal `{}`, so the property held everywhere except before the first
- * navigation - which is exactly when a consumer is most likely to read a query
- * it has not populated yet.
- *
- * It is also a module-level singleton, exported publicly and shared by every
- * router in the process, and `Object.freeze` reaches one level - so its nested
- * objects were writable globals.
- */
+// START_LOCATION is the location every router starts on: a consumer must not have to know which branch built the query.
+// It is a public module-level singleton shared by every router, and Object.freeze reaches one level only.
 describe('START_LOCATION', () => {
   it('carries a prototype-free query like every other location', () => {
     expect(Object.getPrototypeOf(START_LOCATION.query)).toBeNull();

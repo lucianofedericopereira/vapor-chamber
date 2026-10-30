@@ -1,17 +1,8 @@
 /**
- * Covers src/chamber-vapor.ts's SUCCESS paths - createVaporChamberApp's return
- * (not just its throw) and defineVaporCustomElement's extraOptions ternary.
- *
- * tests/chamber-vapor.test.ts exercises the "Vapor not available" throw path
- * exclusively. That's not a timing gap to await past: Node's plain
- * `import('vue')` does not expose createVaporApp / defineVaporCustomElement /
- * vaporInteropPlugin as main-entry exports at all in this environment (only a
- * bundler-resolved build does) - confirmed directly, `waitForVueDetection()`
- * changes nothing. tests/vue-global-detection.test.ts already established the
- * fix for exactly this: stub `globalThis.__VAPOR_CHAMBER_VUE__` with a mock Vue object
- * before chamber.ts's module-load probe runs, so its SYNCHRONOUS global
- * branch (not the async ESM import) wires up the Vapor surface. This file
- * follows the same pattern to reach chamber-vapor.ts's success paths.
+ * src/chamber-vapor.ts with Vapor present: each wrapper forwards to Vue's own function and returns its result.
+ * Why: coverage: Node's `import('vue')` lacks the Vapor exports, so only a `__VAPOR_CHAMBER_VUE__` stub set before the probe reaches these branches.
+ * Shows: createVaporChamberApp returns Vue's app with rootProps; custom elements with and without extraOptions; components and both async forms pass through; production is silent.
+ * See: tests/chamber-vapor.test.ts, tests/vue-global-detection.test.ts.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
@@ -90,10 +81,7 @@ describe('defineVaporCustomElement - Vapor available', () => {
   });
 });
 
-// The remaining two wrappers had their "Vapor present" side stubbed in mockVue
-// but never actually called, so only their null-return branch was reached -
-// which is the half that cannot regress silently, since it now DEV-warns. The
-// forwarding half is the half a refactor could quietly break.
+// The forwarding half is the one a refactor could quietly break; the null half already warns in DEV.
 describe('defineVaporComponent / defineVaporAsyncComponent - Vapor available', () => {
   it('defineVaporComponent forwards options to Vue and returns its result', async () => {
     const { defineVaporComponent } = await freshChamberVapor();
@@ -115,18 +103,12 @@ describe('defineVaporComponent / defineVaporAsyncComponent - Vapor available', (
   });
 
   it('the three wrappers are silent in production, and still return null', async () => {
-    // The `if (DEV)` guard added around each devWarnNoVapor() has a false side
-    // that vitest never takes on its own - NODE_ENV is not 'production' here,
-    // so DEV is always true and the branch is dead in a normal run. Pin it the
-    // way tests/dev-flag.test.ts pins DEV itself: force the runtime fallback to
-    // false, then assert the warning is gone while the RETURN CONTRACT is not.
-    // Silencing a warning must never change what the function gives back.
+    // NODE_ENV is never 'production' in vitest, so force it: the warning goes, the null return must not.
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // No global stub here, so the Vapor surface is absent and all three take
-      // the null path - the same path that warns in dev.
+      // No global stub, so Vapor is absent and all three take the null path.
       const m = await import('../src/chamber-vapor');
       expect(m.defineVaporCustomElement({})).toBeNull();
       expect(m.defineVaporComponent({})).toBeNull();
@@ -141,9 +123,7 @@ describe('defineVaporComponent / defineVaporAsyncComponent - Vapor available', (
 
   it('defineVaporAsyncComponent also accepts the options-object form', async () => {
     const { defineVaporAsyncComponent } = await freshChamberVapor();
-    // Vue supports both `defineVaporAsyncComponent(loader)` and the
-    // `{ loader, loadingComponent, ... }` object; our signature allows both, so
-    // the object form should reach Vue unchanged rather than be treated as a fn.
+    // Vue takes a loader or an options object; the object must reach Vue unchanged, not be called.
     const opts = { loader: () => Promise.resolve({ default: {} }), delay: 0 };
     const Async = defineVaporAsyncComponent(opts) as any;
 

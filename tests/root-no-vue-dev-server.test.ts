@@ -1,4 +1,9 @@
-// The packed package under a real Vite dev server, in an app with no Vue installed; rationale at the end.
+/**
+ * The packed package root under a real Vite dev server, in an app with no Vue installed.
+ * Why: the root must work with no Vue in the tree. If the build folded chamber.ts's specifier into a literal `import("vue")` in dist/chamber.js, the dev server's pre-bundling would resolve it and answer 500 for the package: a blank page, even for an app importing only createCommandBus. The package is packed and extracted, not aliased to src or dist, because what ships is what is tested; the app sits in the OS temp directory so no node_modules above it holds a `vue`.
+ * Shows: the pre-bundled dep is served with 200 with no vue installed and with vue linked in; in Node the packed root still finds the installed Vue. Vue apps wire through `vapor-chamber/vue` or `/vapor`, not the root, since the specifier is a runtime value.
+ * See: log s36.F26
+ */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -94,22 +99,3 @@ describe('the package root under a Vite dev server', () => {
     expect(out.trim()).toBe('true');
   });
 });
-
-/*
- * Why this file exists. The root has to work with no Vue in the tree (README).
- * The build used to fold chamber.ts's specifier into a literal
- * `import("vue")` in dist/chamber.js. A Vite dev server pre-bundles the whole
- * package, re-analyses the pre-bundled dep and resolves that literal, so an
- * app with no `vue` installed got a 500 for the package: a blank page, even
- * when it imported only createCommandBus (log 36.F26). Pre-bundling does no
- * tree-shaking, which is why the bus-only app is the one tested here.
- *
- * The package is packed and extracted, not aliased to src or dist: the bug
- * lived in what ships. The app sits in the OS temp directory, so no
- * node_modules above it holds a `vue`. Vite runs from this repo.
- *
- * The controls: with `vue` linked in, the dep is served too, and Node, which
- * resolves a bare specifier at runtime, still finds Vue through the root's
- * lookup. A browser under the dev server cannot: the specifier is a runtime
- * value now, and a Vue app wires through `vapor-chamber/vue` or `/vapor`.
- */

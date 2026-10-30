@@ -1,4 +1,9 @@
-/** Tabs sharing one outbox: each sends its own records, a closed tab's records go to another, none twice. Rationale at the end. */
+/**
+ * Tabs sharing one outbox queue: each tab sends its own records, a closed tab's records go to another tab, none twice.
+ * Why: if every tab flushed the stored queue, a record would be sent twice (only the server's Idempotency-Key would dedupe it), and a closed tab's records would wait for a reload; a merge that is not per-tab authority would lose an add made at the same moment in another tab.
+ * Shows: a stored record from a gone tab is sent once by two tabs; a live tab's caller gets its own done and the other tab does not send it; the first waiter takes a closed tab's records; a clear() in any tab aborts every held caller; crossing writes keep both tabs' records; foreign locks and a pending lock grant do not count as an open tab.
+ * See: log s36.F5, s36.F18
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { type Command, createAsyncCommandBus } from '../src/command-bus';
@@ -7,6 +12,7 @@ import type { PersistStorage } from '../src/store-persist';
 import { defineTransport } from '../src/transports';
 
 const closers: Array<() => void> = [];
+// `window` marks a page; navigator.locks and BroadcastChannel are Node's own.
 beforeEach(() => { vi.stubGlobal('window', {}); });
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); });
 
@@ -225,14 +231,3 @@ describe('two tabs on one outbox', () => {
     expect(await (held.value as Accepted).done).toMatchObject({ ok: true, value: 'jam' });
   });
 });
-
-// Rationale.
-// The 1-7 fix-up, audit M1 (coordinator rulings 2026-10-21): the outbox's
-// queue is a state half, saved and shared across tabs. Two tabs on one key
-// each loaded the stored queue and each flushed it, so a record went twice
-// (only the server's Idempotency-Key deduped it). Sending is the work of the
-// tab that dispatched, which holds the caller's `done`. Each tab holds a Web
-// Lock for its life and waits on every other tab's: when one closes, the
-// first waiter takes its lock and its records, so none is sent twice and none
-// waits for a reload. Node's own navigator.locks and BroadcastChannel are the
-// real platform here; `window` marks a page.

@@ -1,15 +1,13 @@
 /**
- * src/vapor.ts's async wrapper and its seed, against the source (decision 6).
- * tests/vapor-async-wire.test.ts proves them in real builds of the dist; this
- * file is what keeps src/vapor.ts inside the coverage gate. The default
- * project's `vue` carries no Vapor (tests/vapor-subpath.test.ts), so Vue's
- * `defineVaporAsyncComponent` is stood in for.
+ * src/vapor.ts's defineVaporAsyncComponent wrapper and its registry seed, run against the source.
+ * Why: the /vapor wrapper must hand the loader to Vue's function, and the root wrapper must still find Vue's function in every build except a /vapor-wired one, or async components would not resolve there. Also the only file reaching the wrapper and both arms of the seed, so the 100% floor needs it.
+ * Shows: the wrapper returns Vue's result for the loader; importing src/vapor seeds the registry with Vue's function, and seeds nothing under __VC_WIRED_VAPOR__.
+ * See: log s35.109, tests/vapor-async-wire.test.ts, tests/vapor-subpath.test.ts
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const vueAsync = vi.hoisted(() => (loader: unknown) => ({ asyncOf: loader }));
-// The two other names /vapor imports are absent from this `vue` too; a mock
-// must still name them.
+// The default project's vue carries no Vapor, so Vue's function is stood in for; the two other names /vapor imports are absent too, and a mock must still name them.
 vi.mock('vue', async (original) => ({
   ...(await original<object>()),
   createVaporApp: undefined,

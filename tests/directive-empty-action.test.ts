@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `v-vc-command` with no action: a press dispatches nothing, on
- * both renderers. The long note is at the end of this file.
+ * FIXTURE: `v-vc-command` with no action: a press dispatches nothing, on both renderers.
+ * Why: Vue calls a directive whatever its value; a press dispatching `undefined` fails, shows vc-error and is announced. Like `@click=""`, it does nothing.
+ * Shows: empty, bare and null actions dispatch nothing, show no error, warn once in DEV; an action set after mount dispatches from then on; a literal action dispatches; an action that cannot be read at mount does not stop the mount.
+ * See: docs/rc-alignment-log.md 36.6, tests/compile-vapor.ts.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +89,7 @@ describe('v-vc-command with no action', () => {
     host.remove();
   });
 
+  // Checked at press time, when both renderers decide the action; Vapor has no `updated` hook for a mount-time check.
   for (const renderer of ['vapor', 'vdom'] as const) {
     it(`${renderer}: an action set after mount dispatches from then on`, async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -110,28 +113,23 @@ describe('v-vc-command with no action', () => {
       host.remove();
     });
   }
-});
 
-/*
- * WHY THIS FILE EXISTS. Vue calls a directive whatever its value is. Before
- * this fix one notation behaved three ways (docs/rc-alignment-log.md, 36.6
- * R1, measured on rc.10 and rc.11):
- *
- *   Vapor `v-vc-command=""`   rc.10: compile output threw a SyntaxError.
- *                             rc.11: a press dispatched the string "undefined".
- *   vDOM, bare or `=""`       a press dispatched `undefined`.
- *
- * On a default bus that press failed with `No handler registered for
- * "undefined".`, so the control showed vc-error and the message was announced
- * to screen readers.
- *
- * The rule now, the shape Vue's own `@click=""` has (a listener that does
- * nothing): the directive stays bound, and a press with no action (undefined,
- * null or '') does nothing, with one DEV warning per element. It is checked at
- * press time because that is when the action is decided on both renderers, so
- * an action set after mount works, which is the case a mount-time refusal
- * would lose on Vapor (no `updated` hook there).
- *
- * Every template goes through tests/compile-vapor.ts on the installed Vue. The
- * literal-action cases are the control: they show the harness dispatches.
- */
+  it('an action that cannot be read yet does not stop the mount, and one set later works', async () => {
+    const s = v.reactive({ a: null as { name: string } | null });
+    const errors: unknown[] = [];
+    const tpl = await compileVapor(v, '<button v-vc-command="s.a.name">x</button>');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = v.createVaporApp(v.defineVaporComponent({ setup: () => tpl.render({ s }) }));
+    app.config.errorHandler = (e: unknown) => { errors.push(e); };
+    app.directive('vc-command', vcCommandVapor);
+    app.mount(host);
+    expect(errors).toEqual([]);
+    s.a = { name: 'late' };
+    (host.querySelector('button') as HTMLButtonElement).click();
+    await settle();
+    expect(seen).toEqual(['late']);
+    app.unmount();
+    host.remove();
+  });
+});

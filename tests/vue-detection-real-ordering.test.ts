@@ -1,28 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - is the detection failure an artefact of how the other tests probe,
- * or does it happen with the real Vue build and the real `chamber.ts`?
- *
- * Worth asking, because the two neighbouring suites each prove only half:
- *   - `tests/vue-global-detection.test.ts` stubs globals and hands the probe a
- *     MOCK namespace. It measures OUR logic's response to a shape, not Vue.
- *   - `tests/vue-detection-global-clobber.test.ts` uses the real build and
- *     measures VUE's behaviour (`__VUE__` becomes `true` on app creation), but
- *     never runs `chamber.ts` against it.
- *
- * Neither on its own shows an end-to-end failure. This file closes that gap:
- * real `vue.runtime-with-vapor.esm-browser.js`, a real `createVaporApp().mount()`,
- * and a real, freshly-evaluated `src/chamber.ts` - nothing stubbed, nothing
- * mocked. The only thing arranged is the ORDER, which is the variable under
- * test.
- *
- * The order being reproduced is the documented no-bundler page from whitepaper
- * §11.6, in the arrangement where the library is not the first thing to load:
- * a Vue app mounts, and only then does a later chunk / island / deferred
- * script pull in vapor-chamber. In a bundler this is harmless because the
- * async `import('vue')` fallback resolves; on a no-bundler page that fallback
- * is a bare specifier the browser cannot resolve at all, so the synchronous
- * global is the only channel left - and by then it holds `true`.
+ * Vapor detection in a freshly evaluated `src/chamber.ts` after a real Vue app has mounted: the real with-vapor build, a real `createVaporApp().mount()`, nothing stubbed except the owned slot where named.
+ * Why: on a no-bundler page, a later chunk or island that loads the library after an app mounted finds `__VUE__ === true` and cannot see Vapor, because the async `import('vue')` cannot resolve there; the owned slot and `configureVue()` must still work in that order.
+ * Shows: after a mount the library reports no Vapor and a hint saying Vue is unreachable; under Vitest's resolver the async probe still finds Vue; a namespace in `__VAPOR_CHAMBER_VUE__`, or passed to `configureVue()`, restores the full Vapor surface.
+ * See: tests/vue-global-detection.test.ts, tests/vue-detection-global-clobber.test.ts, tests/vapor-sfc-prod-detection.test.ts, docs/whitepaper.md 9.6
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -53,32 +34,18 @@ describe('real ordering: app mounts first, library loads second', () => {
   it('REAL FAILURE: after a real mount, a fresh chamber.ts cannot see Vapor via __VUE__', async () => {
     const vue = await mountRealVaporApp();
 
-    // Real Vue really did this - no stub involved.
     expect((globalThis as unknown as Record<string, unknown>).__VUE__).toBe(true);
 
-    // The page genuinely has Vapor sitting right there.
     expect(typeof vue.createVaporApp).toBe('function');
 
-    // Now the library loads, for the first time, into that page. `vi.resetModules`
-    // is not simulating anything about detection - it is how a fresh module
-    // evaluation is obtained in-process, which is what a late chunk does.
+    // resetModules gives a fresh module evaluation, as a late chunk gets.
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
-    // MEASURED, end to end: detection comes up empty. Not a mock artefact -
-    // the boolean on the left was written by Vue, and the probe on the right
-    // is the shipping one.
-    //
-    // (The async `import('vue')` fallback is what saves the bundler case, and
-    // it is deliberately NOT awaited here: on a no-bundler page it is a bare
-    // specifier that cannot resolve, so this synchronous outcome is the whole
-    // outcome. `waitForVueDetection()` is asserted separately below to keep
-    // the distinction honest.)
+    // The async import('vue') probe is deliberately not awaited: on a no-bundler page it cannot resolve.
     expect(chamber.isVaporAvailable()).toBe(false);
     expect(chamber.getVaporAppFn()).toBeNull();
 
-    // And the failure is legible rather than silent, which is the other half
-    // of the fix: the hint names the cause and the one-line remedy.
     expect(chamber.vueDetectionHint()).toMatch(/unreachable/);
   });
 
@@ -87,18 +54,10 @@ describe('real ordering: app mounts first, library loads second', () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
-    // Under a bundler (which is what vitest is here), `import('vue')` resolves,
-    // so detection recovers a tick later.
-    //
-    // That holds under **the dev server** only. In a production build the bare
-    // specifier does not resolve either, so a built page with Vapor bundled
-    // into it would throw. Pinned separately in
-    // `tests/vapor-sfc-prod-detection.test.ts`. Vitest resolves `vue`, which is
-    // precisely why this suite could not see that half.
+    // Vitest resolves `import('vue')`, as a dev server does; a production build does not (tests/vapor-sfc-prod-detection.test.ts).
     await chamber.waitForVueDetection();
 
-    // The plain `vue` entry ships no Vapor runtime (whitepaper §9.6), so Vapor
-    // specifically stays false even here - but Vue itself was found.
+    // Vue itself was found; the plain `vue` entry this resolves to ships no Vapor runtime.
     expect(chamber.getVueDeepRefFn()).not.toBeNull();
   });
 
@@ -106,14 +65,12 @@ describe('real ordering: app mounts first, library loads second', () => {
     const vue = await mountRealVaporApp();
     expect((globalThis as unknown as Record<string, unknown>).__VUE__).toBe(true);
 
-    // The one line the fix asks a no-bundler page for. Same real namespace,
-    // parked in a slot Vue does not write.
+    // The same real namespace, parked in a slot Vue does not write.
     vi.stubGlobal('__VAPOR_CHAMBER_VUE__', vue);
 
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
-    // MEASURED: full Vapor surface, synchronously, on the page that failed above.
     expect(chamber.isVaporAvailable()).toBe(true);
     expect(chamber.getVaporAppFn()).toBe(vue.createVaporApp);
   });

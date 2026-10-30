@@ -1,6 +1,8 @@
 /**
- * FIXTURE - `httpTransport` with `batch` never posts an empty batch, on any way
- * a flush gets scheduled. The long note is at the end.
+ * FIXTURE: `httpTransport` with `batch` never posts an empty batch, on any way a flush gets scheduled.
+ * Why: `flush()` has no empty-batch guard; the invariant that a flush follows a push needs evidence, not a reading of the code.
+ * Shows: a burst, separate ticks, a timed window, pre-aborted and queue-aborted dispatches, a dispatch during a flush: exact batch sizes, none 0.
+ * See: log s35.25, log s35.168, tests/batching-abort.test.ts.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -73,7 +75,7 @@ describe('httpTransport with batch: a flush always carries at least one command'
     controller.abort();
     expect((await pending).error).toMatchObject({ code: 'core:aborted:dispatch' });
     await new Promise((r) => setTimeout(r, 0));
-    expect(sizes).toEqual([]); // tests/batching-abort.test.ts, log s35.168
+    expect(sizes).toEqual([]);
   });
 
   it('a dispatch made while a flush is in flight gets a flush of its own', async () => {
@@ -88,24 +90,3 @@ describe('httpTransport with batch: a flush always carries at least one command'
     expect(sizes).toEqual([2, 1]);
   });
 });
-
-/*
- * Why this file exists. `flush()` used to open with
- * `if (batch.length === 0) return;` under a `v8 ignore` marker whose comment
- * said the branch was unreachable. The guard was removed in log s35.25 on a
- * READING of the code: a flush is scheduled only after a push, once per
- * window, and only a flush empties the queue. A reading is not evidence, and a
- * green suite after the removal is a negative result with no positive control.
- *
- * This file is that evidence. It drives the bridge through each way a flush
- * is scheduled (a burst, separate ticks, a timed window with idle time after
- * it, a pre-aborted dispatch, a dispatch aborted while queued, a dispatch made
- * during a flush) and records the size of every batch the backend receives.
- * No batch is empty, and the counts are exact, so an extra empty POST would
- * fail the list as well as the rule.
- *
- * The positive control was run before this file was trusted: with `flush()`
- * edited to schedule one more flush after every real one, four of the five
- * tests fail on a recorded batch of 0 (the fifth posts nothing either way).
- * See log s35.25.
- */

@@ -1,4 +1,9 @@
-// useCommand on an async bus that cannot reject adds no promise to a dispatch. The long note is at the end.
+/**
+ * useCommand on an async bus that cannot reject adds no promise to a dispatch.
+ * Why: wrapping every async dispatch in `.then(undefined, rejected)` would cost a promise and a microtask turn per dispatch; an async bus rejects only when it declares onMissing: 'throw' or a throwing naming rule, both fixed at creation, so the composable decides once.
+ * Shows: on a bus that cannot reject the dispatch settles in the same microtask turns as bus.dispatch; both rejecting configurations still settle as failed results; every other outcome (value, throw, refusal, missing handler) resolves on a bus that cannot reject.
+ * See: log s36.F49
+ */
 import { describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -53,12 +58,3 @@ describe('useCommand on an async bus', () => {
     expect(all.map((x) => (x as PromiseFulfilledResult<{ ok: boolean }>).value.ok)).toEqual([true, false, false, false]);
   });
 });
-
-// Why: useCommand's dispatch put `.then(undefined, rejected)` on every async
-// dispatch, a promise and a turn, to turn a rejection into a failed result. An
-// async bus rejects only when it declares `onMissing: 'throw'` or a naming rule
-// with `onViolation: 'throw'`, both set at creation, so the composable decides
-// once whether its bus can reject. The turn count pins the claim against
-// bus.dispatch itself. The controls pin both rejecting buses, still settled as
-// failed results, and the last case pins that every other outcome of a bus that
-// cannot reject resolves on its own, so nothing needed the `.then`.

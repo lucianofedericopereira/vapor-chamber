@@ -1,7 +1,7 @@
 /**
- * Tests for the `supersede` plugin - auto-abort the previous in-flight
- * dispatch for the same key, so a rapid second dispatch (search-as-you-type,
- * a filter changing mid-fetch) cancels the stale one instead of racing it.
+ * The supersede plugin: a second dispatch for the same key aborts the previous in-flight one.
+ * Why: search-as-you-type or a filter changing mid-fetch would race stale requests against the latest one.
+ * Shows: the earlier signal aborts (and the dispatch still resolves); different keys, different actions, null keys and out-of-scope actions are never aborted; a caller signal still propagates; the async bus accepts the plugin and the sync bus refuses it; a part whose attach throws installs nothing.
  */
 import { describe, expect } from 'vitest';
 import { supersede } from '../src/plugins-extra';
@@ -9,11 +9,7 @@ import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
-/**
- * A handler that must still be in flight when the test acts waits on a gate
- * the test opens, not on a timer: under load a handler's timer can expire
- * before the test's own tick, and the dispatch settles too early.
- */
+// A handler that must stay in flight waits on a gate, not a timer: under load its timer can expire before the test acts.
 function gate(): { wait: Promise<void>; open: () => void } {
   let open!: () => void;
   const wait = new Promise<void>((r) => { open = r; });
@@ -68,8 +64,7 @@ describe('supersede plugin', () => {
     bus.register('search', async () => { await tick(5); return 'searched'; });
     bus.register('save', async () => { await tick(5); return 'saved'; });
 
-    // Same target ({}) but different actions - commandKey includes the
-    // action name, so these must never supersede each other.
+    // The key includes the action name.
     const [a, b] = await Promise.all([
       bus.dispatch('search', {}),
       bus.dispatch('save', {}),

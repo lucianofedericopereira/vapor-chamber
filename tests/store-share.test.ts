@@ -1,4 +1,9 @@
-/** A store shared across tabs (`share: shareTabs()`): every tab converges on one state, written with no dispatch. Rationale at the end. */
+/**
+ * A store shared across tabs (`share: shareTabs()`): each write crosses as its command, the receiving tab runs the store's own handler with no dispatch, and every tab converges on one state.
+ * Why: if a receiving tab dispatched what another tab already ran, every plugin, listener and reaction there would see a mirror of a write that ran elsewhere; a tab with another tab open must send its writes, and a tab with none must send nothing. The tab holding the store's Web Lock runs every tab's command and posts it on.
+ * Shows: a write in one tab becomes every tab's state; the receiver's listeners and plugins see nothing while its history and persist record the write; commands go out as { kind, value, tab } on a channel named vc:store:<id> by default, without echo; an undo reaches the other tab; $dispose, a missing share option, a server, a missing BroadcastChannel and a state that cannot be cloned keep a write in its tab (warning in development only); a worker shares.
+ * See: log s36.F30, log s36.F39, tests/store-propagate-undo.test.ts.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus, type Command } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -19,7 +24,7 @@ beforeEach(() => { vi.stubGlobal('window', {}); });
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 let n = 0;
-/** One "tab": its own bus and store instance, sharing over the channel `name`. */
+// One "tab": its own bus and store instance, sharing over the channel `name`; tests open two tabs first because a tab alone sends no write.
 function tab(name: string, opts: { share?: boolean; undo?: boolean; storage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } } = {}) {
   const bus = createCommandBus();
   const useCart = defineChamberStore('cart', {
@@ -34,7 +39,7 @@ function tab(name: string, opts: { share?: boolean; undo?: boolean; storage?: { 
   return { bus, cart };
 }
 
-/** Every message on the channel `name`, as another tab reads it. */
+// Every message on the channel `name`, as another tab reads it.
 function wire(name: string): Array<Record<string, unknown>> {
   const heard: Array<Record<string, unknown>> = [];
   const ch = new BroadcastChannel(name);
@@ -43,7 +48,7 @@ function wire(name: string): Array<Record<string, unknown>> {
   return heard;
 }
 
-/** Every message on the channels this file's tabs use: `settle` waits until they carry nothing (tests/tabs-quiet.ts). */
+// `settle` waits until the channels this file's tabs use carry nothing (tests/tabs-quiet.ts).
 const net = traffic();
 afterEach(() => net.close());
 const settle = (): Promise<void> => net.settle();
@@ -286,22 +291,3 @@ describe('the wire', () => {
     expect(b.cart.state.value).toEqual({ items: ['milk'] });
   });
 });
-
-/*
- * `share` took an event lane an app bridged with createChannel, and a state
- * from another tab came in as the `<id>$sync` command: every plugin, listener
- * and reaction of the receiving tab saw a mirror of a write that already ran
- * elsewhere, and a held Set kept each received state until its `$sync`
- * settled so a late one was not sent back as this tab's own.
- *
- * `share: shareTabs()` then opened one BroadcastChannel per shared store and
- * sent the whole state each write reached, weighed by a per-tab count. Two
- * tabs writing at once kept one state and lost the other's write.
- *
- * Now each write crosses as its command (log 36.F30, and
- * tests/store-propagate-undo.test.ts): the receiving tab runs the store's own
- * handler with no dispatch, its history records the same command, and an
- * undo crosses as the id of the command it reverses. The tab holding the
- * store's Web Lock runs every tab's command and posts it on (log 36.F39). A tab
- * with no other tab open sends no write, so these tests open two tabs first.
- */

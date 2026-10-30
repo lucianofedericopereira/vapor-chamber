@@ -11,11 +11,11 @@ native. An older browser is not a target.[^iife-floor]
 
 [^iife-floor]: The floor was raised in v1.25.0. An IIFE from an earlier release runs on Chrome 80, Firefox 75 and Safari 13.
 
-| Variant | Audience | Min | Brotli | Gzip |
-|---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.2<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->24.1<!-- /vc:sizeIifeCoreGzip --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->71.6<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->24.9<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->95.6<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->33.2<!-- /vc:sizeIifeFullGzip --> KB |
+| Variant | Audience | Min | Brotli |
+|---|---|--:|--:|
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.3<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.7<!-- /vc:sizeIifeCore --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->71.7<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->95.8<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.8<!-- /vc:sizeIifeFull --> KB |
 
 ## Drop a variant into a page
 

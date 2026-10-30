@@ -1,4 +1,9 @@
-/** A 202 answers an Accepted whose `done` follows the status monitor to the job's end. Rationale at the end. */
+/**
+ * A 202 answers an Accepted whose `done` follows the status monitor to the job's end.
+ * Why: a 202 says the work is not done (RFC 9110 15.3.3); the app needs the job's end, and a 202 it ignores must cost nothing.
+ * Shows: the dispatch resolves at once; done waits each declared wait and settles with the end, a problem, a timeout or an abort; nothing is polled until read; a batched 202 too.
+ * See: plan 1.32 3c, log s35.140.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -268,18 +273,3 @@ describe('Accepted in a batch: the result carries its own 202', () => {
     expect(end).toEqual({ ok: true, value: { job: gets[0] }, error: undefined });
   });
 });
-
-/*
- * RFC 9110 15.3.3: a 202 says the request was accepted and the work is not
- * done, and `Location` may name a status monitor. The dispatch resolves at
- * once with `{ ok: true, value }`, `value` an `Accepted`; its `done` follows
- * the monitor, waiting each declared wait, and settles with the job's end.
- * It replaces pollWith and its `<action>$done` event (plan 1.32, 3c): the
- * event's data, the command and the result, is what a listener sees and what
- * `done` settles with. Nothing is polled until `done` is read: an app that
- * never asked was never polled before, and a 202 it ignores costs nothing.
- * An abort, the command's or the bus's dispose, settles `done` instead of
- * leaving it pending. A batched result carries its own status and headers
- * (OData JSON batch), so a batched 202 is followed the same way; before, the
- * batch's 200 hid it. Ported from tests/poll-with.test.ts (log s35.140).
- */

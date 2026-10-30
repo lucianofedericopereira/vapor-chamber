@@ -1,4 +1,9 @@
-/** A query change while a page navigation is pending: the query wins, the navigation is superseded and told. Log s35.120. */
+/**
+ * A query change while a page navigation is pending: the query wins, and the pending navigation is superseded and told.
+ * Why: a filter typed while a slow page loads would otherwise be lost or committed onto the wrong page.
+ * Shows: setQuery and a query-only push commit on the page on screen (router and history) and the pending push answers router:aborted:navigation; with nothing pending a query change leaves the next navigation alone.
+ * See: log 35.120
+ */
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { isRouterError } from '@router/errors';

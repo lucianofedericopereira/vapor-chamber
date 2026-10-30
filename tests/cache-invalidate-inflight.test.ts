@@ -1,14 +1,7 @@
 /**
- * cache() - an invalidation that overtakes a read in flight.
- *
- * A read missed, started, and a write then invalidated its key while it was
- * still running. The read settled afterwards and stored its answer from before
- * the write, so every read after the invalidation was served that stale answer
- * until the TTL ran out. The HTTP client's cache has the same window closed
- * with read tickets; this is the bus-level cache's version of it.
- *
- * The read in flight still answers its own caller (it is a real answer to the
- * question it asked); it is only not stored.
+ * cache(): a clear() that overtakes a read in flight.
+ * Why: an answer from before the clear, stored after it, would be served stale until its TTL; the HTTP client closes the same window with read tickets.
+ * Shows: the read in flight still answers its own caller but is not stored; the next read runs again and gets the new value.
  */
 import { describe, expect, it } from 'vitest';
 import { cache, createAsyncCommandBus } from '../src/index';

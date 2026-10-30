@@ -1,14 +1,7 @@
 /**
- * Focused tests for narrow arms across several modules. Each block drives one
- * specific condition the module's main suite does not reach:
- *
- *   - observable.ts:88            - double unsubscribe early-return
- *   - plugins-schema.ts:185-186   - validateSchemasAsync "warn" mode passthrough
- *   - utilities.ts:135            - workflow step dispatch throws
- *   - utilities.ts:149            - workflow compensation dispatch throws
- *   - utilities.ts:209            - createReaction target dispatch throws
- *   - http-query.ts:37-38         - nested-object query param expansion
- *   - chamber-vapor.ts:261-263    - useVaporAsyncCommand catch on rejected dispatch
+ * Narrow behaviours of several modules: observe unsubscribe, validateSchemasAsync warn mode, createWorkflow and createReaction with a throwing dispatch, nested query params, useVaporAsyncCommand on a rejection.
+ * Why: a second unsubscribe that detaches twice, a warn-mode schema that blocks the dispatch, or a thrown dispatch that escapes a workflow, reaction or composable would crash callers instead of reporting a failed result. Also the only file reaching nested query params, the second unsubscribe, and a thrown dispatch in createWorkflow and createReaction, so the 100% floor needs it.
+ * Shows: a second `unsubscribe()` does not call the detach again; warn mode logs once and the handler still runs; a thrown step or compensation dispatch becomes a failed result; a thrown reaction target is logged, not rethrown; nested params expand to `key[sub]=value` as strings; a rejected dispatch returns `{ ok: false, error }`.
  */
 import { describe, expect, vi } from 'vitest';
 import { observe } from '../src/observable';
@@ -18,20 +11,16 @@ import { buildFullUrl } from '../src/http-query';
 import { useVaporAsyncCommand } from '../src/chamber-vapor';
 import { it } from '../src/vitest';
 
-// ---------------------------------------------------------------------------
-// observable.ts:88 - unsubscribe() is idempotent (second call early-returns)
-// ---------------------------------------------------------------------------
-
 describe('observe - idempotent unsubscribe', () => {
   it('a second unsubscribe() is a no-op and does not re-detach the listener', ({ bus }) => {
     bus.register('act', () => 'ok');
 
-    // Spy on bus.on so we can capture (and count) the off() function.
+    // Wrap bus.on so the detach function is a counted spy.
     const off = vi.fn();
     const realOn = bus.on.bind(bus);
     const onSpy = vi.spyOn(bus, 'on').mockImplementation((pattern: any, listener: any) => {
-      realOn(pattern, listener); // keep real wiring so closed flag flips correctly
-      return off;                // but hand back a spy as the detach fn
+      realOn(pattern, listener);
+      return off;
     });
 
     const sub = observe(bus, 'act').subscribe(() => {});
@@ -41,17 +30,12 @@ describe('observe - idempotent unsubscribe', () => {
     expect(sub.closed).toBe(true);
     expect(off).toHaveBeenCalledTimes(1);
 
-    // Second unsubscribe hits the `if (closed) return;` guard (line 88):
     sub.unsubscribe();
     expect(sub.closed).toBe(true);
-    expect(off).toHaveBeenCalledTimes(1); // not called again
+    expect(off).toHaveBeenCalledTimes(1);
 
   });
 });
-
-// ---------------------------------------------------------------------------
-// plugins-schema.ts:185-186 - async warn mode logs then calls next()
-// ---------------------------------------------------------------------------
 
 function fakeAsync<T>(predicate: (v: unknown) => v is T, message: string): StandardSchemaV1<T> {
   return {
@@ -76,23 +60,18 @@ describe('validateSchemasAsync - warn mode', () => {
     ));
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = await bus.dispatch('inc', -1); // fails schema -> warn + next()
+    const result = await bus.dispatch('inc', -1);
 
-    expect(result.ok).toBe(true);        // dispatch passed through (line 186)
-    expect(handlerRan).toBe(true);       // handler actually ran
-    expect(warn).toHaveBeenCalledOnce(); // warning emitted (line 185)
+    expect(result.ok).toBe(true);
+    expect(handlerRan).toBe(true);
+    expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toMatch(/must be positive/);
   });
 });
 
-// ---------------------------------------------------------------------------
-// utilities.ts:135 + 149 - workflow try/catch around bus.dispatch
-// The real command bus never throws from dispatch (it returns {ok:false}),
-// so we hand-roll a bus whose dispatch THROWS to exercise the catch blocks.
-// ---------------------------------------------------------------------------
-
 describe('createWorkflow - dispatch throws', () => {
   it('catches a thrown step dispatch and reports it as a failed result (line 135)', async () => {
+    // The real bus returns {ok:false} instead of throwing, so these tests hand-roll a bus whose dispatch throws.
     const bus = {
       on() { return () => {}; },
       dispatch(action: string) {
@@ -117,13 +96,13 @@ describe('createWorkflow - dispatch throws', () => {
       dispatch(action: string) {
         if (action === 'release') throw new Error('compensation exploded');
         if (action === 'charge') return { ok: false, error: new Error('declined') };
-        return { ok: true, value: action }; // 'reserve' succeeds
+        return { ok: true, value: action };
       },
     } as any;
 
     const wf = createWorkflow([
-      { action: 'reserve', compensate: 'release' }, // succeeds, registers a compensation
-      { action: 'charge' },                          // fails -> triggers compensation of 'release'
+      { action: 'reserve', compensate: 'release' },
+      { action: 'charge' },
     ]);
 
     const result = await wf.run(bus, {});
@@ -136,14 +115,9 @@ describe('createWorkflow - dispatch throws', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// utilities.ts:209 - createReaction logs when the target dispatch throws
-// ---------------------------------------------------------------------------
-
 describe('createReaction - target dispatch throws', () => {
   it('logs an error (does not rethrow) when the reaction dispatch throws', ({ bus }) => {
-    // Real bus to drive the source event; we make the target handler register a
-    // listener whose own dispatch throws by stubbing bus.dispatch for the target.
+    // Stub dispatch so only the reaction's target action throws; the source dispatch stays real.
     bus.register('src', () => 1);
 
     const realDispatch = bus.dispatch.bind(bus);
@@ -156,7 +130,6 @@ describe('createReaction - target dispatch throws', () => {
 
     createReaction('src', 'dst').install(bus);
 
-    // Dispatching the source fires the reaction, whose dst dispatch throws.
     expect(() => bus.dispatch('src', {})).not.toThrow();
 
     expect(errorSpy).toHaveBeenCalledOnce();
@@ -166,10 +139,6 @@ describe('createReaction - target dispatch throws', () => {
 
   });
 });
-
-// ---------------------------------------------------------------------------
-// http-query.ts:37-38 - nested object params expand to key[subkey]=value
-// ---------------------------------------------------------------------------
 
 describe('buildFullUrl - nested object params', () => {
   it('expands a nested object value into key[subkey] query entries', () => {
@@ -193,14 +162,9 @@ describe('buildFullUrl - nested object params', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// chamber-vapor.ts:261-263 - useVaporAsyncCommand catch on a REJECTED dispatch
-// The existing test uses an async bus that resolves {ok:false}; here the bus's
-// dispatch promise REJECTS, so the try/await throws and the catch runs.
-// ---------------------------------------------------------------------------
-
 describe('useVaporAsyncCommand - dispatch rejects', () => {
   it('catches a rejected dispatch and returns { ok: false, error }', async () => {
+    // The bus's dispatch promise rejects, rather than resolving {ok:false}.
     const thrown = new Error('transport rejected');
     const bus = {
       dispatch: vi.fn(async () => { throw thrown; }),

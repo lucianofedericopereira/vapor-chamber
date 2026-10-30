@@ -1,4 +1,9 @@
-/** History never undoes or redoes locally a command a transport carried out (log s35.159). Rationale at the end. */
+/**
+ * History never undoes or redoes locally a command a transport carried out.
+ * Why: a transport replaces the local handler, so a local inverse would change the client for a write only the server made, and a redo would send a second request without an Idempotency-Key.
+ * Shows: for http, batching and websocket transports the step reads canUndo false and undo runs no local inverse; redo sends nothing again (http); a later local step undoes as usual; without a transport the same action undoes and redoes.
+ * See: log s35.159
+ */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, type Transport } from '../src/command-bus';
 import { httpTransport, wsTransport } from '../src/transports';
@@ -22,7 +27,7 @@ function setup(transport?: Transport) {
   const bus = createAsyncCommandBus({ retry: false, transport: transport && { 'doc*': transport } });
   const h = history({ bus });
   let local = 0;
-  // Sent, docSave has no handler: its undo is what history would run.
+  // With a transport docSave has no local handler; its undo is what history would wrongly run.
   bus.register('docSave', transport ? null : async () => { local++; return 'local'; }, { undo: () => { local--; } });
   bus.register('noteAdd', async () => { local++; return 'local'; }, { undo: () => { local--; } });
   return { bus, h, local: () => local };
@@ -105,19 +110,3 @@ describe('a step a transport carried out', () => {
     expect(local()).toBe(1);
   });
 });
-
-/*
- * A bridge replaces the local handler for the actions it matches: the server
- * applies the command, the local handler never runs. History still recorded
- * it, so undo ran the LOCAL inverse of a change that happened only on the
- * server, and redo dispatched it again: a second request, with no
- * Idempotency-Key (plan P1). The client was then off by one and the server
- * held the write twice.
- *
- * Undo is local (log s35.159): undoing a remote write is the app's
- * compensating command, sent with the write's identity. So a step a bridge
- * carried out reads canUndo false, undo() does nothing, and with nothing
- * undone there is nothing to redo. The bridges mark such a command where they
- * turn the server's answer into a result (`answerOf`); history reads the mark
- * only when it asks canUndo or undoes, never per dispatch.
- */

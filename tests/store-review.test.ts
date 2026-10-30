@@ -1,4 +1,9 @@
-/** The store re-review (log s35.88): three ways a store broke without a word. Rationale at the end. */
+/**
+ * Store definition refusals and disposal: an action key that is a store member, a url store without a router, a stale $dispose(), and the coded failure shape of every store refusal.
+ * Why: an action key that names a store member would replace it (`store.state` becoming a dispatching function); a url store that throws after registering would leave handlers nothing can unregister; a stale $dispose() would remove the registry entry of the newer store with the same id and leave its state dead.
+ * Shows: member keys are refused by name and the catalogue fix lists them; the throw comes before any registration and a later call with a router starts clean; a second $dispose() or a late-ending scope leaves the newer store registered; each refusal has its code, message and context, and production keeps the fact only; a "$" in an id or action key is store:invalid:name.
+ * See: log s35.88, log s35.117, docs/contract.md.
+ */
 import { describe, expect, vi } from 'vitest';
 import type { BusError } from '../src/command-bus';
 import { effectScope } from 'vue';
@@ -156,24 +161,3 @@ describe("a $ in a store's id or action key (log s35.117)", () => {
     vi.resetModules();
   });
 });
-
-/*
- * Each case was measured on 1.26 before the fix (a probe, log s35.88):
- *
- * - An action key that names a store member replaced it: `actions: { state }`
- *   left `store.state` a dispatching function, so `store.state.value` read
- *   undefined; `actions: { $reset }` registered `<id>$reset`, which the
- *   library's own reset then overwrote (a DEV warning, nothing else). The type
- *   intersects the two and does not object. Refused at definition, where the
- *   options are first known.
- * - `url` declared and no router: the error was thrown AFTER the handlers were
- *   registered and before the store reached the registry, so they stayed on
- *   the bus with nothing able to unregister them; the next call (with the
- *   router) registered again over them, one "is being overwritten" warning
- *   per action.
- * - `$dispose()` deleted the registry entry for the id whatever it held, so
- *   a second call by the old owner, or a scope still holding the old store
- *   ending after the id was taken again, removed the NEWER store: the next
- *   `useStore` built a third one over its handlers, and the second store's
- *   state went dead while its holders still read it.
- */

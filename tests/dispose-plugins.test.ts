@@ -1,15 +1,7 @@
 /**
  * dispose() runs each installed plugin's dispose() before dropping it.
- *
- * Before: the JSDoc promised "cancels all pending timers/requests" and the
- * bus cancelled only its own throttle timers (and, since q2/1, settled its
- * waiting requests). The debounce and throttle plugins (now the sender's
- * `pace`) exposed a dispose() that nothing on the bus called, so their timers
- * outlived the bus. Now a
- * plugin may carry dispose() (the Plugin and AsyncPlugin types say so), the bus
- * runs every installed one first, and the bus's own retry ends a pending wait
- * as core:aborted:dispatch - a cleared timer alone would have left that
- * dispatch pending forever.
+ * Why: a plugin's timers must not outlive its bus, and the bus's own retry must end a pending wait, since a cleared timer alone leaves that dispatch pending forever.
+ * Shows: a retry mid-sleep ends as core:aborted:dispatch with no more attempts; a finished wait leaves no timer; every plugin dispose runs, even if one unsubscribes itself.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus, type BusError, type CommandResult, type PluginParts } from '../src/command-bus';
@@ -25,9 +17,7 @@ const code = (r: CommandResult | undefined): string | undefined => (r?.error as 
 describe('dispose() runs plugin dispose()', () => {
   it('ends a retry wait mid-sleep as core:aborted:dispatch and stops the attempts', async () => {
     vi.useFakeTimers();
-    // The wait is full jitter, Math.random() * 100 ms: a draw under 1 ms ran
-    // out inside the first advance below (1 run in about 100; Math.random 0
-    // reproduces it). Pinned mid-range.
+    // The wait is full jitter, and a draw under 1 ms would end inside the first advance, so it is pinned mid-range.
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actionPolicies: { t: 'idempotent' } } });
     const handler = vi.fn(async () => { throw new Error('flaky'); });

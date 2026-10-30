@@ -1,4 +1,9 @@
-/** A plugin installs once per bus, two plugins sharing an id are said in development, and inspectBus names each plugin's parts. The long note is at the end. */
+/**
+ * Plugin installation on the sync, async and test buses: one install per plugin object, a warning for a shared id, and the parts inspect lists.
+ * Why: a second use() of one object would place its parts twice (two rules, two steps, two observers) while one remover takes out one; two plugins sharing an id make their failures carry one owner.
+ * Shows: re-installing the same object throws `core:invalid:plugin` until it is removed, new instances install, a shared id warns once and both install, plugins without an id do not warn, and inspect names each plugin's declared parts in bus order.
+ * See: log s36.115.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BaseBus, type PluginParts, createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
@@ -58,11 +63,3 @@ describe.each(BUSES)('installing a plugin on the %s bus', (_name, make) => {
     ]);
   });
 });
-
-// Plan 4.1: the bus places each part once, with its plugin's identity. A
-// second use() of one object would place its parts twice: two rules, two
-// steps, two observers, one remover taking out one. So it is refused, as a
-// misuse, with the code use() refuses any plugin with. Two plugins sharing an
-// id are legitimate (two loggers of different scopes), but their failures
-// carry one owner, so development says it. `parts` lists what the bus placed,
-// in the order the bus runs them: facts, rules, steps, then attach.

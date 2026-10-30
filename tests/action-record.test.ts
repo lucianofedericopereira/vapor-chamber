@@ -1,4 +1,9 @@
-/** Each action's record follows every change of what it holds: the next command sees it. The long note is at the end. */
+/**
+ * Each action's record follows every change of what it holds: the next command sees it.
+ * Why: a command reads its action's facts once, from a cached record; a stale one answers with the old handler or the old rules.
+ * Shows: handlers, plugins, clear() and listeners added or removed after a command reach the next one; past the 512-record cap every action still answers.
+ * See: plan 4.1 step 8f.
+ */
 import { describe, expect, it } from 'vitest';
 import { type BaseBus, type CommandResult, type PluginParts, createAsyncCommandBus, createCommandBus, _errResult as err } from '../src/command-bus';
 
@@ -85,11 +90,3 @@ describe.each(BUSES)('the action record on the %s bus', (_name, make) => {
     expect(await bus.dispatch('a599', {})).toMatchObject({ ok: true, value: 599 });
   });
 });
-
-// A command reads its action's facts once, from a record built on the first
-// command since the last change (plan 4.1, step 8f). Each case builds the
-// record first, then changes what it holds, then checks the next command
-// sees the change: a stale record would answer with the old handler or the
-// old rules. Listeners stay out of the record, so a subscription after a
-// command must still be heard; the case pins that. The cap case passes the
-// 512 records the map holds before it starts over.

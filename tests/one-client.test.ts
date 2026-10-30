@@ -1,4 +1,9 @@
-/** One client (plan 1.32 step 3d): the client's re-sends under the bus's bound, keys only for a read that needs one. The long note is at the end. */
+/**
+ * One client: the HTTP client's re-sends use the bus's term (`maxAttempts`) and rule (`retryClass`), and a request key is built only for a read that dedupes or caches.
+ * Why: a client with its own re-send count beside the bus's would multiply attempts for a command (client times bus), and a key built for every request would cost a write work it never uses.
+ * Shows: against a real `node:http` server answering 503 with `Retry-After: 0`, a GET is sent 3 times by default, a write once, `retry: false` once, `maxAttempts` 4/1/2 give 4/1/2 requests, and `retry: {}` lets a write land on the third attempt; `httpTransport` through an app client that re-sends writes sends a command once; the key writer runs once for a deduping or caching GET and never for a write or an uncached, undeduped GET.
+ * See: log s36.50.
+ */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -85,8 +90,7 @@ describe('the transport through the app client: sent once, the bus re-sends', ()
 });
 
 describe('keys: built only for a read that dedupes or caches', () => {
-  // The client's key writer is JSON.stringify with a replacer (src/canonical.ts keyTextFor);
-  // a body is encoded without one.
+  // The key writer is the only JSON.stringify call with a replacer on these paths (src/canonical.ts keyTextFor), so counting those calls counts keys.
   let keyed = 0;
   beforeEach(() => {
     keyed = 0;
@@ -118,23 +122,3 @@ describe('keys: built only for a read that dedupes or caches', () => {
     expect(keyed).toBe(0);
   });
 });
-
-/*
- * Plan 1.32 step 3d (.probes/step-3d-pickup.md, log 36.50). Before it the client
- * had a re-send count of its own (`retry`: 2 for a GET, 0 for any other method)
- * beside the bus's bound (`maxAttempts`). Now `retry` takes the bus's term:
- * `{ maxAttempts }` (attempts in total, default 3, the first included) or `false`.
- * Whether a failure is re-sent stays the bus's rule (`retryClass`): a transient
- * one for any method, an uncertain one for a GET or a keyed request. A GET is on by
- * default and a write off, as before: nobody declared otherwise. A 503 with
- * `Retry-After: 0` is transient and waits nothing, so each case counts requests
- * on a real `node:http` server without sleeping.
- *
- * The transport sends a command once through an app's client (`retry: false`):
- * the bus re-sends it, so the two never multiply, whatever the client's default.
- *
- * Keys: the client keyed every request, a write included, before it knew the
- * request was a read (plan-transport-owned.md revision 9 F). The key writer is the
- * only JSON.stringify call with a replacer on these paths, so counting those calls
- * counts keys.
- */

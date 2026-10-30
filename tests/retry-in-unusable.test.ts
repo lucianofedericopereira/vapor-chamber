@@ -1,13 +1,8 @@
 /**
- * A declared `retryIn` a timer cannot keep (NaN, Infinity, negative) is no
- * declared wait, wherever it came from.
- *
- * 1.30 fixed rateLimit({ max: 0 }) declaring NaN, the one producer the library
- * had; the readers still trusted any number. A plugin or app failure declaring
- * NaN or Infinity made the outbox re-flush with no wait, forever (32 saves in
- * 50 ms), since a timer fires at once on both. The readers - the outbox, the
- * async bus's retry and pollWith (now a 202's poll, src/transports.ts) - apply
- * one rule, isDelay (bounds.ts).
+ * A declared `retryIn` a timer cannot keep (NaN, Infinity, negative) is no declared wait, wherever it came from.
+ * Why: a failure declaring NaN or Infinity would make the outbox re-flush with no wait, forever, since a timer fires at once on both. The readers (the outbox, the async bus's retry, pollWith) apply one rule, isDelay.
+ * Shows: for retryIn Infinity, NaN and -5 from a transport, the outbox sends fewer than 3 more times in 50 ms after a flush. Only the outbox reader is exercised here.
+ * See: src/bounds.ts
  */
 import { describe, expect, it } from 'vitest';
 import { _failures, createAsyncCommandBus } from '../src/command-bus';

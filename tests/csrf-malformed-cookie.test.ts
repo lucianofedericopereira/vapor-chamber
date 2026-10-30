@@ -1,4 +1,9 @@
-/** A malformed XSRF-TOKEN cookie reads as no cookie: the next source answers, nothing throws (audit HT-24). Note at the end. */
+/**
+ * A malformed XSRF-TOKEN cookie reads as no cookie: the next source answers, nothing throws.
+ * Why: a value that is not percent-encoding is no token to send, and decoding it must not throw out of every csrf request before anything goes.
+ * Shows: a lone or cut escape does not throw and the hidden input answers, or no token at all; a well-formed cookie decodes and goes as X-XSRF-TOKEN.
+ * See: audit HT-24.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invalidateCsrfCache, readCsrfToken } from '../src/http';
 
@@ -29,14 +34,3 @@ describe('a malformed XSRF-TOKEN cookie', () => {
     expect(readCsrfToken()).toEqual({ token: 'ok token', headerName: 'X-XSRF-TOKEN' });
   });
 });
-
-/*
- * Found by the release audit (row HT-24). The cookie was decoded with a bare
- * decodeURIComponent, so a value that is not percent-encoding (a lone `%`,
- * a cut multi-byte sequence) threw URIError out of every `csrf: true` request,
- * postCommand and the client alike, before anything was sent (probe on dist,
- * scratchpad probe-ht24.mjs). A value the client cannot decode is not a token
- * it can send, so it reads as no cookie and the read goes on to the next
- * source, as it does when the cookie is absent. A server then answers 419 for
- * a missing token, and the 419 refresh sets a fresh cookie.
- */

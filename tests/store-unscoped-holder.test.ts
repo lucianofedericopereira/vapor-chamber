@@ -1,14 +1,8 @@
 /**
- * A store created outside any scope is not disposed by scoped holders.
- *
- * docs/store.md: "the last holder out disposes, not the first one in", and a
- * caller outside a scope "owns $dispose()". The code counted scoped holders
- * only, so a module-level store (the cookbook panel's db/store.js holds its
- * rows store this way) was disposed by the first component that joined and
- * left: its actions answered ok: false, and the next useStore built a fresh
- * store with its state reset. Measured on 1.24. The tests covered two scoped
- * holders, never an unscoped owner plus a scoped one.
- * (v1.25.0)
+ * Store disposal is refcounted, and a holder outside any scope owns $dispose().
+ * Why: a module-level store would be disposed by the first component that joins and leaves, so its actions would fail and its state reset.
+ * Shows: a scoped holder leaving keeps an unscoped store alive; the unscoped owner can dispose it; scoped holders alone dispose it when the last leaves.
+ * See: docs/store.md
  */
 import { expect } from 'vitest';
 import { effectScope } from 'vue';
@@ -21,7 +15,7 @@ const useCart = defineChamberStore('cart', {
 });
 
 it('a scoped holder leaving does not dispose a store held outside any scope', ({ bus }) => {
-  const moduleStore = useCart(bus); // e.g. a store.js imported at app start
+  const moduleStore = useCart(bus);
   moduleStore.add();
 
   const page = effectScope();

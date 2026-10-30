@@ -1,20 +1,8 @@
 /**
- * commandKey - two different commands never share a key.
- *
- * The key backs idempotent, cache, serialize and supersede (and isLoading's
- * slots), so a collision collapses two commands into one: the second never
- * runs and gets the first one's answer. Two collisions remained after the
- * `__proto__` one (prototype-keys.test.ts), each merging different values:
- *   - every circular target: JSON.stringify threw and the fallback was
- *     String(target), '[object Object]' for all of them;
- *   - every target holding a BigInt, the same way.
- * A target still keys by its value - a primitive by its String(), so 1 and '1'
- * share a key by design (isloading-keys.test.ts) - and ordinary keys read as
- * before ('act:plain', 'act:{"a":1}').
- *
- * An action name holding ':' can still share a key with another action
- * (('a:b', 'c') and ('a', 'b:c')): escaping it per call measured 25-30% of a
- * key (V8-RULES rule 3), so it is a naming rule, warned in development.
+ * commandKey: two different commands never share a key.
+ * Why: the key backs idempotent, cache, serialize, supersede and isLoading; a collision collapses two commands, so the second never runs and gets the first's answer.
+ * Shows: circular, BigInt, non-finite, function, symbol and wrapper targets keep apart; 1 and '1' share a key by design; ordinary keys stay readable; idempotent runs both.
+ * See: tests/prototype-keys.test.ts, tests/isloading-keys.test.ts, docs/V8-RULES.md rule 3, log 36.41.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { _targetKey } from '../src/command-bus';
@@ -60,13 +48,13 @@ describe('commandKey - collisions', () => {
     expect(commandKey('act', [new String('a')])).toBe('act:["a"]');
   });
 
-  // Known limit: only an object with no keys, or keys from '0', is checked for
-  // a wrapper (a check on every object measured 11-13 ns a key, log 36.41).
+  // Known limit: only an object with no keys, or keys from '0', is checked for a wrapper (cost per key).
   // Passes while the limit holds, turns red if it is lifted.
   it.fails('known limit: a Number object with fields of its own keys by its fields', () => {
     expect(commandKey('act', { x: Object.assign(new Number(5), { a: 1 }) })).not.toBe(commandKey('act', { x: Object.assign(new Number(6), { a: 1 }) }));
   });
 
+  // An action holding ':' can share a key with another; escaping it per call costs too much, so it is a naming rule.
   it("warns once in development about an action holding ':'", () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     commandKey('cart:add', 1);

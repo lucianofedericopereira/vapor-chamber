@@ -1,17 +1,8 @@
 /**
- * `vapor-chamber/vitest` and `vapor-chamber/vitest/pure`, in-repo.
- *
- * Acceptance assertions from vitest5-plugin-study.md (Rev 3 section 6, Rev 2
- * B.7) that a run inside this repository can falsify. The packed-consumer half
- * (A1, A4, A5, A10, A12 at runtime, A13) is tests/vitest-consumer.test.ts; the
- * plugin object (A11) is tests/vitest-plugin.test.ts.
- *
- * Diagnostics are asserted on `code` and on the fix they name, never on the
- * rest of the message text (CONTRIBUTING.md, module discipline).
- *
- * No `expect.extend` here: vitest.config.ts loads src/vitest.ts as a setup
- * file, so the matchers and the tapped shared bus arrive the way a consumer
- * gets them. test:unexpected:version is the plugin's (tests/vitest-plugin.test.ts).
+ * `vapor-chamber/vitest` and `vapor-chamber/vitest/pure` (src/vitest.ts, src/vitest-pure.ts), run in-repo with the entry loaded as vitest.config.ts's setup file.
+ * Why: the matchers and the tapped shared bus must be real, fresh per test and lazily importing the library, and misuse must fail loudly with a code and a fix, or tests would pass vacuously or report the wrong cause.
+ * Shows: tap() returns the real bus and records onto it; the shared bus is fresh per test; the entries' import graph is lazy; misuse errors carry `test:*` codes and fixes; every matcher passes and fails with its message; failed tests list their dispatches; the record is scoped to the current test.
+ * See: tests/vitest-consumer.test.ts, tests/vitest-plugin.test.ts, CONTRIBUTING.md
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -27,7 +18,7 @@ type Shop = {
   cartClear: { target: null; result: void };
 };
 
-/** The thrown error of `fn`, or a failure if it did not throw. */
+// The thrown error of `fn`, or a failure if it did not throw.
 function thrown(fn: () => unknown): any {
   try {
     fn();
@@ -37,7 +28,7 @@ function thrown(fn: () => unknown): any {
   throw new Error('expected a throw');
 }
 
-/** Runs a matcher and returns its failure message, or a failure if it passed. */
+// Runs a matcher and returns its failure message, or a failure if it passed.
 function failure(fn: () => unknown): string {
   return withoutColors(String(thrown(fn).message));
 }
@@ -54,8 +45,7 @@ describe('A2 real bus', () => {
   });
   it('the shared bus the entry installs is a real createCommandBus() bus', () => {
     const bus = getCommandBus();
-    // A real bus carries the inspect symbol; a TestBus answers inspectBus from
-    // its fallback, which always reports 0 after-hooks.
+    // A real bus carries the inspect symbol; a TestBus answers inspectBus from its fallback, which reports 0 after-hooks.
     expect(Object.getOwnPropertySymbols(bus).map((s) => s.description)).toContain('vapor-chamber:inspect');
     expect(inspectBus(bus).afterHookCount).toBe(1);
   });
@@ -88,7 +78,7 @@ describe('A3 freshness', () => {
 });
 
 describe('A6 lazy import', () => {
-  /** Static and dynamic import specifiers of a source file, from the compiler's own AST. */
+  // Static and dynamic import specifiers of a source file, from the compiler's own AST.
   function importsOf(file: string) {
     const source = ts.createSourceFile(file, readFileSync(resolve(process.cwd(), file), 'utf8'), ts.ScriptTarget.ES2022, true);
     const statics: string[] = [];
@@ -98,8 +88,7 @@ describe('A6 lazy import', () => {
         statics.push((node.moduleSpecifier as ts.StringLiteral).text);
       }
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-        // The call the nearest enclosing function is passed to: 'beforeEach',
-        // "extend('bus')" for a fixture, or 'module load' outside any function.
+        // The call the nearest enclosing function is passed to: 'beforeEach', "extend('bus')" for a fixture, or 'module load' outside any function.
         let fn: ts.Node | undefined = node.parent;
         while (fn && !ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn) && !ts.isFunctionDeclaration(fn)) fn = fn.parent;
         let runsIn = fn === undefined ? 'module load' : 'a function not passed to a hook or a fixture';
@@ -171,11 +160,7 @@ describe('A8 misuse is coded and names the fix', () => {
   });
 
   it('test:already:instance: a bus from a second module instance is named as such', async () => {
-    // A query makes a second module id, so command-bus.ts evaluates again: a
-    // second instance with its own symbols, exactly what a duplicated install
-    // loads. Not vi.resetModules(): that would also give the NEXT test's shared
-    // bus a fresh instance beside this file's static imports - which the entry
-    // then correctly reports as a duplicate.
+    // A query makes a second module id, so command-bus.ts evaluates again with its own symbols, as a duplicated install does. Not vi.resetModules(): that would give the next test's shared bus a fresh instance too.
     const other = await import('../src/command-bus?second-instance');
     const foreign = other.createCommandBus();
     _setInstalledBus(tap(createCommandBus()));

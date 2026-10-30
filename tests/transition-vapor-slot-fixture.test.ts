@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the transition bridge on a vDOM `<Transition>` whose child is
- * Vapor SLOT content. Fails on Vue 3.6.0-rc.10, passes from rc.11. The long
- * note is at the end of this file.
+ * The transition bridge on a vDOM <Transition> whose child is Vapor slot content.
+ * Why: in a mixed tree the bound <Transition> can be a vDOM component wrapping its default slot, filled by
+ * a Vapor parent; the bridge's leave and enter commands must still arrive, and v-bind="t" must not
+ * pass an onMove listener that makes Vue warn about extraneous non-emits listeners on the slot fragment.
+ * Shows: slot content dispatches BeforeLeave Leave AfterLeave then BeforeEnter Enter AfterEnter with no
+ * errors and no console warning; a Vapor component child (control) dispatches the same.
+ * See: docs/rc-alignment-log.md s36.1, s36.6
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -64,8 +68,7 @@ async function run(shape: 'vapor slot' | 'vapor component') {
 
 describe('transition bridge on a vDOM <Transition> around Vapor content', () => {
   it('Vapor slot content: the leave and the enter are dispatched', async () => {
-    // The bridge spreads no onMove, so nothing falls through to the slot
-    // fragment for Vue to warn about. See the note at the end.
+    // The bridge spreads no onMove, so nothing falls through to the slot fragment for Vue to warn about.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await run('vapor slot')).toEqual({
       off: 'BeforeLeave Leave AfterLeave | 0 node, idle',
@@ -84,24 +87,3 @@ describe('transition bridge on a vDOM <Transition> around Vapor content', () => 
     });
   });
 });
-
-/*
- * WHY THIS FILE EXISTS. `createTransitionBridge` is bound with
- * `<Transition v-bind="t">`. In a mixed tree that `<Transition>` can be a vDOM
- * component's, wrapping its default slot, with the slot filled by a Vapor
- * parent: the transitioned child is then Vapor SLOT content, not a vnode.
- *
- * Measured on Vue 3.6.0-rc.10 (docs/rc-alignment-log.md, the rc.11 cycle):
- * the content left and entered, and the bridge dispatched nothing at all,
- * because vDOM BaseTransition had no hooks to hand a Vapor slot. Vue
- * 3.6.0-rc.11 `e656425e` ("transition vapor slot content inside a vdom
- * Transition") resolves the hooks for the slot's blocks, and the six commands
- * now arrive. A Vapor COMPONENT child already worked on rc.10, so it is the
- * control: it shows the harness dispatches when Vue calls the hooks.
- *
- * NO WARNING. Vue has no `onMove` hook. While the bridge spread `onMove`,
- * `v-bind="t"` passed it on as a fallthrough listener, and on a fragment child
- * (this slot) Vue warned "Extraneous non-emits event listeners (move)". The
- * bridge now keeps `onMove` out of a spread (docs/rc-alignment-log.md, 36.6
- * R2), and the assertion pins that no warning is printed.
- */

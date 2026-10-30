@@ -1,4 +1,9 @@
-/** A handler's child that declares its cause is undone with its parent and applied once on redo (B3). The long note is at the end. */
+/**
+ * history undo and redo of a handler's child that declares its cause with `__causationId`, on the sync and async bus.
+ * Why: a handler's child settles before its parent; if redo re-ran the parent's handler on top of a child still applied, the child would apply twice, and an undo would leave the child behind.
+ * Shows: one undo takes a declared child with its parent and one redo applies it once; an undeclared child stays its own step; a refused parent redo keeps the child on the redo stack; reactions, store actions, grandchildren and useCommandHistory follow the same press; history.clear() during a multi-step undo or redo leaves the history empty.
+ * See: docs/whitepaper.md ("infer root from derived dispatches"), docs/manual/02-commands.md ("Read a command's metadata"), src/command-bus.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { type BaseBus, type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { useCommandHistory } from '../src/chamber';
@@ -11,7 +16,7 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 const names = (cmds: readonly Command[]) => cmds.map((c) => c.action);
 
 /**
- * `cartAdd`'s handler dispatches `statsBump` before it returns (M5), declaring its cause when
+ * `cartAdd`'s handler dispatches `statsBump` before it returns, declaring its cause when
  * `declare` is set. Each action counts its runs and has an inverse; `refuse` fails cartAdd.
  */
 function world(make: () => BaseBus, declare: boolean) {
@@ -201,18 +206,3 @@ describe.each(BUSES)('a declared handler child on the %s bus', (_name, make) => 
     u.dispose();
   });
 });
-
-/*
- * Interop plan B3 (probe M5). A handler that dispatches a child before it returns: the child
- * settles first, so it is recorded below its parent. Before, an undo took the parent only, and
- * a redo re-ran the parent's handler, which dispatched the child again on top of the child
- * still applied: the child applied twice. The library does not infer a child from the
- * dispatch depth: the record rejected inferring a nested dispatch (whitepaper.md, "infer root
- * from derived dispatches") and decided the side that knows declares. The handler declares
- * with the documented `__causationId: cmd.meta.id` (manual chapter 2, "Read a command's metadata"). The ledger reads it at
- * press time: a member's declared child below it goes with the press; on redo it is not
- * dispatched, the parent's handler dispatches it again (origin redo, not recorded), and its
- * entry moves back once the parent lands. A child that declares nothing is its own step, as
- * released. A child dispatched after an await in the handler is outside the redo's origin
- * scope, the limit command-bus.ts states for that scope.
- */

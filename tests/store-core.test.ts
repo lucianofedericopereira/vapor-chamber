@@ -1,4 +1,9 @@
-/** vapor-chamber/store/core: the same store with no Vue (S11, log s35.130). */
+/**
+ * vapor-chamber/store/core: the same store with no Vue.
+ * Why: an app that imports the store without Vue must get the same actions, undo, field events and cross-tab share, and its built entry must not pull in vue or the chamber bundle.
+ * Shows: actions are commands with `$reset`, undo and `$onField`; the store lives until its caller disposes it; share crosses tabs and each write goes out as its command; an alien-signals effect reruns on a write; the built entry imports neither vue nor chamber (skipped when dist/ is absent).
+ * See: log s35.130
+ */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { effect as alienEffect, signal as alienSignal } from 'alien-signals';
@@ -19,7 +24,6 @@ const state = (): Cart => ({ items: [], count: 0 });
 
 // Back to the plain `{ value }` cell after a test that configured alien-signals.
 afterEach(() => { configureSignal(((v: unknown) => ({ value: v })) as CreateSignal); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-
 
 describe('the Vue-less store', () => {
   it('actions are commands; $reset, undo and $onField work as in the Vue store', () => {

@@ -1,4 +1,9 @@
-/** The router's failures are the core's: `router:condition:subject` BusErrors (log s35.108). Rationale at the end. */
+/**
+ * Router failures are core BusErrors coded `router:condition:subject`, and the registry and HARD_NAV_CODES agree with them.
+ * Why: a router failure that is not a core BusError would be unreadable by the core's owner and condition readers, would carry a stack when it is only a refusal or a supersede, and could be misclassified as a hard navigation.
+ * Shows: owner, condition, code and `context.to` read like any core failure; a superseded navigation has no stack and a failure keeps one; a guard throw, a missing url and a missing or throwing loader each get their own code; the registry's router rows and HARD_NAV_CODES match the stated lists.
+ * See: log s35.108, docs/contract.md
+ */
 import { describe, expect, it } from 'vitest';
 import { BusError, conditionOf, ownerOf } from '../../src/command-bus';
 import { HARD_NAV_CODES, isRouterError } from '@router/errors';
@@ -108,18 +113,3 @@ describe('the catalogue', () => {
     expect([...HARD_NAV_CODES].sort()).toEqual(rule.sort());
   });
 });
-
-/*
- * Log s35.108 (docs/contract.md 6; shape rules 2 and 3; todo-router 1 and 2).
- * The router had its own failure: a plain Error named RouterError with a
- * snake_case code, none of them in ERROR_CODE_REGISTRY, read by none of the
- * core's readers (`failureCondition` saw `failed` in all of them), a stack
- * captured for every one - a superseded navigation and a guard's refusal
- * included - and a guard's throw reported as `component_load_failed`, a
- * hard-navigation code. Now each is the core's BusError, minted by
- * `_failures('router')` from src/failure.ts (no bus in the router's graph,
- * docs/contract.md 6): one shape, the stack only for `failed`, the RFC 9457 `toJSON` at a
- * boundary, the navigation target in `context.to`. The mapping is the owner's
- * (todo-router 1, with invalid_routes_payload as `unexpected`: the server's
- * payload off-protocol); HARD_NAV_CODES follows docs/contract.md 6's rule.
- */

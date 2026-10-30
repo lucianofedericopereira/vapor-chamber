@@ -1,4 +1,9 @@
-/** RFC 9875 cache groups on the client and the transports (plan 1.32 step 3g). Rationale at the end. */
+/**
+ * RFC 9875 cache groups on the client and the transports: the server declares, the client obeys.
+ * Why: a write names the groups it changed, so the client drops its cached reads in them and tells listeners; a read in flight across it is never stored stale.
+ * Shows: the group-field parser; a write drops its groups and tells each listener once; safe methods ignored; single, batched and WS answers invalidate; no client warns once.
+ * See: plan 1.32 step 3g, RFC 9875, docs/decisions.md 2026-10-01 HTTP cache tickets, tests/router/cache-groups.test.ts.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
@@ -229,17 +234,3 @@ describe('cacheMode: the Fetch cache mode of one request', () => {
     expect(modes.sort()).toEqual(['no-cache', undefined]);
   });
 });
-
-/*
- * The server declares, the client obeys (record revision 15, RFC 9875). A read's
- * response carries `Cache-Groups`; a write's answer names the groups it changed in
- * `Cache-Group-Invalidation`, on the response or in a batched result's or a frame's
- * `headers` member. The client drops its cached reads in those groups and tells its
- * listeners, the router's loader data among them (tests/router/cache-groups.test.ts).
- *
- * A read on the wire when a group goes has groups nobody knows yet, so none is stored
- * and none is joined: a fetch, never stale data (decisions.md 2026-10-01).
- *
- * The transport without a client (postCommand's path) has nothing to invalidate: it
- * warns once in development, so an app learns to share one client.
- */

@@ -1,15 +1,7 @@
 /**
- * The numeric-option rule, and the four defects that forced it into one place.
- *
- * Comparison direction decides which way a bad number fails. Every comparison
- * against NaN is false, so a gate on RECORDING (`length < max`) fails safe by
- * recording nothing, while a gate on EVICTING (`length > max`) or REFUSING
- * (`count >= max`) fails OPEN - the bound silently ceases to exist. The two
- * that fail open are the two that are idiomatic to write, which is why this
- * kept happening.
- *
- * The four below were measured through the public API before ../src/bounds
- * existed, not reasoned about.
+ * countOption, the one numeric-option rule, and the caps and windows that rely on it.
+ * Why: every comparison with NaN is false, so a gate on evicting or refusing (`length > max`, `count >= max`) fails open and the bound silently vanishes.
+ * Shows: non-numbers take the default, Infinity and large caps survive, zero is kept; history, metrics, circuitBreaker, StreamParser, the http cache and idempotent hold under NaN.
  */
 
 import { describe, expect } from 'vitest';
@@ -29,22 +21,20 @@ describe('countOption', () => {
     expect(countOption({}, 50)).toBe(50);
     // A numeric STRING is a number - a config read that worked.
     expect(countOption('12', 50)).toBe(12);
-    // `Number(null)` and `Number(false)` are 0, so they take the floor, not
-    // the default.
+    // `Number(null)` and `Number(false)` are 0, so they take the floor, not the default.
     expect(countOption(null, 50)).toBe(0);
     expect(countOption(false, 50, 1)).toBe(1);
   });
 
   it('preserves Infinity, which the `| 0` idiom mapped to zero', () => {
-    // "No bound" is a real request. `Infinity | 0` is 0, so five hand-clamped
-    // sites answered it with "store nothing".
+    // "No bound" is a real request; `Infinity | 0` is 0, which stores nothing.
     expect(countOption(Number.POSITIVE_INFINITY, 50)).toBe(Number.POSITIVE_INFINITY);
     expect(countOption(Number.NEGATIVE_INFINITY, 50)).toBe(0);
     expect(countOption(Number.NEGATIVE_INFINITY, 50, 1)).toBe(1);
   });
 
   it('does not truncate to 32 bits, which the `| 0` idiom did', () => {
-    // `3_000_000_000 | 0` is -1294967296: a large cap silently went negative.
+    // `3_000_000_000 | 0` is -1294967296: a large cap goes negative.
     expect(countOption(3_000_000_000, 50)).toBe(3_000_000_000);
   });
 
@@ -96,20 +86,13 @@ describe('the bounds that had silently ceased to exist', () => {
   });
 });
 
-/**
- * The TTL family, swept after the caps.
- *
- * Same rule, different consequence: a NaN window reaches `setTimeout` as 0
- * (loud) or defeats an expiry comparison (silent). Only the silent ones are
- * defects, and there were two.
- */
+/** Windows: a NaN reaches `setTimeout` as 0 (loud) or defeats an expiry comparison (silent); these are the silent ones. */
 describe('windows that never closed', () => {
   it('an http cache entry with a NaN ttl is treated as expired, not eternal', async () => {
     const { createResponseCache } = await import('../src/http-cache');
     const cache = createResponseCache();
 
-    // `now + NaN` is NaN, and `now >= NaN` is false - so the old `>=` said
-    // "not expired" forever and served this entry for the life of the page.
+    // `now + NaN` is NaN and `now >= NaN` is false, so a `>=` check would serve it forever.
     cache.set('k', { data: 'stale-forever' } as never, Number('nope'));
     expect(cache.get('k')).toBeNull();
 
@@ -132,9 +115,7 @@ describe('windows that never closed', () => {
 
     await bus.dispatch('orderCreate', 1);
     await bus.dispatch('orderCreate', 1);
-    // `now - cached.at < ttl` gates COLLAPSING, so a NaN window collapsed
-    // nothing and every duplicate re-executed - the guarantee this plugin
-    // exists for, silently absent.
+    // `now - cached.at < ttl` gates collapsing, so a NaN window would re-run every duplicate.
     expect(runs).toBe(1);
   });
 });

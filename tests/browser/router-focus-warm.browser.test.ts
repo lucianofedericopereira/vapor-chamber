@@ -1,6 +1,8 @@
 /**
  * Focus warm-up of a router link, in light DOM and open shadow roots, with a real keyboard in Chromium.
- * The long note is at the end.
+ * Why: a focused link warms its page as a hover does; focus moves inside one shadow root stop at the host, so each open root needs focusin/focusout.
+ * Shows: Tab onto a light-DOM or shadow-root link warms it; Tab between links in one root warms the second; across nested roots, the one focused.
+ * See: log 36.19 item 4, DOM Standard dispatch steps 6.9.3 and 6.9.7, tests/browser/router-shadow-hover.browser.test.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -54,6 +56,8 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
+// Chromium only: Safari's Tab reaches links only when the user turns that on.
+// Each test checks where focus landed first, so a red means "not warmed", never "Tab went elsewhere".
 describe('a link that takes focus warms its page (real Chromium)', () => {
   it('Tab onto a light-DOM link warms it', async () => {
     await park();
@@ -115,16 +119,3 @@ describe('a link that takes focus warms its page (real Chromium)', () => {
     expect(seen).toEqual(['/a']);
   });
 });
-
-// The note.
-//
-// Log 36.19 item 4. A link that takes focus warms its page as a hover does:
-// `focusin` arms its own timer, `focusout` cancels it, on the document and on
-// every open shadow root an event comes from. A move of focus between two
-// nodes of one shadow root stops at the host (DOM Standard, dispatch steps
-// 6.9.3 and 6.9.7), as a pointer move does, so the roots need the focus pair
-// too. Chromium only: Safari's Tab reaches links only when the user turns that
-// on (Apple's Safari keyboard shortcuts, Option-Tab). Red before: all four
-// (`[]`, nothing listened to focus). Each test checks where focus landed
-// first, so a red means "not warmed", never "Tab went elsewhere". The 1000 ms
-// delay and the parked pointer follow tests/browser/router-shadow-hover.

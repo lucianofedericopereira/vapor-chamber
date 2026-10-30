@@ -1,18 +1,8 @@
 /**
- * The wire contract (docs/contract.md 4), end to end, with
- * only `fetch` and the socket stubbed: each rule stated once and run on every
- * path it covers.
- *
- * - An answer is `{ state }`, `{ redirect }` or `{ problem }`; a single
- *   command's failure is its non-2xx problem. A failure reads
- *   `remote:<condition of its status>:<code>`, the same on every path.
- * - The status table says only what RFC 9110 says of a status.
- * - Retries follow the condition: a transient one, a `Retry-After`, a lost
- *   answer for an idempotent action or a keyed command. The async bus re-sends
- *   through the transport, invisibly to the plugins outside.
- * - The outbox drops a record on the backend's verdict and keeps it otherwise.
- * - The files in contract/ replay against the client over a real server:
- *   the request it sends, then what the app sees.
+ * The wire contract end to end, with only `fetch` and the socket stubbed, plus a replay of the contract/ pact files over a real HTTP server.
+ * Why: a client that reads an answer, classifies a failure, retries or drops an outbox record differently from the contract would break every backend that follows it.
+ * Shows: an answer is `{ state }`, `{ redirect }` or `{ problem }` and reads the same on single, batch and ws; a failure is `remote:<condition of its status>:<code>`; retries follow the condition and stay invisible to outside plugins; the outbox drops a record only on the backend's verdict; each pact case's request is what the client sends and the result is what the app sees.
+ * See: docs/contract.md, RFC 9110
  */
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -123,8 +113,7 @@ describe('the status table: only what RFC 9110 says of a status', () => {
   });
 
   it('the two conditions from gRPC are in the vocabulary, final by default', () => {
-    // unauthenticated (sign in, then retry) split from refused; conflict (the
-    // state changed underneath) split from already (it exists).
+    // Both are final: unauthenticated needs a sign-in first, conflict a re-read of the state.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fail = _failures('test');
     const a = fail('unauthenticated:session', 'sign in');
@@ -181,8 +170,7 @@ describe('off the contract', () => {
     vi.stubGlobal('fetch', fetch);
     const bus = createAsyncCommandBus({ retry: { baseDelay: 0 }, transport: httpTransport({ endpoint: '/api/vc/batch', batch: {} }) });
     await bus.dispatch('save', {});
-    // The backend may have run it and dropped the result: re-sending an
-    // unkeyed write could run it twice.
+    // The backend may have run it and dropped the result: an unkeyed re-send could run it twice.
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -533,7 +521,7 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
     const { outbox, sent } = await oneQueued(() => (busy ? answering(503, 'unavailable', '1') : [200, { state: 1 }]));
     await outbox.flush();
     await vi.advanceTimersByTimeAsync(600_000);
-    expect(sent.length).toBe(24); // 601 before the backoff: one a second
+    expect(sent.length).toBe(24);
     busy = false;
     await vi.advanceTimersByTimeAsync(1000);
     expect(sent.length).toBe(25);
@@ -600,7 +588,7 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
     vi.useRealTimers();
     vi.unstubAllGlobals();
 
-    // Control: the same 409 with no Retry-After is still the verdict it was.
+    // Control: the same 409 with no Retry-After is a verdict.
     const bare = await oneQueued(() => answering(409, 'in_progress'));
     expect(await bare.outbox.flush()).toEqual({ replayed: 0, failed: 0, rejected: 1 });
     expect(bare.rejected).toEqual(['remote:conflict:in_progress']);
@@ -616,10 +604,7 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
   });
 });
 
-// The contract files (scripts/generate-contract.mjs) replayed against the
-// client. A real server answers each request with its pact's response and
-// records it. The client sends the table's request, so a case edited without
-// regenerating fails here too. What the app sees is checked against `sees`.
+// Replay of the contract files (scripts/generate-contract.mjs): a real server answers each request with its pact's response and records it; a case edited without regenerating fails here.
 
 type PactRequest = { method: string; path: string; headers?: Record<string, string[]>; body?: { content?: any } };
 type PactResponse = { status: number; headers?: Record<string, string[]>; body?: { content?: any } };

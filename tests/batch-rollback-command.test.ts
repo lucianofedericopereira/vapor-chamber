@@ -1,4 +1,9 @@
-// A transactional batch undoes the command that ran, not a copy (log s35.155).
+/**
+ * A transactional batch undoes the command that ran, not a copy.
+ * Why: an undo works from the command it reverses; a copy loses its identity, so the store and the causation chain go wrong.
+ * Shows: undo: true stores return to their pre-batch state, sync and async; $undo gets that command and names it as cause; depth and naming rules hold in a batch.
+ * See: log s35.155.
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type Command } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';

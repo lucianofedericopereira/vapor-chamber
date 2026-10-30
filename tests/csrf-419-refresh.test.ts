@@ -1,28 +1,7 @@
 /**
- * FIXTURE - a 419 on a page whose `<meta name="csrf-token">` has gone stale.
- *
- * The hazard, reported from a running Laravel panel and verified against
- * src/http.ts and Laravel 13's source. The meta token is rendered ONCE per
- * page load; when the session rotates the page's meta is stale for as long as
- * the page stays open, and every write answers 419. Laravel sets a fresh
- * `XSRF-TOKEN` cookie on every response its CSRF middleware passes, so a plain
- * refresh fetch of any same-origin route gives a live token. Two things in the
- * old 419 path defeated that:
- *
- *   1. `readCsrfFromDom` read the meta tag BEFORE the cookie, so after the
- *      refresh the stale meta still won and the retry carried the old token.
- *   2. The retry ADDED the fresh header next to the stale one. Laravel's
- *      `getTokenFromRequest` reads `X-CSRF-TOKEN` before `X-XSRF-TOKEN`
- *      (verified at source, 13.x), so even a cookie-first read would have lost
- *      to the leftover stale `X-CSRF-TOKEN`.
- *
- * The fix reads the cookie first on the post-refresh re-read AND sets it as the
- * ONLY csrf header (clearing the other name). It FAILS before the fix on both.
- *
- * The headers are SNAPSHOT at fetch time: postCommand mutates one headers
- * object across the retry (real fetch reads it synchronously, so that is fine),
- * and a mock that captures the object by reference would see only its final
- * state.
+ * FIXTURE: a 419 on a page whose `<meta name="csrf-token">` has gone stale.
+ * Why: the meta token is rendered once per page and goes stale when the session rotates; Laravel reads X-CSRF-TOKEN first, so the fresh cookie must be the only csrf header.
+ * Shows: the retry carries the fresh X-XSRF-TOKEN and no stale X-CSRF-TOKEN; a meta-only page refreshes from the DOM; with no document, transport:missing:csrf, no crash.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invalidateCsrfCache, postCommand } from '../src/http';
@@ -58,7 +37,7 @@ describe('postCommand - 419 refresh uses the fresh cookie as the only csrf heade
     invalidateCsrfCache();
   });
 
-  /** A fetch that 419s the first POST, refreshes the cookie, then 200s. Snapshots POST headers. */
+  /** A fetch that 419s the first POST, refreshes the cookie, then 200s; snapshots headers, as postCommand reuses one object across the retry. */
   function stubFetch() {
     let posts = 0;
     const fetchMock = vi.fn((url: string, init: { headers?: Record<string, string> }) => {

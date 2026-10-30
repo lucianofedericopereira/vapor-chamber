@@ -1,23 +1,14 @@
 /**
- * alien-signals connector - proves the adapter actually works against the
- * real published alien-signals package, not a hand-rolled stub.
- *
- * What we verify:
- *   1. signal() wraps an alien-signal - value reads/writes go through it
- *   2. configureAlienSignals() flips vapor-chamber's signal factory
- *   3. computed/effect built on top of the same alien-signals instance
- *      observe vapor-chamber-created signals (real reactive integration,
- *      not just storage)
- *   4. useSharedCommandState, useCommand, etc. transparently use it
- *      (via the configureSignal hook)
+ * The alien-signals connector, against the real published alien-signals package.
+ * Why: the adapter must work on the real package, not on a hand-rolled stub.
+ * Shows: the adapter reads and writes through alien-signals; configureAlienSignals switches signal() and the composables; effect and computed propagate over a raw alien signal.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { signal as alienSignal, computed, effect } from 'alien-signals';
 import { signal, configureSignal, type CreateSignal } from '../src/signal';
 import { alienSignalAdapter, configureAlienSignals } from '../src/alien-signals';
 
-// Reset between tests - restore the lib's default getter/setter signal so
-// other test files (which don't expect alien-signals) aren't affected.
+// Restore the default signal, so files that do not use alien-signals are unaffected.
 beforeEach(() => {
   configureSignal((<T>(initial: T) => {
     let v = initial;
@@ -62,37 +53,10 @@ describe('configureAlienSignals', () => {
     expect(s.value).toBe(2);
   });
 
-  it('integrates with alien-signals computed - derives from vapor-chamber signals', () => {
-    configureAlienSignals(alienSignal as any);
-
-    // Build a computed using alien-signals' own primitive that reads from a
-    // vapor-chamber signal. Because both wrap the same alien-signals
-    // instance, the dependency tracking propagates correctly.
-    const count = signal(1);
-    const internal = (count as any).value === undefined
-      ? null
-      : (() => {
-          // The Signal returned by configureAlienSignals has alien-signal
-          // semantics - but we access it through the .value getter/setter.
-          // To prove computed correctness we need an alien-signal handle.
-          // Easiest: create the alien-signal directly and verify the
-          // adapter's get/set wrap THAT.
-          return null;
-        })();
-    void internal;
-
-    // Update the value and verify reads see the new value.
-    count.value = 5;
-    expect(count.value).toBe(5);
-    count.value = 10;
-    expect(count.value).toBe(10);
-  });
-
   it('reactive propagation: an effect re-runs when a vapor-chamber signal changes', async () => {
     configureAlienSignals(alienSignal as any);
 
-    // Wrap an alien-signal directly so we have its raw handle for `effect`.
-    // Then assign through .value via the adapter to confirm propagation.
+    // A raw alien signal for `effect`, written through a .value wrapper like the adapter's.
     const raw = alienSignal(0);
     const wrapped = { get value() { return raw(); }, set value(v: number) { raw(v); } };
 
@@ -113,9 +77,7 @@ describe('configureAlienSignals', () => {
   it('full integration: useSharedCommandState signals propagate via alien-signals', async () => {
     configureAlienSignals(alienSignal as any);
 
-    // Re-import after configureAlienSignals so the composable picks up the
-    // flipped factory. (In real apps you call configureAlienSignals at
-    // startup before importing composables.)
+    // Imported after configureAlienSignals, so the composable picks up the switched factory.
     const { useSharedCommandState } = await import('../src/chamber');
     const { createCommandBus, setCommandBus, resetCommandBus } = await import('../src/index');
 
@@ -130,8 +92,7 @@ describe('configureAlienSignals', () => {
 
     bus.dispatch('boom', null);
 
-    // The state was updated through alien-signals' write path; reading
-    // .value pulls the latest value via the adapter's getter.
+    // Written through alien-signals, read through the adapter's getter.
     expect(s.errors.value.length).toBe(1);
     expect(s.lastError.value?.message).toBe('e');
 
@@ -144,8 +105,7 @@ describe('alien-signals integration with computed', () => {
   it('computed that reads a wrapped signal updates correctly', () => {
     configureAlienSignals(alienSignal as any);
 
-    // Create the alien-signal directly so we have the raw handle to feed
-    // into computed. The adapter wraps the same instance.
+    // A raw alien signal for `computed`, written through a .value wrapper like the adapter's.
     const raw = alienSignal(2);
     const wrapped = { get value() { return raw(); }, set value(v: number) { raw(v); } };
 

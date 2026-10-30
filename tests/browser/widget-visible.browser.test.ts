@@ -1,4 +1,9 @@
-// defineWidget({ when: 'visible' }) in Chromium: defined when its first element scrolls in, one observer for every widget; rationale at the end.
+/**
+ * defineWidget({ when: 'visible' }) in Chromium: defined when its first element scrolls in, one observer for every widget.
+ * Why: a widget out of view waits until it is seen, and happy-dom's IntersectionObserver never reports an intersection.
+ * Shows: a widget in view is defined at once (the control); one far below stays undefined until it is scrolled to.
+ * See: plan 1.32 4.5, record H.
+ */
 import { describe, expect, it } from 'vitest';
 // The default `vue` entry re-exports the Vapor runtime too (tests/vue-bundler-vapor-exports.test.ts).
 import * as Vue from 'vue';
@@ -37,8 +42,3 @@ describe('a visible widget', () => {
     expect({ before, after }).toEqual({ before: { near: true, far: false }, after: true });
   });
 });
-
-// Plan 1.32 4.5 and record H (840-841): the `visible` strategy shares one
-// IntersectionObserver for every widget, not one per element. A real engine: happy-dom's
-// observer never reports an intersection. The near widget, in view at once, is the
-// positive control; the far one stays undefined until it is scrolled to.

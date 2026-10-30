@@ -42,7 +42,7 @@ const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:242](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L242)
+**Function** - [src/chamber-vapor.ts:241](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L241)
 
 ```ts
 defineVaporCommand<B extends BaseBus = CommandBus<import("./command-bus").CommandMap>, D extends number | undefined = undefined, T extends number | undefined = undefined>(action: string, handler: Handler, options?: VaporCommandOptions<B, D, T>) => { dispatch: (target: any, payload?: any) => PacedOn<B, CommandResult, D, T>; dispose: () => void; }
@@ -72,7 +72,7 @@ dispatch({ name: 'page_view', params: { page: '/landing' } });
 
 ### defineVaporComponent
 
-**Function** - [src/chamber-vapor.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L178)
+**Function** - [src/chamber-vapor.ts:177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L177)
 
 ```ts
 defineVaporComponent<T = any>(options: object) => T | null
@@ -83,8 +83,7 @@ defineVaporComponent - define a Vapor component with proper type inference.
 Wraps Vue's `defineVaporComponent()`. Use this to get full
 TypeScript inference for props, emits, and slots in Vapor components.
 Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
-compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
-whitepaper alignment log).
+compiler optimizations are Vue behavior (whitepaper appendix B, and log section 37).
 
 Returns null if the Vapor runtime (Vue 3.6+) is not detected.
 
@@ -158,7 +157,7 @@ if (plugin) createApp(App).use(plugin).mount('#app');
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L319)
+**Function** - [src/chamber-vapor.ts:318](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L318)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; pending: (action: string, target?: unknown) => Readonly<Signal<boolean>>; dispose: () => void; }
@@ -173,7 +172,7 @@ gives `pending(action, target?)` (the bus's command state for that key,
 `commandState`), making it safe for `<script setup vapor>` components that
 await async operations. Error-boundary rendering and scheduler-flush
 behavior around async components are Vue runtime concerns (per-beta detail:
-CHANGELOG / whitepaper alignment log).
+whitepaper appendix B, and log section 37).
 
 The dispatch function returns a Promise<CommandResult>, matching the
 AsyncCommandBus interface. Use this when your commands hit async transports

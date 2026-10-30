@@ -160,7 +160,8 @@ Three rules when you run the steps by hand:
 - **After any change under `src/`, comments included, run `npm run docs`**, and commit `docs/api/`
   with the change. The API reference carries source line anchors, so a comment that moves a line
   moves them. Run `npm run size:doc` too when a change can move a size row. Both must regenerate
-  with no diff.
+  with no diff. CI fails a pull request on stale generated files; on a push to main it commits
+  them itself.
 - **After adding or removing tests, run `npm run docs:stamp` after `test:coverage`.** The
   test-count markers publish only from a built run with coverage on. The `stamp-docs --check`
   inside `lint:check` follows a plain `test:run`, so it cannot see a stale count.
@@ -196,6 +197,8 @@ does, which a test cannot:
   (`tests/under-coverage.ts`).
 - macOS runs the build, both test projects and the size budgets once `check` is green, so a Linux
   failure costs no macOS minutes.
+- Every job takes Node from `.node-version`, and macOS and Ubuntu are pinned, so a runner or Node
+  update cannot turn CI red by itself. A Node bump is a commit, and it runs the V8-shape tests.
 - A push that changes only files no check reads (`paths-ignore` in ci.yml: the funding file, the
   issue and PR templates) runs no CI.
 
@@ -219,7 +222,8 @@ the shapes apps use to the log section.
 
 1. Build the base and your change (`npm run ab:dists`), then run `npm run ab` on a workload in
    `scripts/ab/workloads/` that runs the changed path (V8-RULES rule 16). CI's `perf-ab` job runs
-   the same comparison on every pull request and fails on a counted "slower".
+   the same comparison on every pull request that changes the build and reports a counted "slower". It is advisory: it
+   does not turn the run red.
 2. Report each row's verdict and its ns in the pull request description.
 3. **Keep a "performance" change only if a path that runs it reads faster and none reads
    slower.**

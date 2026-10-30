@@ -1,49 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - what Vue's KeepAlive scope-pausing (#15237) does and does NOT
- * suppress, measured on vue@3.6.0-rc.3.
- *
- * WHY. `docs/router.md` carried this note about `tryKeepAliveHooks` in
- * `src/chamber.ts`:
- *
- *   "it hand-solves what #15237 proposes doing natively, so if that lands the
- *    manual pause/resume becomes double-suppression and should be removed in
- *    the same release."
- *
- * #15237 has since landed (closed 2026-08-10; scope pausing propagated through
- * EffectScope/ReactiveEffect, suppressing queued watcher and render jobs while
- * a KeepAlive branch is deactivated). Taken at face value, the note is a
- * standing instruction to delete the guard in `useCommandHistory` and
- * `useCommandError`.
- *
- * It is wrong, and this fixture is why. Vue pauses REACTIVE EFFECTS owned by
- * the deactivated scope. `tryKeepAliveHooks` guards a `bus.onAfter` hook -
- * a plain callback the command bus invokes synchronously inside `dispatch`,
- * held in the bus's own hook array, owned by no scope and scheduled by no
- * scheduler. Nothing upstream can suppress it, because upstream cannot see it.
- *
- * The two mechanisms also answer different questions:
- *   Vue's       - "should this cached component re-render / re-run watchers
- *                  while it is off-screen?"   (a rendering concern)
- *   ours        - "should a command dispatched while this component is
- *                  deactivated be RECORDED into its undo history?"
- *                  (a domain concern - the history would otherwise fill with
- *                  commands the user never performed in that view)
- *
- * So the guard is not redundant and is not double-suppression. The note is
- * corrected rather than obeyed; this file is the evidence, so the question
- * does not get re-litigated from a changelog line next release.
- *
- * LIMIT OF THIS FILE, found in the rc.4 cycle and worth stating here rather
- * than only in the newer test. What follows is a stand-in: a bare
- * `effectScope()` standing in for a KeepAlive deactivation. It measures Vue's
- * side of the boundary correctly and its conclusion holds. But it never calls
- * `tryKeepAliveHooks`, so it could not detect that the guard was gated on
- * `getCurrentInstance()` and therefore never armed in a Vapor component at all
- * - a real bug that a stand-in is structurally unable to see.
- * `tests/keepalive-input-scope-fixture.test.ts` runs the real VaporKeepAlive
- * and pins that. Keep both: this one isolates the mechanism, that one proves
- * the wiring.
+ * What a paused Vue effect scope suppresses and does not suppress, with a bare `effectScope()` standing in for KeepAlive deactivation.
+ * Why: Vue pauses reactive effects owned by a deactivated scope, but a `bus.onAfter` hook is a plain
+ * callback in the bus's own array, owned by no scope. The `tryKeepAliveHooks` guard in
+ * `useCommandHistory` / `useCommandError` is therefore not double-suppression, and a command
+ * dispatched while a cached view is deactivated would otherwise land in its undo history.
+ * Shows: pause() suppresses a scope-owned watcher until resume(), a plain callback registered inside
+ * the scope still runs while paused, and a stopped scope does not stop such a callback either.
+ * See: vuejs/core#15237, docs/router.md, tests/keepalive-input-scope-fixture.test.ts
  */
 
 import { describe, expect, it } from 'vitest';
@@ -82,14 +46,11 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     await nextTick();
     expect(runs).toEqual([1]);
 
-    // Deactivation, as KeepAlive now performs it.
     scope.pause();
     source.value = 2;
     await nextTick();
 
-    // MEASURED: the watcher does not run while paused. This is exactly the
-    // class of work Vue took over - and it is not the class of work
-    // tryKeepAliveHooks guards.
+    // Vue's pausing covers scope-owned reactive work, not what tryKeepAliveHooks guards.
     expect(runs).toEqual([1]);
 
     scope.resume();
@@ -102,8 +63,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
   it('does NOT suppress a plain callback invoked directly - the shape bus.onAfter has', async () => {
     const { effectScope, shallowRef } = await vue();
 
-    // Stand-in for the bus's hook array: a callback held outside any scope and
-    // called synchronously by the dispatcher, exactly as command-bus.ts does.
+    // Stand-in for the bus's hook array: held outside any scope, called synchronously by the dispatcher.
     const hooks: Array<(action: string) => void> = [];
     const recorded: string[] = [];
 
@@ -111,8 +71,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     const state = shallowRef<string[]>([]);
 
     scope.run(() => {
-      // What useCommandHistory does: register an onAfter hook that WRITES a
-      // signal. The write is reactive; the callback that performs it is not.
+      // Like useCommandHistory: the signal write is reactive, the callback performing it is not.
       hooks.push((action) => {
         recorded.push(action);
         state.value = [...state.value, action];
@@ -127,10 +86,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     scope.pause();
     dispatch('cartRemove');
 
-    // MEASURED and load-bearing: pausing the scope did NOT stop the hook.
-    // Without our own `paused` flag, a command dispatched while the component
-    // is deactivated still lands in its undo history. `tryKeepAliveHooks` is
-    // therefore doing real, non-duplicated work.
+    // Pausing the scope does not stop the hook, so the guard's own `paused` flag is the only suppression.
     expect(recorded).toEqual(['cartAdd', 'cartRemove']);
     expect(state.value).toEqual(['cartAdd', 'cartRemove']);
 
@@ -149,9 +105,6 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     scope.stop();
     for (const h of hooks) h();
 
-    // The corollary: teardown is ours too. `onScopeDispose` fires and our
-    // `dispose()` calls the bus unsubscribe - the scope ending is not by
-    // itself what detaches the hook.
     expect(calls).toBe(1);
   });
 });

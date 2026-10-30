@@ -1,13 +1,8 @@
 /**
- * Outbox - the paths the happy-path suite does not reach.
- *
- * `tests/outbox.test.ts` covers hold -> flush -> drain. What it never exercises
- * are the arms that only fire when something is wrong or unusual: no bus, a
- * re-entrant flush held open, a failure that carries no error, and the
- * `window`-less (SSR / worker) branch.
- *
- * Each of these is a real operating condition for an offline queue, not a
- * synthetic edge: an outbox exists precisely because the network is unreliable.
+ * Outbox when something is wrong or unusual: flush with no bus, a re-entrant flush, a failed replay with no error, and no `window` (SSR / worker).
+ * Why: an offline queue runs on an unreliable network, so a flush without a bus would throw something opaque, two flushes would race and send a record twice, and a missing `window` would crash construction.
+ * Shows: flush off a bus rejects with a message naming the fix; a second flush returns the same promise and sends once; a failed replay with no error reaches `isRetryable` as an Error with message 'Unknown error'; listeners bind and unbind once, and without a window dispose() does not throw.
+ * See: tests/outbox.test.ts
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus, type CommandResult } from '../src/index';
@@ -22,7 +17,6 @@ afterEach(() => {
 describe('outbox - flush off a bus', () => {
   it('rejects with an actionable message instead of throwing something opaque', async () => {
     const outbox = createOutbox({ storage: null, autoFlush: false });
-    // The message names the fix.
     await expect(outbox.flush()).rejects.toThrow(/createAsyncCommandBus\(\{ outbox \}\)/);
   });
 });
@@ -55,8 +49,6 @@ describe('outbox - flush re-entrancy', () => {
 describe('outbox - without a window', () => {
   it('does not attempt to bind a listener under SSR / workers', () => {
     vi.stubGlobal('window', undefined);
-    // The `typeof window !== 'undefined'` guard: with no window this must
-    // construct and dispose cleanly rather than throwing.
     const outbox = createOutbox({ storage: null, autoFlush: true });
     expect(() => outbox.dispose()).not.toThrow();
   });

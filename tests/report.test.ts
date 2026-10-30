@@ -1,4 +1,9 @@
-/** Every warning and error the library detects reaches one formatter and its sinks, with its code. The long note is at the end. */
+/**
+ * The reporter: one formatter, replaceable sinks, a level floor.
+ * Why: a report is formatted once and every sink receives it; a throwing formatter or sink must not turn a reported listener error into a failed dispatch.
+ * Shows: the default formatter's lines, the level floor, a sink receiving a listener's throw on both buses, the console as default sink, a replaced formatter, throwing formatter and sink, consoleSink kept beside an app's.
+ * See: log s36.118
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BaseBus, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { type Report, configureReport, consoleSink, formatReport } from '../src/report';
@@ -36,7 +41,7 @@ describe('the default formatter', () => {
 });
 
 describe('the level floor', () => {
-  // A warning (the naming rule's) and an error (a listener's) from one bus.
+  // One bus yields a warning (naming rule) and an error (listener throw).
   const both = (): string[] => {
     const got: string[] = [];
     configureReport({ sinks: [(r) => { got.push(r.level); }], level: floorOf });
@@ -147,10 +152,3 @@ describe('sinks', () => {
     expect([error.mock.calls.length, got.length]).toEqual([1, 1]);
   });
 });
-
-// Plan 1.32 4.1 and step 8h; the owner's ruling of 2026-10-14 (the console is
-// a tool the app extends: one formatter, sinks added or replaced). A report
-// is formatted once and every sink receives it with the arguments. The level
-// is the call site's, so production never reads the registry; development
-// adds the code's fix and docs link from it. A throwing formatter or sink
-// cannot turn a reported listener error into a failed dispatch.

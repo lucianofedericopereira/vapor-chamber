@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
 /**
  * v-vc-command: an optimistic function that throws is the press's failure.
- * It ran before the `try` whose `finally` releases the control, so the control
- * stayed busy for good - `vc-loading`, `aria-disabled` and the in-flight
- * capture guard stayed, and every later press was swallowed.
+ * Why: a throw escaping before the control is released would leave it busy for good, swallowing every later press.
+ * Shows: after a throwing optimistic press the button is neither loading nor aria-disabled, and the next press dispatches.
  */
 import { describe, expect, it } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';

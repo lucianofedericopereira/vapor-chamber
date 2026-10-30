@@ -1,17 +1,8 @@
 /**
- * `ERROR_CODE_REGISTRY` calls itself "the single source of truth" for the
- * library's codes. This sweep checks that against what the source MINTS.
- *
- * Since the owner-by-wiring shape (docs/contract.md 5) a
- * failure is built by a `fail`-shaped call whose first argument is a literal
- * `'condition:subject'`, so "which site mints this?" - the question the old
- * union sweep could not ask - is a scan. Both sides come from source: the
- * literals out of `src/`, the rows out of the exported registry. A code minted
- * with no row fails; so does a row nothing mints, unless it is one of the codes
- * declared on purpose and never raised (listed below, each with its reason).
- *
- * The owner half is not scanned: it is the wiring's, not the site's. A row is
- * matched on its `condition:subject`.
+ * ERROR_CODE_REGISTRY against what src/ mints: both sides read from source, matched on `condition:subject`, since the owner is the wiring's.
+ * Why: the registry calls itself the single source of truth, and only a scan can hold it to that.
+ * Shows: every minted code has a row; every row is minted or declared not minted, with a reason; the DEV vocabulary matches the Condition type; the router's codes are its own; no code twice.
+ * See: docs/contract.md section 5, log s35.108.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -21,16 +12,11 @@ import { it } from '../src/vitest';
 import { ERROR_CODE_REGISTRY } from '../src/error-registry';
 
 const SRC = join(import.meta.dirname, '..', 'src');
-// The vocabulary, read from the `Condition` type itself: a copy here went stale
-// when `conflict` and `unauthenticated` joined it, and a site minting either
-// would have been skipped by the scan without a word.
+// Read from the `Condition` type, so a new word cannot be skipped by the scan.
 const VOCABULARY = [...(/export type Condition =([^;]*);/.exec(readFileSync(join(SRC, 'failure.ts'), 'utf8'))?.[1] ?? '').matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
 const CONDITIONS = VOCABULARY.join('|');
 
-/**
- * Declared, catalogued and minted by no site - each for a stated reason, so
- * adding one is a decision rather than a way to silence this sweep.
- */
+/** Declared and minted by no site, each with its reason, so adding one is a decision, not a way to silence this sweep. */
 const DECLARED_NOT_MINTED: Record<string, string> = {
   'failed:handler': "a handler's throw reaches result.error raw (docs/contract.md rule 8)",
   'failed:step': 'workflow codes: declared for the workflow module',
@@ -101,10 +87,7 @@ describe('error-code registry sweep', () => {
     expect([...words].sort()).toEqual([...VOCABULARY].sort());
   });
 
-  // The router owns its codes under its own name (shape rule 3), so its
-  // sweep is owner-exact: every `routerError` or reported literal has a `router:` row and
-  // every `router:` row is raised, and no plain Error is built in its sources
-  // (log s35.108).
+  // The router owns its codes under its own name, so its sweep is owner-exact.
   it('the router: every code it mints is a router: row, every router: row is minted', () => {
     const own = new Set<string>();
     const literal = new RegExp(`routerError\\(\\s*'((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');

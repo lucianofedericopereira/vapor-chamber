@@ -1,4 +1,9 @@
-/** A state from outside a store (a tab's, a server's, a seed) is a fact on the bus's store lane, written as it arrives, never coalesced. Rationale at the end. */
+/**
+ * A state from outside a store (a tab's, a server's, a seed) is a fact on the bus's store lane, written as it arrives, never coalesced.
+ * Why: a fact written a microtask late would let share send it back (a message storm for one write), a seeded coalesce store would read its default state first, and `storeStates` would miss a same-tick write.
+ * Shows: on both runtimes, with and without coalesce, one write in a tab crosses as one command per tab with no echo; two coalescing tabs writing at once both keep both writes; a server state lands at once past a pending own write; a seed is read at once; `storeStates` sees a same-tick write; after a takeover only the newest store hears the id's facts.
+ * See: log s36.F30
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore as defineVue } from '../src/store';
@@ -35,8 +40,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
         heard.length = 0;
         a.add(1);
         await quiet(heard);
-        // No message goes back and forth: the write crosses once from its tab,
-        // and once more from the tab holding the lock when that is the other.
+        // The write crosses once from its tab, and once more from the tab holding the lock when that is the other.
         expect(heard.every((m) => m.kind === 'cmd')).toBe(true);
         expect(perTab(heard).every((c) => c === 1)).toBe(true);
         expect(b.state.value).toEqual({ items: [1] });
@@ -58,8 +62,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
       a.add(1);
       b.add(2);
       await quiet(heard);
-      // Both writes kept, and one list in both tabs: the tab holding the lock
-      // ran them, and the other follows it.
+      // The tab holding the lock runs both writes and the other follows it.
       expect([...a.state.value.items].sort()).toEqual([1, 2]);
       expect(b.state.value).toEqual(a.state.value);
     });
@@ -111,13 +114,3 @@ describe('a store taken over by another definition', () => {
     old.$dispose();
   });
 });
-
-// Rationale.
-// Audit 2026-10-21 W1 and W2 (.probes/audit-steps-1-7.md): a tab's state, a
-// server's and a seed went through `coalesce`'s pend, written a microtask
-// later. Share cleared its received marker before the write landed, so the
-// write was sent back: 32,514 messages for one write. A seeded coalesce store
-// read its default state first, and storeStates missed a same-tick write. The
-// plain store (coalesce false) is each case's control. Two tabs writing at
-// once: each write now crosses as its command, so both tabs keep both (log
-// 36.F30). Before, one tab's state replaced the other's and a write was lost.

@@ -1,17 +1,8 @@
 /**
- * core:missing:handler in DEV: the other cause, when a plugin could have taken it.
- *
- * A transport is the work only for the actions its pattern covers; any other
- * goes to the handler lookup, which then says "Call bus.register(...) first" -
- * the wrong fix when the action was meant for the transport
- * (docs/rc-alignment-log.md s10.1, B2). In DEV, a bus with a transport names
- * that cause too. Production carries the fact
- * alone: all advice sits behind DEV, which the IIFEs fold at build and a
- * consumer's production build folds, and the fix text is the catalogue's
- * (ERROR_CODE_REGISTRY).
- *
- * The real transport map, not a stand-in: its pattern decides whether the
- * dispatch reaches the handler lookup at all.
+ * The `core:missing:handler` message in DEV names a transport pattern as the other possible cause.
+ * Why: an action meant for a transport but outside its pattern would be told only "call bus.register(...) first", the wrong fix; production must carry the fact alone, with the fix text from the catalogue.
+ * Shows: with a transport map that misses, the DEV message starts with the register() advice and adds the transport hint; with no transport it is the register() advice only; in production it is the bare fact.
+ * See: docs/rc-alignment-log.md s10.1 (B2), docs/contract.md rule 5.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

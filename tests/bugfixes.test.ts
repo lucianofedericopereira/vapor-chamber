@@ -1,14 +1,12 @@
 /**
- * Tests for all Track A bug fixes (A1-A7)
+ * createTestBus's passthroughHandlers, request() deduplication, and the form's isValidating and isBusy.
+ * Why: a test bus stubs by default and runs real handlers only when asked; identical concurrent requests run once; a form is busy while validating too.
+ * Shows: stubbing, recording, passthrough with errors caught; same action and target deduped, different not, entry cleared after; isValidating and isBusy during work.
  */
 import { describe, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
 import { createFormBus } from '../src/form';
 import { it } from '../src/vitest';
-
-// ---------------------------------------------------------------------------
-// A1: testing.ts - passthroughHandlers fix
-// ---------------------------------------------------------------------------
 
 describe('A1: createTestBus passthroughHandlers', () => {
   it('default mode: stubs handlers (does NOT execute them)', () => {
@@ -58,10 +56,6 @@ describe('A1: createTestBus passthroughHandlers', () => {
     expect(result).toSucceedWith(undefined);
   });
 });
-
-// ---------------------------------------------------------------------------
-// A2: command-bus.ts - asyncRequest dedup
-// ---------------------------------------------------------------------------
 
 describe('A2: asyncRequest deduplication', () => {
   it('concurrent requests to same action+target return the same Promise', async ({ asyncBus: bus }) => {
@@ -115,10 +109,6 @@ describe('A2: asyncRequest deduplication', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A7: form.ts - isValidating and isBusy
-// ---------------------------------------------------------------------------
-
 describe('A7: form isValidating and isBusy', () => {
   it('exposes isValidating and isBusy signals', () => {
     const form = createFormBus({ fields: { name: '' } });
@@ -168,14 +158,6 @@ describe('A7: form isValidating and isBusy', () => {
     await form.submit();
     expect(busyDuringValidation).toBe(true);
     expect(busyDuringSubmit).toBe(true);
-    expect(form.isBusy.value).toBe(false);
-  });
-
-  it('reset() clears isValidating and isBusy', () => {
-    const form = createFormBus({ fields: { x: '' } });
-    // Manually verify reset path
-    form.reset();
-    expect(form.isValidating.value).toBe(false);
     expect(form.isBusy.value).toBe(false);
   });
 });

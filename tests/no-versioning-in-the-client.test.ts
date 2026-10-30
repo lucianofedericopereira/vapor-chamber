@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** A stale tab is HTTP invalidation, not the library's: no manifest read at runtime, no build on a record. The long note is at the end. */
+/**
+ * The client does no versioning: no manifest read at runtime, no build stored on an outbox record.
+ * Why: a tab left open across a deploy is invalidated by HTTP (the server's refusal or redirect); a client that also reads a deployed manifest would second-guess the server and could drop or redirect a replay the server would accept.
+ * Shows: with the build defines present and a deployed manifest that says `cartAdd` broke, the root exports no stale-tab API, an outbox record has no `build` and its flush replays without a fetch, the router fetches nothing and does not call `location.assign` on start, visibility change or push, and the package exports no `./vite-manifest`.
+ * See: log s36.44.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as root from '../src/index';
 import { createAsyncCommandBus } from '../src/index';
@@ -11,14 +16,14 @@ import pkg from '../package.json';
 const OWN = 'ni:///sha-256-128;own';
 const NEW = 'ni:///sha-256-128;new';
 
-/** A deployed manifest that says this build's `cartAdd` broke: what the removed check acted on. */
+/** A deployed manifest that says this build's `cartAdd` broke. */
 function deployBroken() {
   const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ $id: NEW, history: [{ $id: OWN, broken: ['cartAdd'] }] }), { status: 200 }));
   vi.stubGlobal('fetch', fetchSpy);
   return fetchSpy;
 }
 
-// The build defines present, as in a build with vaporChamberManifest(): the case the removed code acted on.
+// The build defines are present, so a manifest read would be reachable.
 beforeEach(() => {
   vi.stubGlobal('__VC_MANIFEST__', OWN);
   vi.stubGlobal('__VC_MANIFEST_URL__', '/build/vc-manifest.json');
@@ -75,21 +80,3 @@ describe('no versioning in the client', () => {
     expect('./vite-manifest' in pkg.exports).toBe(false);
   });
 });
-
-/*
- * Step 2 of .probes/plan-1.32.md (revision 13 of plan-transport-owned.md):
- * a tab left open across a deploy is a cached copy of the app, and its
- * invalidation is HTTP's (the document revalidated at its next load, hashed
- * assets, the router's hard navigation on a chunk that is gone). "You are old"
- * is the server's answer, a redirect or a refusal, which the wire already
- * carries; an outbox record is a request like any other, and the server's
- * answer is its verdict. So the client reads no deployed manifest and stores
- * no build: stale.ts and the outbox's build check go. So does the manifest
- * plugin (vapor-chamber/vite-manifest) whole: its breaking check judged what
- * "an old tab sends the old input to the new server" (its own header), the
- * same edge case, and its emitted file, defines, history and
- * `toolOutputSchema` had no reader but the removed code (owner: "what
- * external?", "again keep what can be discarded?"). Each test runs with the
- * build defines present and a deployed manifest that says `cartAdd` broke,
- * the case the removed code acted on, so each is red before the removal.
- */

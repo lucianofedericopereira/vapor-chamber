@@ -1,5 +1,14 @@
 // @vitest-environment happy-dom
-// Hover and focus preheat and shadow roots: which roots get the listeners, a node removed first, and teardown. The long note is at the end.
+/**
+ * Hover and focus preheat in shadow roots (src/router/dom.ts): which roots get listeners, a node moved first, teardown.
+ * Why: a move between two nodes of one shadow root never reaches the document, so every root an event comes from
+ * needs its own hover and focus listeners; a node an app listener removed or moved must not throw or get listeners;
+ * teardown would otherwise leave root listeners behind after router.dispose().
+ * Shows: the first event from a root (nested roots innermost first) attaches the four listeners once; a removed node
+ * or one moved into a fragment gets none and nothing throws; teardown aborts the signal on every root listener.
+ * Hover itself is shown in tests/browser/router-shadow-hover.browser.test.ts (happy-dom stops no dispatch at the host).
+ * See: log s36.19
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration } from '@router/dom';
 
@@ -91,7 +100,7 @@ describe('a node an app listener moved before the router listener runs', () => {
     });
     const adds = vi.spyOn(span, 'addEventListener');
     const teardown = install();
-    // vitest's happy-dom turns error capture off, so a listener's throw would leave dispatchEvent.
+    // happy-dom under vitest has error capture off, so a listener's throw would escape dispatchEvent.
     expect(() => over(span)).not.toThrow();
     expect(adds).not.toHaveBeenCalled();
     teardown();
@@ -132,33 +141,3 @@ describe('teardown', () => {
     expect(seen).toEqual([]);
   });
 });
-
-// The note.
-//
-// Log 36.19 item 2. A move between two nodes of one shadow root never reaches
-// the document's listeners (DOM Standard, dispatch steps 6.9.3 and 6.9.7), so
-// each open shadow root an event comes from gets the hover listeners too.
-// Item 4 adds the focus pair (`focusin`, `focusout`) to every target, so each
-// root gets four listeners.
-// happy-dom does not stop the dispatch at the host, so the hover itself is
-// shown in tests/browser/router-shadow-hover.browser.test.ts. This file holds
-// what happy-dom can show: which roots get the listeners, and teardown.
-//
-// Red before: the two attach tests (no root got a listener) and teardown (no
-// root listener to carry a signal). The walk goes out from the innermost root
-// to the document and stops at a seen root: an event from a nested root
-// attaches it and every unseen root outside it.
-//
-// The walk asks each root's type. An app listener earlier on the path can
-// remove or move the hovered node before the router's listener runs, and the
-// node's root is then an element or a fragment, not a shadow root. A walk that
-// read `.host` off it threw (seeded once: red here, an uncaught error per
-// hover in a browser), and one that attached any root put listeners on the
-// removed node. Pins, green before and after: the removal, the fragment, and
-// the control that the same page preheats when nothing moves.
-//
-// Teardown aborts one signal that every listener was added with, the roots'
-// included. So the listeners come off, as `router.dispose()` promises, with no
-// list of roots kept. A flag that only made them return kept the router in
-// memory while a root it saw stayed on the page. Root listeners added without
-// the signal were seeded once and turned the teardown test red.

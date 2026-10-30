@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - WHEN the transition bridge's `phase` settles on a sync bus, today
- * and with `done` deferred to a microtask. The long note is at the end.
+ * When the transition bridge's phase settles on a sync bus, as shipped and with done deferred to a microtask.
+ * Why: on a sync bus the bridge calls done() inside the hook's own stack, and on a vDOM mode="out-in"
+ * Transition that makes Vue throw; deferring done avoids the throw but changes what a consumer observes
+ * at a post-flush watcher, after nextTick and on a later macrotask.
+ * Shows: for vapor and vdom, the order of dispatches and the phase, node count and text at the three
+ * markers for each variant, plus the vdom out-in throw and that done runs inline versus a microtask later.
+ * See: docs/rc-alignment-log.md s35.16, tests/compile-vapor.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -16,10 +21,10 @@ const BODY = '<div v-if="s.a" key="a" class="p">A</div><div v-else key="b" class
 const DEFAULT_MODE = `<Transition v-bind="t">${BODY}</Transition>`;
 const OUT_IN = `<Transition mode="out-in" v-bind="t">${BODY}</Transition>`;
 
-/** The bridge as it is. */
+/** The bridge as shipped. */
 const today = (t: TransitionBridge): object => t;
 
-/** The bridge with `done` never called inside the hook's own stack: the change F2 proposes. */
+/** The bridge with `done` never called inside the hook's own stack; emulated here, not in src. */
 const deferred = (t: TransitionBridge): object => ({
   ...t,
   onEnter: (el: Element, done: () => void) => t.onEnter(el, () => queueMicrotask(done)),
@@ -146,23 +151,3 @@ describe('transition bridge on a sync bus: when `phase` settles', () => {
     expect(later).toHaveBeenCalledTimes(1);
   });
 });
-
-/*
- * WHY THIS FILE EXISTS. On a sync bus the bridge calls `done()` inside the
- * `onEnter` / `onLeave` hook's own stack. On a vDOM
- * `<Transition mode="out-in">` a synchronous `done()` makes Vue throw (the
- * last test; Vue's defect, present on 3.5 too, docs/rc-alignment-log.md
- * s35.16). Deferring `done` to a microtask avoids the throw, and the question
- * was whether a consumer could tell the difference anywhere else.
- *
- * They can, and these tests are the two behaviours side by side. `deferred`
- * is NOT in src: it is the proposed change, emulated by wrapping the two
- * hooks, so both can be measured on one tree.
- *
- * THE THREE MARKERS are places a consumer's code can stand: a `flush: 'post'`
- * watcher in the flush that toggled, the line after `await nextTick()`, and a
- * later macrotask. Each records `phase`, the number of transitioned nodes in
- * the DOM, and the text.
- *
- * Every template goes through tests/compile-vapor.ts on the installed Vue.
- */

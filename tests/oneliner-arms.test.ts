@@ -1,15 +1,8 @@
 // @vitest-environment happy-dom
 /**
- * Single-arm gaps across the small modules - each one line, each a normal
- * runtime condition rather than an exotic one.
- *
- *  - transitions: an async transition command that REJECTS must still call
- *    Vue's `done()`, or the element is stuck mid-transition forever.
- *  - utilities: createReaction's refusal returns a working no-op unsubscribe
- *, and a non-object mapPayload value rides through unwrapped.
- *  - router/url: encodeQueryParam wrapping a scalar for an `array` param.
- *  - router/history: resolveBase with no window and no pathname.
- *  - router/menu: a table with no menu-flagged rows at all.
+ * Small behaviours of the transition bridge, createReaction, encodeQueryParam, resolveBase and buildMenu.
+ * Why: a transition whose `done()` never fires leaves the element stuck mid-transition; a refused reaction whose unsubscribe throws, or a scalar `mapPayload` that gets wrapped, would break callers; a scalar for an `array` param must still encode as an array. Also the only file reaching the transition's rejected-promise arm, a refused reaction's no-op unsubscribe, a scalar `array` param and buildMenu with no flagged rows, so the 100% floor needs it.
+ * Shows: `done()` fires once when the handler fails, the dispatch promise rejects, or it resolves; a refused createReaction returns a safe no-op unsubscribe; `mapPayload` scalars pass unwrapped and objects get the causation marker; encodeQueryParam wraps scalars, keeps arrays, and drops default and empty arrays; resolveBase gives the prefix or '' without locales, and an explicit `url` wins; buildMenu returns `[]` with no flagged rows and stamps `exactActive` on flagged ones.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTransitionBridge } from '../src/transitions';
@@ -20,11 +13,6 @@ import { resolveBase } from '@router/history';
 import { buildMenu } from '@router/menu';
 import { createRouteTable } from '@router/table';
 
-
-// ---------------------------------------------------------------------------
-// transitions - done() on a rejected dispatch
-// ---------------------------------------------------------------------------
-
 describe('transition bridge done() callback', () => {
   it('calls done() when a handler fails (the bus resolves that as errResult)', async () => {
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
@@ -34,14 +22,11 @@ describe('transition bridge done() callback', () => {
     const done = vi.fn();
     t.onEnter(document.createElement('div'), done);
 
-    // The element must not be left mid-transition just because the handler failed.
     await vi.waitFor(() => expect(done).toHaveBeenCalledTimes(1));
   });
 
   it('calls done() when the dispatch promise itself REJECTS', async () => {
-    // The chamber bus never rejects - failures come back as errResult - so this
-    // arm exists for the other BaseBus implementations the bridge accepts. A
-    // bus that breaks that contract must still not strand the element.
+    // The chamber bus never rejects, but the bridge also accepts other BaseBus implementations that might.
     const bus = { dispatch: () => Promise.reject(new Error('bus contract broken')) } as any;
     const t: any = createTransitionBridge({ bus, namespace: 'modal' });
 
@@ -61,21 +46,17 @@ describe('transition bridge done() callback', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// utilities - createReaction
-// ---------------------------------------------------------------------------
-
 describe('createReaction', () => {
   it('returns a callable no-op unsubscribe when it refuses to install', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'ignore' });
 
-    // Source pattern matches its own target -> refused (would self-trigger).
+    // The source pattern matches its own target, so install refuses.
     const off = createReaction('cart*', 'cartSync').install(bus);
 
     expect(error).toHaveBeenCalledTimes(1);
     expect(typeof off).toBe('function');
-    expect(() => off()).not.toThrow(); // the no-op must still be safe to call
+    expect(() => off()).not.toThrow();
   });
 
   it('passes a non-object mapPayload value through unwrapped', () => {
@@ -87,7 +68,7 @@ describe('createReaction', () => {
     const off = createReaction('source', 'target', { mapPayload: () => 'a bare string' }).install(bus);
     bus.dispatch('source', {});
 
-    // Nothing to spread the causation marker into - the scalar rides as-is.
+    // A scalar has nothing to carry the causation marker, so it rides as-is.
     expect(seen).toEqual(['a bare string']);
     off();
   });
@@ -107,10 +88,6 @@ describe('createReaction', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// router/url - encodeQueryParam array coercion
-// ---------------------------------------------------------------------------
-
 describe('encodeQueryParam', () => {
   it('wraps a scalar for a declared array param', () => {
     expect(encodeQueryParam('red', { type: 'array' })).toEqual(['red']);
@@ -127,13 +104,9 @@ describe('encodeQueryParam', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// router/history - resolveBase + position
-// ---------------------------------------------------------------------------
-
 describe('resolveBase', () => {
   it('falls back to an empty pathname with no window and no option', () => {
-    // Node environment: no window, no options.pathname -> '' is the pathname.
+    // Without `url` or `locales` the base is the prefix, whatever the pathname.
     expect(resolveBase({})).toBe('');
     expect(resolveBase({ prefix: '/admin' })).toBe('/admin');
   });
@@ -143,17 +116,12 @@ describe('resolveBase', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// router/menu - nothing flagged for the menu
-// ---------------------------------------------------------------------------
-
 describe('buildMenu', () => {
   it('returns an empty menu when no row carries meta.menu', () => {
     const table = createRouteTable([
       { name: 'home', path: '/', component: 'Home' },
       { name: 'list', path: '/list', component: 'List' },
     ]);
-    // No root bucket exists at all - the `?? []` fallback is what answers.
     expect(buildMenu(table.records, '/')).toEqual([]);
   });
 
@@ -167,8 +135,3 @@ describe('buildMenu', () => {
     expect(menu.find(i => i.name === 'list')!.exactActive).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// ssr - the thenable guard's own catch
-// ---------------------------------------------------------------------------
-

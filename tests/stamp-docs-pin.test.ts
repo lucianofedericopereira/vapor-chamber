@@ -1,4 +1,9 @@
-// Pinned stamps: `vc:NAME@<npm range>` is stamped only while package.json's version satisfies the range.
+/**
+ * Pinned stamps: `vc:NAME@<npm range>` is stamped only while package.json's version satisfies the range.
+ * Why: a marker inside a quoted passage would be rewritten with today's number on every release, and a mistyped or unsatisfiable range would silently never stamp, or start rewriting history later.
+ * Shows: a satisfied pin stamps like an unpinned marker, a pin the version has left is frozen and never stale, and a bad or too-high range is an error naming the file and marker, even with no value for it in the run.
+ * See: log s36.15, audit WPA-1
+ */
 import { describe, expect, it } from 'vitest';
 import { stampMarkers } from '../scripts/stamp-docs.mjs';
 
@@ -59,18 +64,8 @@ describe('stamp-docs: pinned markers', () => {
   });
 
   it('a bad range is an error even when its value has no source in this run', () => {
+    // No values on purpose: a fresh checkout has no source for the test counts, and the range is still checked.
     const out = stampMarkers('<!-- vc:testFiles@1.40 -->179<!-- /vc:testFiles@1.40 -->', {}, '1.30.0', 'f.md');
     expect(out.errors).toEqual(['f.md: vc:testFiles@1.40 starts above package.json version 1.30.0']);
   });
 });
-
-// Why pins exist. The whitepaper quotes earlier versions of itself "as they
-// stood" (appendix A, part C), and those quotes carried live markers, so every
-// release rewrote the quote with today's number (audit row WPA-1). A pin
-// freezes a marker at the value it held when the range was last satisfied.
-//
-// The two error cases exist because a frozen marker is never stale: a typo such
-// as `@1.40` for `@1.30` would otherwise wait silently until 1.40 and then start
-// rewriting history, and a range no version satisfies would never be stamped at
-// all. The last case runs with no values on purpose: on a fresh checkout the
-// test counts have no source, and the range is still checked there.

@@ -1,9 +1,8 @@
 /**
- * Adversarial hardening for createWorkflow (saga/compensation). The happy
- * compensation path is covered in utilities.test.ts; these cover the intricate
- * failure modes: a compensation step that ITSELF fails, failure on the first
- * step (nothing to compensate), reverse-order compensation across multiple
- * steps, and the async-bus path.
+ * Failure modes of `createWorkflow` compensation: a compensation that itself fails, failure on the first step, reverse order, mapped inputs, and the async bus.
+ * Why: a workflow that threw on a failed compensation, undid a step that never ran, undid in the wrong order, or compensated against the raw arguments would leave partial work half-undone or aimed at the wrong entity.
+ * Shows: a failed compensation is recorded and the rest still run in reverse order; a first-step failure has no compensations; only steps that succeeded and declare `compensate` are undone; the async bus compensates the same way; a compensation receives the step's mapped target and payload; a successful run has no `compensations`.
+ * See: tests/utilities.test.ts
  */
 import { describe, expect } from 'vitest';
 import { createWorkflow } from '../src/utilities';
@@ -22,7 +21,7 @@ describe('createWorkflow - adversarial compensation', () => {
     const wf = createWorkflow([
       { action: 'reserve', compensate: 'releaseReserve' },
       { action: 'charge', compensate: 'releaseCharge' },
-      { action: 'orderCreate' }, // fails -> compensate charge then reserve, in reverse
+      { action: 'orderCreate' },
     ]);
 
     const result = await wf.run(bus, { id: 1 });
@@ -85,9 +84,6 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(result.compensations?.every((c) => c.ok)).toBe(true);
   });
 
-  // Item 31: steps ran with MAPPED inputs, compensations with the raw workflow
-  // arguments - so a step that derived a sub-entity was compensated against
-  // the parent (or against nothing at all).
   it('compensates with the mapped target/payload the step actually acted on', async ({ bus }) => {
     const seen: Array<{ action: string; target: unknown; payload: unknown }> = [];
     const record = (action: string) => (cmd: { target: unknown; payload?: unknown }) => {
@@ -114,8 +110,6 @@ describe('createWorkflow - adversarial compensation', () => {
 
     expect(result.ok).toBe(false);
     const compensation = seen.find((c) => c.action === 'releaseReserve');
-    // Was { cartId: 'cart-7' } / { qty: 3 } - the raw workflow arguments, so
-    // the release addressed the cart instead of the reservation it created.
     expect(compensation?.target).toEqual({ reservationId: 'cart-7-res' });
     expect(compensation?.payload).toEqual({ qty: 3 });
   });

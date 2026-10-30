@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// FIXTURE - a widget with a child and a template ref: the child and the ref are in place before the host's mounted hook. The note is at the end.
+/**
+ * `defineWidget` on a Vapor component with a child and a template ref, placed in the DOM as a custom element.
+ * Why: if a custom element's component were created outside the flush of its mount, the host's mounted hook would see a null template ref and run before its child's mounted hook.
+ * Shows: in the same tick the tag is placed, the child's mounted hook runs first and the host's mounted hook sees its ref as a DIV, and the order is unchanged a tick later.
+ * See: vuejs/core#15991, log s36.F43
+ */
 
 import { afterEach, beforeAll, expect, it } from 'vitest';
 import { configureVue, waitForVueDetection } from '../src/chamber';
@@ -55,17 +60,3 @@ it('the child mounts and the ref is set before the host mounted hook, in the tic
   expect(r.sync).toEqual(['child mounted', 'mounted DIV']);
   expect(r.later).toEqual(['child mounted', 'mounted DIV']);
 });
-
-/*
- * WHY THIS FILE EXISTS. On Vue 3.6.0-rc.12 a Vapor custom element created its
- * component before the app mounted it, outside the flush that the root mount
- * runs. The jobs the creation queued (template refs, the mounted hooks of
- * children) ran later: the host's mounted hook saw `null` for its ref and ran
- * before the child's. Vue 3.6.0-rc.13 (#15991, "flush custom element component
- * creation with its mount") flushes both together. This file fails on rc.12
- * and passes on rc.13 (docs/rc-alignment-log.md, section 36.F43).
- *
- * defineWidget is this library's way to define such an element, through
- * defineVaporCustomElement, so a widget whose mounted hook reads a ref or a
- * child's state is what an app sees.
- */

@@ -1,36 +1,10 @@
 // @vitest-environment happy-dom
 /**
- * EXPERIMENT -> SHIPPED: memoizing `routableTarget` per anchor.
- *
- * WHERE THE IDEA CAME FROM. Vue 3.6.0-rc.6's `29ed4b0` hoists a per-call
- * template-string scan into a descriptor the factory computes once. The same
- * shape was sitting in `stampActiveLinks`, which runs after EVERY navigation
- * over EVERY in-base anchor and re-derives `new URL()` + `stripBase()` per
- * anchor per commit - from an href that almost never changes. rc.6's prop fix
- * (`84833e2`) supplied the other half: validate the cache against the raw INPUT
- * you were given, not against something downstream of it, so the memo is keyed
- * on the anchor's href rather than merely on the element.
- *
- * WHY IT IS SHAPED THIS WAY. Both arms run the REAL `stampActiveLinks`, in one
- * process, interleaved AB/BA, medians - the house method
- * (`tests/clock-source-ab.test.ts`, `scripts/ab-vue.mjs`). The baseline arm is
- * DERIVED from the shipped source at run time rather than hand-written, so it is
- * the genuine pre-change function and not a transcription of it; if the revert
- * target ever stops matching, the transform throws instead of silently
- * measuring one arm twice.
- *
- * SCALE MATTERS AND IS MEASURED AT THREE SIZES. `data-active` stamping exists
- * for Blade-rendered menus ("Blade-rendered menus light up with zero Vue"), and
- * a server-rendered nav is where anchor counts get large. 50 is an ordinary
- * page, 200 a large nav, 1000 a sitemap-ish footer.
- *
- * NO TIMING THRESHOLD IS ASSERTED, per the house rule - single-host ratios are
- * unstable under parallel load. The printed table is the evidence. What IS
- * asserted is equivalence, including the two cases a naive memo would get
- * wrong: an anchor whose `href` is rewritten in place, and non-routable links
- * (whose `null` result is cached too).
+ * stampActiveLinks with the per-anchor routableTarget memo, A/B against a baseline derived from the shipped source.
+ * Why: the memo must be keyed on the anchor's href, not the element alone; otherwise an href rewritten in place would keep stamping data-active from a stale target.
+ * Shows: the memoized function stamps data-active and data-exact-active exactly as the baseline for three paths, after an href is rewritten in place, and after it moves out of the base (a cached target becomes null); the timing table prints only under the timing run and asserts finite, positive figures, never a ratio threshold.
+ * See: tests/clock-source-ab.test.ts, scripts/ab-vue.mjs
  */
-
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +17,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REF_DIR = resolve(HERE, '__ref', 'router-stamp');
 const BASELINE = resolve(REF_DIR, 'router-dom-baseline.ts');
 
-/** The memo lookup this change introduced, and what it replaced. */
+/** The memo block in src/router/dom.ts, and the one line the baseline arm puts in its place. */
 const SHIPPED = `  const memo = routableMemo.get(anchor);
   // \`base\` is fixed per router instance, so href alone settles validity.
   if (memo !== undefined && memo.href === href) return memo.target;
@@ -64,11 +38,7 @@ function buildBaseline(): void {
   }
   const reverted = src
     .replace(SHIPPED, BASELINE_BODY)
-    // GENERIC, not a list of the two imports that happened to exist. It was a
-    // list, and adding one import to `router/dom.ts` broke this harness with
-    // "Failed to resolve import '../bounds'" - the same shape as every other
-    // allowlist in this repo that reported clean while missing what nobody
-    // thought of. Rewrites any relative specifier to its real location instead.
+    // Rewrite every relative specifier to its real location, not a fixed list of imports.
     .replace(/from '\.\.\/([^']+)'/g, "from '../../../src/$1'")
     .replace(/from '\.\/([^']+)'/g, "from '@router/$1'");
   mkdirSync(REF_DIR, { recursive: true });
@@ -112,7 +82,6 @@ describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
     const base = (await import(/* @vite-ignore */ BASELINE)) as { stampActiveLinks: Stamp };
     const baseline = base.stampActiveLinks;
 
-    // --- equivalence, including the cases a naive memo gets wrong ------------
     const host = buildMenu(12);
     const snapshot = (fn: Stamp, path: string): string => {
       for (const a of host.querySelectorAll('a')) {
@@ -128,16 +97,13 @@ describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
       expect(snapshot(stampActiveLinks, path)).toBe(snapshot(baseline, path));
     }
 
-    // An href rewritten IN PLACE must invalidate the memo. This is the case a
-    // memo keyed on element identity alone would answer wrongly, and the reason
-    // the cache stores the href it was derived from.
+    // An href rewritten in place must invalidate the memo.
     const first = host.querySelector('a') as HTMLAnchorElement;
     first.setAttribute('href', '/app/section-9/item-999');
     expect(snapshot(stampActiveLinks, '/section-9/item-999')).toBe(
       snapshot(baseline, '/section-9/item-999'),
     );
-    // And once more after moving it OUT of the base - the cached value flips
-    // from a target to null.
+    // Moving it out of the base flips the cached value from a target to null.
     first.setAttribute('href', 'https://elsewhere.test/x');
     expect(snapshot(stampActiveLinks, '/section-1/item-1')).toBe(
       snapshot(baseline, '/section-1/item-1'),
@@ -147,7 +113,6 @@ describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
     // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
     if (!runTiming) return;
 
-    // --- measurement --------------------------------------------------------
     const rows: Array<{ n: number; oldUs: number; newUs: number; ratio: number }> = [];
     for (const n of [50, 200, 1000]) {
       const menu = buildMenu(n);

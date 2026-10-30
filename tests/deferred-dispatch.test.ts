@@ -1,8 +1,8 @@
 /**
- * Tests for the bus's `buffer` (createBuffer) - deferred dispatch (buffer-until-registered).
- * Built for lazy/async wiring (island hydration, code-split panels) where a
- * command can be dispatched before its handler exists: the command is queued
- * per-action and replayed, in order, the moment a handler registers.
+ * The bus's `buffer` (createBuffer): a command dispatched before its handler exists is queued per action and replayed in order on register.
+ * Why: lazy wiring (island hydration, code-split panels) dispatches before a handler exists; a bad bound must neither throw nor unbound the queue.
+ * Shows: FIFO replay through the full pipeline, per action; no buffering once a handler exists or for a query; maxSize, onDrop and ttl; 0, NaN and negative bounds are safe.
+ * See: audit D7, tests/bounds.test.ts.
  */
 import { describe, expect, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
@@ -110,9 +110,7 @@ describe('buffer - deferred dispatch', () => {
     expect(dropped).toEqual([{ action: 'q', target: 1 }]);
   });
 
-  // Evicting BEFORE the push would, at a bound of 0, let an empty queue
-  // satisfy `q.length >= limit`: `shift()` returns undefined and the drop
-  // callback dereferences it, throwing out of `bus.dispatch()`.
+  // A bound of 0 drops the arriving command; evicting before the push would shift an empty queue and throw.
   it('maxSize: 0 buffers nothing instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
@@ -131,9 +129,7 @@ describe('buffer - deferred dispatch', () => {
     expect(seen).toEqual([]);
   });
 
-  // Math.trunc and Math.max both propagate NaN, and every comparison against
-  // NaN is false - so `q.length > limit` never fired and the bound silently
-  // vanished. A `maxSize: Number(badConfigValue)` is all it takes.
+  // Every comparison with NaN is false, so a NaN bound would vanish silently.
   it('a NaN maxSize takes the default bound instead of unbounding the queue', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = buffered({ maxSize: Number('not-a-number') });
@@ -143,9 +139,7 @@ describe('buffer - deferred dispatch', () => {
     let replayed = 0;
     bus.register('q', () => { replayed++; return { ok: true }; });
 
-    // Measured at 300 buffered before any guard - unbounded growth. The bound
-    // is read by countOption, as every count in the library is: NaN takes
-    // the default 256, so the queue stays bounded (audit D7, owner ruling).
+    // countOption sends NaN to the default 256, as for every count in the library.
     expect(replayed).toBe(256);
   });
 

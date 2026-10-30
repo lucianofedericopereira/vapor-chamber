@@ -1,14 +1,7 @@
 /**
- * wsTransport - the close of a socket already replaced is not the bridge's.
- *
- * `disconnect()` then `connect()` (a reconnect button, a new auth token) opens
- * a second socket while the first one's close event is still on its way. That
- * close event ran the bridge's teardown as if the current socket had closed:
- * `disconnect()`'s intentional mark was already reset by `connect()`, so with
- * `reconnect: false` it failed every command queued for the new socket
- * (`lost:reply`) and emptied the queue, and with `reconnect: true` it scheduled
- * a reconnect and set `connected` false under an open socket. A replaced
- * socket's close now only reports `onDisconnect`.
+ * `wsTransport` handling the late close event of a socket that `disconnect()` then `connect()` already replaced.
+ * Why: `connect()` resets `disconnect()`'s intentional mark, so a stale close treated as the current socket's would fail the commands queued for the new socket (`lost:reply`) and empty the queue, or with `reconnect: true` mark `connected` false under an open socket and schedule a second reconnect; a replaced socket's close must only report `onDisconnect`.
+ * Shows: with `reconnect: false` the command queued for the new socket is sent and answered and `onDisconnect` fires once; with `reconnect: true` `connected` stays true and no extra socket opens; a current socket's close still marks it down and reconnects; a closed socket with no replacement reports `onDisconnect` and starts nothing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Accepted } from '../src/accepted';

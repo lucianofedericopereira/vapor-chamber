@@ -32,7 +32,8 @@
  * random load order. Wall time decides; main-thread CPU only validates it.
  * The tool does not check the machine's load: a row whose control or clocks
  * show interference says "no result" (decisions, 2026-10-01; log s35.49).
- * Run a session through scripts/ab/session.sh, after the owner's "go".
+ * Run it plain, after the owner's "go" (docs/TESTING_PROCEDURE.md step 7);
+ * scripts/ab/session.sh only when asked, because it demotes other apps.
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

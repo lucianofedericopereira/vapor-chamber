@@ -1,22 +1,8 @@
 /**
- * Optional peer dependencies must stay UNRESOLVABLE in the built output.
- *
- * `src/devtools.ts` loads `@vue/devtools-api` through a variable specifier so
- * no bundler can resolve it statically. That indirection is easy to lose: the
- * build once constant-folded the variable back into
- * `import("@vue/devtools-api")`, and every consuming Vite/Astro app that had
- * not installed the optional peer died at dep-optimize time with
- * "Failed to resolve import" - a 500 on the dep bundle, an unhandled rejection
- * in the browser, and a dev-server reload loop. `@vite-ignore` does not save
- * it, because the pre-bundled dep is re-analyzed.
- *
- * `vue` is under the same rule. The root's probe was exempt until 36.F26, on
- * the premise that an app pulling in a Vue library has Vue installed. The root
- * has to work with no Vue in the tree, and the literal gave a Vue-less app a
- * 500 under the Vite dev server (tests/root-no-vue-dev-server.test.ts).
- *
- * The peer list is read from package.json, so marking a new peer optional
- * automatically puts it under this guard.
+ * Optional peer dependencies stay unresolvable in the built output; the list is read from package.json, so a new optional peer joins automatically.
+ * Why: a literal `import("peer")` kills any Vite or Astro app without that peer at dep-optimize time; `@vite-ignore` does not help, since the pre-bundled dep is re-analyzed.
+ * Shows: no dist chunk holds a literal dynamic import of an optional peer outside its opt-in subpath; the root probe tells webpack to leave its import alone.
+ * See: log 36.F26, tests/root-no-vue-dev-server.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -31,11 +17,7 @@ const optionalPeers: string[] = Object.entries(pkg.peerDependenciesMeta ?? {})
   .filter(([, meta]) => (meta as { optional?: boolean }).optional)
   .map(([name]) => name);
 
-/**
- * The `<script>`-tag bundles. No bundler pre-bundles them from the package
- * root, and their minifier inlines the probe's name back into a literal. On a
- * page it is a bare specifier the browser cannot resolve, caught by the probe.
- */
+/** The `<script>`-tag bundles: no bundler pre-bundles them, and on a page the literal fails inside the probe, which catches it. */
 const isIife = (file: string) => /\.iife(\.min)?\.js$/.test(file);
 
 function distFiles(dir: string): string[] {
@@ -51,17 +33,11 @@ describe('dist - optional peers are never statically resolvable', () => {
     expect(optionalPeers).toEqual(expect.arrayContaining(['@vue/devtools-api', 'vue']));
   });
 
-  /**
-   * Opt-in subpaths may resolve the peer statically - that is what makes the
-   * feature work for someone who installed it. The rule is about REACH: the
-   * specifier must not travel in anything a consumer gets by importing the
-   * package root, because the root is what every bundler pre-bundles.
-   */
+  /** An opt-in subpath may resolve its peer: the rule is about reach from the root, which every bundler pre-bundles. */
   const OPT_IN = new Map([['@vue/devtools-api', ['dist/devtools.js']]]);
 
   it.each(optionalPeers)('never emits a literal dynamic import of %s', (peer) => {
-    // `import(` + the bare specifier as a string or template literal. Comments
-    // go first: a magic comment may sit inside the call, and prose may quote one.
+    // Comments are stripped first: a magic comment may sit inside the call, and prose may quote one.
     const literalImport = new RegExp(`import\\(\\s*['"\`]${peer.replace(/[/@.]/g, '\\$&')}['"\`]`);
 
     const allowed = OPT_IN.get(peer) ?? [];

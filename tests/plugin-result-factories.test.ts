@@ -1,4 +1,9 @@
-// ok / err / countOption from the root: the tools an app plugin needs (decision 12, #15).
+/**
+ * `ok`, `err` and `countOption` exported from the root.
+ * Why: a plugin that hand-builds `{ ok: false, error }` has a different hidden class from the bus's result, so every `result.ok` site that sees both goes polymorphic; a hand-written `| 0` or `x > max` count gate fails open on NaN.
+ * Shows: `ok` and `err` are the bus's own factories (identity) and build the same result map as a dispatch, `err(fail(...))` carries the plugin's own id, and `countOption` is the library's own function with the default, clamp and truncate rules.
+ * See: log s35.74, tests/v8-shapes.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { _errResult, _okResult, createCommandBus, type CommandResult } from '../src/command-bus';
 import { countOption as internalCountOption } from '../src/bounds';
@@ -50,18 +55,3 @@ describe('countOption from the root', () => {
     expect(root.countOption(0, 3, 1)).toBe(1);
   });
 });
-
-/*
- * Why these three are public. An app plugin that rejects had to hand-build
- * `{ ok: false, error }`: a two-field literal, a different hidden class from
- * the bus's three-field result, so every `result.ok` site that sees both goes
- * polymorphic (tests/v8-shapes.test.ts pins the library's own sites; this pins
- * what an app gets). `ok` / `err` are the same functions the library uses, so
- * identity is the test, then the map. `err` only wraps an error: the owner of
- * a failure is minted by the plugin's bound `fail`, the third argument, so
- * `err(fail(...))` is the one idiom and it carries the plugin's declared id.
- * `countOption` is the rule bounds.ts records: a caller's count is often NaN
- * (a parsed env var, a storage read), and a hand-written `| 0` or `x > max`
- * gate fails open; app plugins with a `maxSize`-style option meet the same
- * class the library met in cache() and createOutbox().
- */

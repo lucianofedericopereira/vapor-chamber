@@ -1,4 +1,10 @@
-/** The default command id: `<time36>-<random36>-<counter36>`, the counter consecutive. The long note is at the end. */
+/**
+ * The default command id: <time36>-<random36>-<counter36>, with a consecutive counter.
+ * Why: an id of another shape (a prefix without its '-', a non-base-36 counter) would break anything that relies on the documented format.
+ * Shows: forty ids have three base-36 parts, one shared prefix and a consecutive counter that crosses z to 10, and
+ * _resetUid() after configureUid gives the default generator back.
+ * See: docs/rc-alignment-log.md s35.213, tests/perf.bench.ts
+ */
 import { describe, expect, it, vi } from 'vitest';
 
 async function idsFromFreshModule(n: number, reset = false): Promise<string[]> {
@@ -38,15 +44,3 @@ describe('the default id', () => {
     expect(shape(ids)).toEqual({ threeBase36Parts: true, samePrefix: true, consecutive: true });
   });
 });
-
-/*
- * Plan 1.28 item 2 (log s35.213). The plan joined the constant `-` into the
- * prefix once at load. Measured on four workloads: no difference, and +3 to
- * +6 brotli on the IIFEs, so the default keeps joining it per id. This test
- * pins the id format either way: three base-36 parts, one prefix, a
- * consecutive counter. Positive control: a prefix without its `-` (two
- * parts) or a radix-10 counter (the run of forty crosses `z` to `10` in base
- * 36) each turns it red; both seeded and reverted. `_resetUid` exists for
- * tests/perf.bench.ts, whose uid group swapped the generator and never put
- * the default back, so every later group timed a copy.
- */

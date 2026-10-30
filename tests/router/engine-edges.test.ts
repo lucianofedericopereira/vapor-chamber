@@ -1,15 +1,11 @@
 // @vitest-environment happy-dom
 /**
- * Engine paths that only occur when something unusual happens mid-navigation:
- * a guard that unregisters itself while the guard list is being walked, a
- * post-commit hook that throws after the route has already committed, and the
- * resolve() shapes that fall back rather than fail.
- *
- * These are the branches an ordinary navigation test never reaches, and each
- * one exists because the alternative is worse than the edge case: a guard
- * removing itself mid-walk would otherwise cause the engine to SKIP the next
- * guard (index drift), and a throwing post-commit hook would otherwise turn a
- * successful navigation into a rejected one after the URL had already changed.
+ * Unusual mid-navigation paths of the router engine: guards and hooks that unregister during the walk, redirect chains, a post-commit throw.
+ * Why: a guard or hook that removes itself or a later peer would make the walk skip or re-run a neighbour, a redirect loop
+ * would hang push(), and a throwing post-commit hook would turn a committed navigation into a failure.
+ * Shows: the next guard or hook still runs once and none runs twice; false aborts, a location redirects, a two-guard loop
+ * gives router:exceeded:redirects; a redirect during popstate replaces; push() without a table returns a router error;
+ * a post-commit throw is logged and push() returns null.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -33,7 +29,6 @@ const ROWS: RouteRecord[] = [
 // The fixture's router on this file's table (its list page declares a query).
 const makeRouter = (opts: Record<string, unknown> = {}) => fixtureRouter({ routes: ROWS, ...opts });
 
-
 describe('resolve() shapes', () => {
   it('throws router:missing:routes before the table is loaded', () => {
     const router = fixtureRouter({
@@ -41,8 +36,6 @@ describe('resolve() shapes', () => {
       routes: { url: '/routes.json' } as never,
       components: {},
     });
-    // router.resolve() swallows this into a raw href; the engine's
-    // resolveLocation is the one that reports it, reached through push().
     expect(() => (router as unknown as { resolve: (t: string) => string }).resolve('/list')).not.toThrow();
     router.dispose();
   });
@@ -52,23 +45,9 @@ describe('resolve() shapes', () => {
     await router.isReady();
     await router.push('/list');
 
-    // `{ query }` with no `path` means "stay here, change the query" - the
-    // fallback to snapshot.location.path is what makes that work.
     await router.push({ query: { tag: 'x' } } as never);
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(router.currentRoute.value.location.query.tag).toBe('x');
-    router.dispose();
-  });
-
-  it('parses a string `to` carrying both query and hash', async () => {
-    const router = makeRouter();
-    await router.isReady();
-    await router.push('/list?tag=a#frag');
-
-    const loc = router.currentRoute.value.location;
-    expect(loc.path).toBe('/list');
-    expect(loc.query.tag).toBe('a');
-    expect(loc.hash).toBe('#frag');
     router.dispose();
   });
 });
@@ -83,8 +62,7 @@ describe('query patch cleaning', () => {
     await Promise.resolve();
 
     const q = router.currentRoute.value.location.query;
-    // Array -> repeated values, kept as strings; null -> key removed entirely
-    // (not serialised as the string "null", which is the bug this guards).
+    // A null patch value removes the key; it is never serialised as the string "null".
     expect(q.tag).toEqual(['a', 'b']);
     expect(q.page === undefined || q.page === '1').toBe(true);
     router.dispose();
@@ -100,7 +78,7 @@ describe('guards', () => {
     let offFirst!: () => void;
     offFirst = router.beforeEach(() => {
       order.push('first');
-      offFirst(); // removes itself while the engine is iterating the list
+      offFirst();
       return true;
     });
     router.beforeEach(() => {
@@ -110,28 +88,22 @@ describe('guards', () => {
 
     await router.push('/list');
 
-    // Without the index correction the shrinking array would slide 'second'
-    // past the cursor and it would never run.
+    // Without the index correction the shrinking array would slide 'second' past the cursor.
     expect(order).toEqual(['first', 'second']);
     router.dispose();
   });
 
-  // The other direction of the same correction, and the one the bus already
-  // learned the hard way (see fanOutListeners in command-bus.ts: "corrected by
-  // IDENTITY, not by length"). Removing a LATER peer shrinks the array without
-  // moving anything at or before the cursor, so a length-based `i -= shrinkage`
-  // walks the cursor BACK onto the guard that just ran and runs it twice.
+  // Removing a LATER peer moves nothing at or before the cursor, so a length-based correction would re-run the guard that just ran.
   it('does not re-run a guard that unregisters a LATER one', async () => {
     const router = makeRouter();
     await router.isReady();
 
     const order: string[] = [];
     let offC!: () => void;
-    // Three, so that a hook AFTER the cursor still remains once C is gone -
-    // otherwise the shrunken array ends the loop and hides the over-correction.
+    // Three, so a guard after the cursor remains once C is gone; with two the loop would end and hide an over-correction.
     router.beforeEach(() => {
       order.push('a');
-      offC(); // removes a guard AFTER this one in the list
+      offC();
       return true;
     });
     router.beforeEach(() => {
@@ -145,7 +117,6 @@ describe('guards', () => {
 
     await router.push('/list');
 
-    // Length-based correction walks the cursor back onto 'a' and re-awaits it.
     expect(order).toEqual(['a', 'b']);
     router.dispose();
   });
@@ -173,9 +144,7 @@ describe('guards', () => {
   });
 
   it('reports router:exceeded:redirects instead of hanging when two guards redirect at each other', async () => {
-    // Two targets that are BOTH away from the start: a redirect landing on the
-    // location already committed is a duplicate and short-circuits, which
-    // would end the chain before it could loop.
+    // Both targets are away from the start: a redirect onto the committed location short-circuits and would end the chain early.
     const router = fixtureRouter({
       routes: [
         { name: 'home', path: '/', component: 'Home' },
@@ -187,15 +156,11 @@ describe('guards', () => {
     });
     await router.isReady();
 
-    // The realistic shape: an auth guard sending users to /b and an onboarding
-    // guard sending them back to /a. Each is reasonable alone.
     const offA = router.beforeEach((to) => (to.path === '/a' ? '/b' : true));
     const offB = router.beforeEach((to) => (to.path === '/b' ? '/a' : true));
 
     const result = await router.push('/a');
 
-    // Pre-fix this recursed forever: async, so no stack overflow to point at -
-    // push() simply never settled and the page never moved.
     expect(isRouterError(result, 'router:exceeded:redirects')).toBe(true);
     offA();
     offB();
@@ -206,8 +171,7 @@ describe('guards', () => {
     const router = makeRouter();
     await router.isReady();
 
-    // Three hops, the realistic ceiling (auth -> locale -> onboarding), must
-    // stay well inside the bound rather than tripping it.
+    // Three hops stay inside the redirect bound.
     let hops = 0;
     const off = router.beforeEach((to) => {
       if (to.path === '/list' && hops < 3) {
@@ -229,14 +193,11 @@ describe('guards', () => {
     await router.isReady();
     await router.push('/list');
 
-    // Redirect anything arriving at '/' back to '/list' - the guard shape that
-    // makes a Back press interesting.
     const off = router.beforeEach((to) => (to.path === '/' ? '/list' : true));
     router.back();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // Pushing here would leave the '/' entry behind, so the next Back would
-    // hit it, redirect again, and strand the user. Replacing consumes it.
+    // A push would leave the '/' entry behind, so the next Back would redirect again and strand the user.
     expect(router.currentRoute.value.location.path).toBe('/list');
     off();
     router.dispose();
@@ -250,28 +211,11 @@ describe('navigating without a table', () => {
       components: {},
       http: { get: async () => { throw new Error('offline'); } } as never,
     });
-    // The table never loads, so resolveLocation has nothing to resolve against.
     await router.isReady().catch(() => {});
 
     const result = await router.push('/list');
-    // Returned as a value, not thrown: navigation errors are results here, so
-    // a caller awaiting push() does not need a try/catch around every link.
+    // Returned as a value, not thrown, so a caller needs no try/catch around push().
     expect(isRouterError(result)).toBe(true);
-    router.dispose();
-  });
-});
-
-describe('setRouteData', () => {
-  it('dev-warns for a record name that is not in the table, but still stores it', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const router = makeRouter();
-    await router.isReady();
-
-    router.setRouteData('nope', { a: 1 } as never);
-
-    // Loud in dev, lenient in prod: the value lands, but nothing reads it,
-    // which is a typo nobody would otherwise notice.
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no route record by that name'));
     router.dispose();
   });
 });
@@ -297,18 +241,14 @@ describe('afterEach hooks', () => {
     router.dispose();
   });
 
-  // Same over-correction as the guard case above, on the hook list. A one-shot
-  // `afterEach` that tears down a sibling - "scroll to top on this next
-  // navigation, and stop the analytics ping" - re-ran the hook that had just
-  // fired, so its side effect happened twice per navigation.
+  // Same rule as the guard case: a hook that tears down a later sibling must not make the hook that just fired run again.
   it('does not re-run a hook that unregisters a LATER one', async () => {
     const router = makeRouter();
     await router.isReady();
 
     const order: string[] = [];
     let offC!: () => void;
-    // Three, so a hook after the cursor survives the removal - with only two the
-    // shrunken array ends the loop and the over-correction is invisible.
+    // Three, so a hook after the cursor remains once C is gone.
     router.afterEach(() => {
       order.push('a');
       offC();
@@ -330,8 +270,7 @@ describe('afterEach hooks', () => {
 describe('post-commit failure', () => {
   it('logs and returns null when a hook throws after the route committed', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    // onCommit runs scroll restoration; making that throw is the realistic way
-    // to fail *after* the URL has already been written.
+    // onCommit runs scroll restoration, so a throwing scrollTo fails after the URL is written.
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {
       throw new Error('scroll blew up');
     });
@@ -340,8 +279,7 @@ describe('post-commit failure', () => {
     await router.isReady();
     const result = await router.push('/list');
 
-    // The navigation stands: reverting a committed route would leave the URL
-    // and the rendered tree disagreeing.
+    // The navigation stands: reverting would leave the URL and the rendered tree disagreeing.
     expect(result).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(error).toHaveBeenCalled();

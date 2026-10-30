@@ -1,5 +1,7 @@
 /**
- * The TestBus must answer in the same SHAPE the real bus does.
+ * The TestBus answers dispatch and query with the same result keys as the real bus.
+ * Why: a result missing a key (`error` on success, `value` on failure) would change the object's shape, so shape-sensitive code and benches would behave differently through the harness than in production.
+ * Shows: the key sets of success and failure dispatch results, and of a query result, equal the real bus's; the real success result has exactly error, ok and value; the test bus reports the right ok and value.
  */
 
 import { describe, expect } from 'vitest';
@@ -17,8 +19,7 @@ describe('TestBus result parity', () => {
     const realOk = bus.dispatch('ok', {});
     const realErr = bus.dispatch('bad', {});
 
-    // `passthroughHandlers` so the harness actually runs the handler and can
-    // reach its error path; the default stubs every handler to ok.
+    // passthroughHandlers runs the handler, so the error path is reachable; the default stubs every handler to ok.
     const test = createTestBus({ passthroughHandlers: true });
     test.register('ok', () => 'v');
     test.register('bad', () => { throw new Error('x'); });
@@ -27,7 +28,7 @@ describe('TestBus result parity', () => {
 
     expect(keys(testOk)).toEqual(keys(realOk));
     expect(keys(testErr)).toEqual(keys(realErr));
-    // Not just "same length": the real bus carries BOTH keys on BOTH paths.
+    // Equal sets alone would pass if both lacked a key.
     expect(keys(realOk)).toEqual(['error', 'ok', 'value']);
     expect(testOk.ok).toBe(true);
     expect(testOk.value).toBe('v');
@@ -45,27 +46,3 @@ describe('TestBus result parity', () => {
     expect(keys(test.query('read', {}))).toEqual(keys(real));
   });
 });
-
-// ---------------------------------------------------------------------------
-// Why this file exists
-// ---------------------------------------------------------------------------
-//
-// src/testing.ts imported `_okResult` / `_errResult` from the bus and then
-// built its results with object literals anyway, nine times. The literals
-// omitted a key the constructors always set - `error: undefined` on success,
-// `value: undefined` on failure - so a TestBus result was `{ok,value}` where
-// every real bus result is `{ok,value,error}`.
-//
-// `result.error` reads `undefined` either way, which is why nothing failed.
-// What differs is `'error' in result`, `Object.keys(result)`, and the object's
-// hidden class: code that is monomorphic on the real result shape goes
-// polymorphic the moment it is exercised through the test harness, so a bench
-// or a shape-sensitive path measures something the production bus never does.
-//
-// That is the defect this module has already had twice, both recorded in its
-// own comments: results without `meta`, which sent every meta consumer down its
-// defensive no-op branch so that "NOTHING FAILS"; and a listener fan-out cursor
-// fixed in the real buses and not here, so a test could assert behaviour the
-// production bus does not have. Same class, third instance. Asserting the key
-// sets are EQUAL rather than listing them means the next key added to the
-// constructors fails here until the harness carries it too.

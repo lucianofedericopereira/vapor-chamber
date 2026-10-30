@@ -1,12 +1,8 @@
 /**
- * SSR - dehydrated commands embedded in a <script> element.
- *
- * The documented embedding was `<script>window.__VAPOR_STATES__ =
- * ${JSON.stringify(commands)}</script>`. JSON.stringify leaves `</script>`
- * as it is, so any user text in a dehydrated command's target or payload - a
- * search term, a name - could close the element and run script of its own.
- * `serializeForScript` escapes `<`, `>`, `&`, U+2028 and U+2029: the text is
- * still JSON, parses to the same value, and cannot leave the element.
+ * serializeForScript: dehydrated commands embedded in a <script> element.
+ * Why: JSON.stringify leaves `</script>` as it is, so user text in a command's target or payload would close the element and run script of its own.
+ * Shows: hostile text cannot close the element, the output parses back to the same value, `<`, `>`, `&`, U+2028 and U+2029 are escaped, and plain values serialize as JSON.stringify does.
+ * See: src/ssr.ts
  */
 import { describe, expect, it } from 'vitest';
 import { serializeForScript } from '../src/ssr';

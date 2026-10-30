@@ -1,4 +1,9 @@
-/** `store.$ready` resolves once the store holds the state it starts from: its saved state, its tabs' state, or both. Rationale at the end. */
+/**
+ * `store.$ready` resolves once the store holds the state it starts from: its saved state, its tabs' state, or both.
+ * Why: without a signal that the start state landed, an app's "empty? add the starter lines" check would run on the default state and double the cart, and a wait on $onField would never end when nothing was saved or the saved state equals the default.
+ * Shows: $ready is a Promise<void> that resolves after the async read lands (saved, absent, equal to the default, failed, refused, or store disposed first) and after a tab holds the lock or takes the open tab's state; a store with neither is ready at once; a page with no Web Locks resolves; $ready is reserved against actions.
+ * See: log s36.F41.
+ */
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store/core';
@@ -181,20 +186,3 @@ describe('$ready with share', () => {
     expect(a.state.value.items).toEqual([1, 2]);
   });
 });
-
-/*
- * Why `$ready`. A store's state is final at creation unless it reads one: an
- * async saved state (`indexedDbStorage()`), or the state of the store's other
- * tabs (`shareTabs()`, the lead's answer or the lock). Until then it holds
- * `state()`. Before `$ready` an app had no way to wait: a wait on `$onField`
- * never ended when nothing was saved or the saved state equalled the default,
- * and a page's "empty? add the starter lines" ran on the default and doubled
- * the cart, saved or across tabs (B3 (b), log 36.F41). 1.x had `await
- * persist().hydrate()` for the saved half, removed with `persist()`.
- *
- * `$ready` resolves once the store holds the state it starts from: the read
- * landed (its early writes replayed), the lead's answer taken or the lock
- * granted, both when both are set. A failed or refused read, a page with no
- * Web Locks and a store disposed early resolve too, so no wait hangs. A store
- * with neither resolves at once, one shared promise.
- */

@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// defineWidget's `when`: a real Vapor custom element defined now, when idle, when visible, or from a loader; rationale at the end.
+/**
+ * `defineWidget(tag, component, { when })` and `emitDOMEvent` from src/widget.ts, on Vue's own `defineVaporCustomElement` handed over as an app does.
+ * Why: a widget defined too early costs page load, one defined too late or twice never renders or throws, and a failed loader must be reported rather than leave a dead tag.
+ * Shows: false and nothing defined without Vapor or custom elements; `load` defines at once; `idle` defines after idle (requestIdleCallback where present, else a short timer); a loader is imported only when the tag is defined, and a module without a default is the component; racing loaders define once; a failed loader is reported; `visible` defines at once with no element on the page, else on intersection through one shared observer (driven by hand here); other options reach `defineVaporCustomElement`; a defined tag is left alone; `emitDOMEvent` reaches a document listener.
+ * See: tests/browser/widget-visible.browser.test.ts (a real IntersectionObserver), tests/vue-bundler-vapor-exports.test.ts
+ */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { configureVue } from '../src/chamber';
 import { defineWidget, emitDOMEvent } from '../src/widget';
@@ -141,12 +146,3 @@ describe('defineWidget({ when })', () => {
     expect(heard).toEqual([{ sku: 'X' }]);
   });
 });
-
-// Plan 1.32 4.5: `defineWidget(tag, component, { when })` with the three strategies
-// vapor-island-cart wrote by hand (capacity C19), one module for the IIFEs and the root.
-// The default `vue` entry carries the Vapor runtime (tests/vue-bundler-vapor-exports.test.ts),
-// so this runs on Vue's own `defineVaporCustomElement`, handed over as an app does. `idle`
-// uses `requestIdleCallback` where it exists, else a 1 ms timer. A loader is imported at
-// the moment the strategy picks. The `visible` case here drives the observer's callback by
-// hand to reach its branches; tests/browser/widget-visible.browser.test.ts shows a real
-// IntersectionObserver in Chromium does the same.

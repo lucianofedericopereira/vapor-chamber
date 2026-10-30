@@ -1,8 +1,14 @@
-/** A command's action, target, payload and meta are readonly in its type, and a dispatched command keeps one hidden class. The long note is at the end. */
+/**
+ * A command's action, target, payload and meta are readonly in its type, and a dispatched command keeps one hidden class.
+ * Why: every part, listener and history entry reads the same command; declaring it readonly costs nothing at runtime, where freezing or checking it did.
+ * Shows: a write to any of the four is a type error; meta's own fields stay writable; a command keeps the hidden class it was built with.
+ * See: plan 4.1, log 36.116, log 36.127, docs/V8-RULES.md rules 1 and 2.
+ */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus, _errResult as err } from '../src/command-bus';
 import { sameMap } from './v8';
 
+// Each `@ts-expect-error` sits in a branch that never runs: this file pins the type, not a runtime check.
 describe('a command stays as dispatched', () => {
   it('its action, target, payload and meta are readonly to a handler, a part and a listener', async () => {
     const bus = createAsyncCommandBus({ retry: false });
@@ -52,15 +58,3 @@ describe('a command stays as dispatched', () => {
     expect(sameMap(done!, fresh!)).toBe(true);
   });
 });
-
-// Plan 4.1 asked for the command to stay as dispatched in development. The
-// first answer froze it at its work (36.116): a second hidden class mid-life,
-// against docs/V8-RULES.md rules 1 and 2, and the bench read development
-// dispatch 2.3x slower. A per-dispatch compare in its place (36.127) still
-// cost development 17-48% on the paths with parts, and the ritual's third
-// question rules out a check per dispatch anyway. The fact is declared at
-// build time instead: the type makes the four fields readonly, so a write is
-// a compile error and costs nothing at runtime. The `@ts-expect-error` lines
-// fail typecheck if the type ever lets a write through. Each sits in a branch
-// that never runs, since this file pins the type, not a runtime check. The
-// hidden-class case pins rule 1 at runtime: nothing changes a command's map.

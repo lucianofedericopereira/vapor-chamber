@@ -1,12 +1,8 @@
 /**
- * An async bus's missing handler under `onMissing: 'throw'` reaches the caller
- * as a REJECTED promise, never a synchronous throw, past the work's steps.
- *
- * The async `execute` closure is a plain function returning
- * `tryCatchAsyncHandler`'s promise (one async frame and promise fewer per
- * dispatch than an `async` closure); the missing path goes through the
- * `async` `asyncMissing` helper so this contract survives. A step's ticket
- * lands with the failure before the rejection reaches the caller.
+ * An async bus's missing handler under `onMissing: 'throw'`: a rejected promise, never a synchronous throw.
+ * Why: the async `execute` is a plain arrow for speed, so the missing path must stay async on its own (`asyncMissing`).
+ * Shows: dispatch and query reject with core:missing:handler, a step's ticket lands with the failure first, a present handler still resolves.
+ * See: tests/async-execute-ab.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { type CommandResult, createAsyncCommandBus } from '../src/command-bus';

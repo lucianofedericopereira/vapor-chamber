@@ -1,6 +1,8 @@
 /**
  * Hover preheat of a router link with an icon inside it, with a real pointer in Chromium.
- * The long note is at the end.
+ * Why: moving onto the icon fires mouseout on the link, then mouseover on the icon; that must not restart the warm-up delay.
+ * Shows: in light DOM and in a shadow root the link warms 1000 ms after the pointer reached it; leaving the link from its icon still cancels.
+ * See: plan-preheat M11, log 36.21, tests/browser/router-shadow-hover.browser.test.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -47,6 +49,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
+// Read 1200 ms after the pointer reached the link: the warm-up fires at 1000, a restarted timer at 1600 or later.
 describe('the pointer moving onto an icon inside a link keeps its delay (real Chromium)', () => {
   it('a light-DOM link: warmed 1000 ms after the pointer reached the link', async () => {
     await park();
@@ -96,18 +99,3 @@ describe('the pointer moving onto an icon inside a link keeps its delay (real Ch
     expect(seen).toEqual([]);
   });
 });
-
-// The note.
-//
-// Plan-preheat M11, log 36.21. A pointer moving from a link onto an icon
-// inside it fires `mouseout` on the link, then `mouseover` on the icon, so
-// the warm-up timer was cleared and armed again and its delay restarted. The
-// pointer timer now remembers the link that armed it and leaves itself alone
-// on a move whose `relatedTarget` is inside that link. In a shadow root the
-// move is seen by the root's own listeners, where `relatedTarget` is the node
-// in the same tree (DOM Standard, retargeting). The check is read 1200 ms
-// after the pointer reached the link: the warm-up fired at 1000 ms, while a
-// restarted timer fires 1000 ms after the move onto the icon, at 1600 ms or
-// later. Red before: both "warmed" tests (`[]`). The two controls are green
-// before and after: leaving the link from its icon still cancels. The 1000 ms
-// delay and the parked pointer follow tests/browser/router-shadow-hover.

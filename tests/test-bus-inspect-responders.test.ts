@@ -1,6 +1,7 @@
 /**
- * createTestBus().inspect() lists its responders, as the real bus's does.
- * It always reported `responderActions: []`.
+ * createTestBus().inspect() lists the actions registered with respond().
+ * Why: a test that inspects the test bus would see no responders, unlike the real bus.
+ * Shows: responderActions holds the registered action, and is empty after the responder is removed.
  */
 import { describe, expect, it } from 'vitest';
 import { createTestBus } from '../src/testing';

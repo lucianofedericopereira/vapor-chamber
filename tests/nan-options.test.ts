@@ -1,4 +1,9 @@
-/** A NaN option behaves like a missing one, and a delay past the timer maximum is capped, at every site bounds.ts's rule names. Rationale at the end. */
+/**
+ * A NaN option behaves like a missing one, and a delay past the timer maximum is capped, at the sites bounds.ts's rule names.
+ * Why: a NaN or Infinity read raw by a timer fires at once, so a config that failed to parse would let `rateLimit` pass everything, poll in a hot loop, or fail every ws command and request after about 1 ms. Zero keeps its meaning (`max: 0` refuses every call). A throttle has no wait of its own, so its default is no throttle; NaN debounce is no delay.
+ * Shows: with a control for the default and for a kept number at each site, NaN gives the default for rateLimit max/window, createReaction maxHops, the http poll interval, and both composables' maxSize; for the wsTransport timeout, the http batch window, and request() on both buses, NaN gives the default and Infinity or 3e9 the timer maximum (request() `null` is the default); for `pace`, NaN throttle passes every call and NaN debounce adds no delay, while Infinity and 3e9 give the timer maximum.
+ * See: log s35.174, s36.11, src/bounds.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Accepted } from '../src/accepted';
 import { resetCommandBus, setCommandBus, useCommandError, useSharedCommandState } from '../src/chamber';
@@ -160,7 +165,7 @@ describe('a timeout: NaN waits the default, Infinity and past 2^31-1 the timer m
       };
       expect(await at()).toEqual([false, true]); // control: the default
       expect(await at(50)).toEqual([true, true]); // control: a number is kept
-      expect(await at(null)).toEqual([false, true]); // null keeps its released meaning, the default
+      expect(await at(null)).toEqual([false, true]); // null is the default
       expect(await at(NaN)).toEqual([false, true]);
       expect(await at(Infinity)).toEqual([false, false]);
       expect(await at(3e9)).toEqual([false, false]);
@@ -213,48 +218,3 @@ describe('a pace wait: NaN is no wait; Infinity the timer maximum', () => {
     expect(await at(3e9)).toEqual([false, false]);
   });
 });
-
-/*
- * bounds.ts: "A NaN option is indistinguishable in intent from a missing
- * one ... so it now behaves like a missing one", through `countOption`.
- * Seven sites read their option raw (audit B14): `rateLimit({ max: NaN })`
- * let 20 of 20 through and `window: NaN` refused for good with no
- * `retryIn`; `createReaction({ maxHops: NaN })` ran a self loop to the depth
- * bound; `pollWith({ interval: NaN })` (now `httpTransport({ poll })`) polled in a
- * hot loop and `maxWait: NaN` never ended; `maxSize: NaN` kept every error in both composables.
- * Each now reads
- * through `countOption` with its default. Zero keeps its released meaning
- * (`max: 0` refuses every call), so the minimum stays 0. Log s35.174.
- */
-
-/*
- * The timeouts (audit D8, log 36.11). wsTransport's `timeout` and
- * request()'s `timeout`, on both buses, went to setTimeout as given. A timer
- * fires at once on NaN and on anything past 2^31-1, Infinity included. So a
- * timeout read from a config that failed to parse, or "no limit", failed
- * every WebSocket command and every request after about 1 ms. They now read
- * through countOption with MAX_TIMEOUT_MS as the ceiling, as the http
- * client's timeout and the ws transport's other three options already did.
- * `null` still means the default (`?? 5000` before the read), and 0 still
- * fires at once.
- */
-
-/*
- * The throttle wait (audit D9, owner 2026-10-12: "bad value on throttle
- * should fallback to default"). A throttle has no wait of its own: register()
- * without the option throttles nothing, and a wait of 0 lets every call
- * through. So the default is no throttle. Before, the two entries disagreed:
- * `throttle(list, NaN)` refused every call for good (`now - last >= NaN` is
- * false) while `register(..., { throttle: NaN })` throttled nothing, and
- * Infinity refused even the first call in both. The gate read its wait once,
- * through countOption with MAX_TIMEOUT_MS as the ceiling. Both entries left
- * the bus in 1.32 step 6a: `pace({ throttle })` keeps the rule.
- */
-
-/*
- * debounce (audit D9, the same rule): its wait went to setTimeout as given,
- * so NaN, Infinity and anything past 2^31-1 ran the handler after about 1 ms.
- * It read its wait once, as the throttle gate did: NaN is no delay, the
- * default a wait of 0 gives, and a larger wait the timer maximum.
- * `pace({ debounce })` keeps the rule.
- */

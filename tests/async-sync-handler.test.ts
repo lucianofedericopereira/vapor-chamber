@@ -1,4 +1,9 @@
-// A sync handler on the async bus answers with no async frame of its own. The long note is at the end.
+/**
+ * A sync handler on the async bus answers with no async frame of its own.
+ * Why: every store reducer on an async bus is a sync handler; wrapping it in an async function costs each local command a promise and an await.
+ * Shows: a sync handler settles in fewer turns than an async one, the counter sees one await; values, throws, promises, rejections and its own abort answer as they should.
+ * See: tests/abort.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineTransport } from '../src/transports';
@@ -62,13 +67,3 @@ describe('a sync handler keeps its answers', () => {
     expect(local).toBeInstanceOf(Promise);
   });
 });
-
-// Why: the async bus ran every local handler through an async function, so a
-// handler that returns a value, every store reducer on an async bus, paid that
-// function's promise and its await, as an async handler does. The phase 2 study
-// counted it as two promise units per local command. The turn counts pin the
-// claim: a sync handler now settles sooner than an async one, and the control
-// shows the counter sees one await. The other cases pin what must not change: a
-// value, a throw, a returned promise and a rejection answer as before, and a
-// throw of the command's own signal's reason is still that abort
-// (tests/abort.test.ts holds the async side).

@@ -1,4 +1,13 @@
-/** isLoading's unread slots under the build profile: performance keeps up to 256 per action, lean prunes at 0. The long note is at the end. */
+/**
+ * isLoading's unread slots under the build profile: performance keeps up to 256 per action, lean prunes at 0.
+ * Why: a speed-against-memory trade sits behind one build-time toggle, `__VC_LEAN__`; if the profile
+ * were read per dispatch, ignored by a build, or pruned a slot a reader holds, apps would pay the wrong
+ * cost or lose their isLoading signal.
+ * Shows: bucket sizes per profile (via a Map.prototype.set spy, so no inspection API ships), a read key
+ * is never pruned in either profile, the flag is read once when tracking starts, and the plugin and
+ * shipped files fold the guard as expected.
+ * See: log s35.61, log s35.62, docs/V8-RULES.md
+ */
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { build as vite } from 'vite';
@@ -71,7 +80,7 @@ describe('performance (the default): unread slots kept, bounded per action', () 
     for (let i = 1; i < 300; i++) bus.dispatch('x', `t${i}`);
     expect(b!.size).toBe(256);
     expect(max).toBe(257);
-    // The first 256 are the ones kept; the rest were pruned at their settle.
+    // The first 256 are kept; later ones are pruned at their settle.
     expect([b!.has('t0'), b!.has('t255'), b!.has('t256'), b!.has('t299')]).toEqual([true, true, false, false]);
     s.dispose();
   });
@@ -91,7 +100,7 @@ describe('lean (`__VC_LEAN__` true): every unread slot pruned at 0', () => {
   });
 
   it('the profile is read when tracking starts, not per dispatch', () => {
-    const { bus, s } = armed(); // performance
+    const { bus, s } = armed();
     g.__VC_LEAN__ = true;
     bus.register('x', () => {});
     const [b] = bucketsDuring(() => bus.dispatch('x', 'a'));
@@ -112,9 +121,7 @@ describe.each([
     const b = bucketWith(buckets, 'r');
     let during: boolean | undefined;
     bus.register('x', (cmd) => {
-      // Settle `r` inside another unread key's dispatch: the bucket is at
-      // its fullest (257 in performance), so a prune that ignored the flag
-      // would take `r` here.
+      // Settle `r` inside another key's dispatch, where the bucket is fullest: a prune that ignored the read flag would take it.
       if (cmd.payload === 'nest') bus.dispatch('x', 'r');
       if (cmd.target === 'r') during = flag.value;
     });
@@ -197,30 +204,3 @@ globalThis.go = () => { getCommandBus().dispatch('ping', 1); return s.pending('p
     expect(readFileSync(dist('vapor-chamber.iife.min.js'), 'utf8')).toContain('pruneAbove:256');
   });
 });
-
-/*
- * The build profile (owner, 2026-10-02, decisions; log s35.61, s35.62). A
- * speed-against-memory trade goes behind ONE build-time toggle:
- * `vaporChamberWire({ profile: 'lean' })` defines `__VC_LEAN__` true; no option,
- * or 'performance', defines it false, and the IIFEs define it false. An app's
- * own define of it is left alone.
- *
- * isLoading option b is the first trade. A key nobody reads used to get a slot
- * on every dispatch and lose it at the settle (an allocation, a Map set and a
- * Map delete per tracked dispatch). Performance keeps that slot at 0 and prunes
- * only when its action's bucket holds more than 256, so a bucket stops at 256
- * at rest and 257 in flight (the slot being settled is counted). Lean prunes at
- * 0, as before. A read slot (one with a signal) is never pruned in either:
- * its readers hold the signal and later dispatches must write that one; the
- * nested settle in the read-key test is where the bucket is fullest.
- *
- * The flag is read once per entry, when tracking starts (trackLoading), never
- * per dispatch: a `typeof` of a global nobody defined is a slow lookup
- * (docs/V8-RULES.md rule 6). The settle compares against `entry.pruneAbove`.
- * Without a define (a bundler without the plugin) that `typeof` ships and runs
- * once per entry; vitest delivers a define as a global, which is how the lean
- * tests set it, and the afterEach removes it so it cannot reach another test.
- *
- * Buckets are found by spying Map.prototype.set for a value whose `bucket` is
- * the Map itself, so no inspection API ships for the test.
- */

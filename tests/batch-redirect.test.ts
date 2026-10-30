@@ -1,19 +1,8 @@
 /**
- * `onRedirect` on the batching bridge.
- *
- * `HttpBatchOptions` is `HttpTransportOptions & { window }`, so it has
- * always ACCEPTED `onRedirect` - and never read it: a redirect result was
- * resolved as a success whose value was the redirect. The single bridge has
- * handled the same body field since `onRedirect` shipped.
- *
- * The body is what the reference controller answers once an action returns
- * `['redirect' => url]` (docs/integrations/laravel.md): each batch result is
- * `{ id, redirect }`, the same field the single endpoint puts at the top of
- * its envelope.
- *
- * `onRedirect` fires ONCE per batch, with the first URL: it navigates, and two
- * navigations in one tick race. Every redirected command still fails on its
- * own, with its own `context.url`.
+ * `onRedirect` on the batching bridge, for a batch result `{ id, redirect }` as the reference controller answers it.
+ * Why: the batch options accept `onRedirect`, so a redirect must not resolve as a success; it fires once, since two navigations in one tick race.
+ * Shows: a redirected command fails with transport:refused:redirect and its own url, siblings are untouched, one navigation per batch, the single bridge agrees.
+ * See: docs/integrations/laravel.md.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -1,4 +1,9 @@
-// A composable's dispatch result type follows the bus it runs on; rationale at the end.
+/**
+ * A composable's dispatch result type follows the bus it runs on.
+ * Why: on an async bus a dispatch returns a promise; typed as a plain result, `result.ok` type-checks with no await and reads undefined.
+ * Shows: the result on a sync bus or no bus, a promise on an async one, either on a BaseBus; at runtime an async bus's failures are still promises.
+ * See: log s35.221, tests/composables-bus-option.test.ts.
+ */
 import { describe, expect, expectTypeOf } from 'vitest';
 import { effect, isRef } from 'vue';
 import {
@@ -22,7 +27,7 @@ declare const baseBus: BaseBus;
 type R = CommandResult;
 type P = Promise<CommandResult>;
 
-// Never called. tsconfig.tests.json type-checks it; at runtime it is only defined.
+// Never called: the claim is about types, which only `npm run typecheck` (tsconfig.tests.json) checks.
 function resultTypes(): void {
   // No bus: the shared bus, whose static type is CommandBus.
   expectTypeOf(useCommand().dispatch('a', null)).toEqualTypeOf<R>();
@@ -78,19 +83,3 @@ describe('dispatch result types', () => {
     expect(await result).toMatchObject({ ok: false });
   });
 });
-
-/*
- * Why this file exists. Every bus composable takes `bus`, sync or async
- * (log s35.221). Before 1.29.0 useCommandGroup's dispatch and query, and
- * defineVaporCommand's dispatch, were typed as returning a CommandResult on
- * any bus. On an async bus they return a promise, so `result.ok` type-checked
- * with no `await` and read undefined. useCommand, useCommandQuery and
- * useSharedCommandState returned the union, which made a sync caller narrow
- * a promise it never gets. Now the type follows the bus passed: the result on
- * a sync bus, a promise on an async one, either on a bus typed only as
- * BaseBus. With no bus it is the shared bus's static type, CommandBus.
- *
- * The checks sit in a function that is never called: the calls would need
- * real buses at runtime, and the claim is about types, which only `npm run
- * typecheck` (tsconfig.tests.json) can check.
- */

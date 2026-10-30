@@ -1,4 +1,9 @@
-/** The hold (plan 1.32 step 3e, L5): after a server's declared limit, a bridged action waits it out unsent. Rationale at the end. */
+/**
+ * The hold: after a limited answer (429, 503) that declares a wait, the action is held on its transport until the wait ends.
+ * Why: without the hold every later command for that action goes to the wire inside the wait and meets the same 429; the scope is the action on its transport because a 429 does not say what it covers, and a verdict with a wait (409) is one request's state, not a limit.
+ * Shows: a command inside the wait is refused unsent as transport:limited:held with the time left in retryIn (http, batch, custom httpClient, WebSocket); other actions, other transports, non-limited answers and answers with no wait hold nothing; the retry waits the hold out, returns it past maxDelay, and abort or dispose ends the wait; the outbox keeps a held replay and flushes it after the time left.
+ * See: log 36.42, RFC 6585 section 4.
+ */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -402,26 +407,3 @@ describe('the outbox', () => {
     outbox.dispose();
   });
 });
-
-/*
- * Plan 1.32 step 3e (.probes/step-3e-pickup.md). L5 (plan-architecture.md) landed
- * its reader first (log 36.42, `_declaredWait`): every transport's failure
- * carries the server's wait as `retryIn`. Each command still went to the wire
- * inside that wait and met the same 429. Now a `limited` answer (429, 503) that
- * declares a wait holds its action on that transport until the wait ends: a
- * command for it is refused at once, unsent, as `transport:limited:held` with
- * the time left in `retryIn`. The bus's retry treats it as the 429 it replaces:
- * `limited` is transient, so the dispatch waits the time left and is sent
- * then; a time left over `maxDelay` is returned, an abort or `dispose()` ends
- * the wait, `retry: false` returns it at once, and the outbox keeps the record.
- *
- * The scope is the action on its transport. A 429 does not say what it covers
- * (RFC 6585 4: the counting is the server's), so holding a whole transport
- * would refuse commands the server accepts under a per-route limit. A verdict
- * with a wait (a 409 `in_progress`) is one request's state, not a limit. A
- * success that reports `RateLimit` r=0 holds nothing: reading every success's
- * headers costs the normal path, and the server's next 429 answers truthfully.
- *
- * The server here is a real `node:http` one whose clock is the test's
- * (`Date.now`), so it limits by the same time the hold reads.
- */

@@ -1,25 +1,8 @@
 /**
- * generate-api-docs contract test - locks the compiler -> Markdown output.
- *
- * Runs scripts/generate-api-docs.mjs against a throwaway fixture package
- * (its own package.json, tsconfig and src tree) and asserts the properties the
- * generator exists to guarantee. Every case here corresponds to something that
- * was WRONG in a draft of that script and was found by reading the rendered
- * output rather than by any test:
- *
- *   - entry points come from `exports`, so a published subpath cannot go
- *     undocumented (the hand-kept typedoc list had drifted by five)
- *   - `iife` subpaths are skipped: they install a global, not a module
- *   - aliases are resolved, or a re-export barrel documents 193 symbols with
- *     empty doc comments and bare types
- *   - `@internal` is honoured on the RESOLVED symbol, since the barrel's
- *     re-export never carries the tag
- *   - a generic type alias prints its DECLARATION, because asking the checker
- *     to stringify one yields the bare word "any"
- *   - plurals are spelled, not suffixed ("Type aliases", not "Type aliass")
- *
- * The script resolves `typescript` from its own location, so running it with
- * cwd set to the fixture works without installing anything there.
+ * scripts/generate-api-docs.mjs run against a throwaway fixture package (own package.json, tsconfig and src tree).
+ * Why: the API reference is generated; if entry points, alias resolution, @internal filtering or type printing were wrong, a published subpath would go undocumented or the pages would show empty comments and "any".
+ * Shows: entry points come from `exports` and skip iife; one page per entry plus an index; aliases resolve through a re-export barrel; a whole re-export links instead of repeating; @internal is excluded; a generic alias prints its declaration; kinds and plurals are labelled; source links use the repository field; Contents are space-separated; output is deterministic.
+ * See: scripts/generate-api-docs.mjs.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -82,8 +65,7 @@ beforeAll(() => {
     }),
   );
 
-  // The real declarations live here; index.ts only re-exports them, which is
-  // what makes this fixture exercise alias resolution rather than assume it.
+  // The declarations live here; index.ts only re-exports them, so alias resolution is exercised.
   writeFileSync(
     join(dir, 'src', 'core.ts'),
     `/**
@@ -133,9 +115,7 @@ describe('generate-api-docs', () => {
     expect(stdout).not.toContain('package.json');
   });
 
-  // Spawns a node process that runs the real compiler over the fixture, so the
-  // default 5000ms budget is not a measure of anything - under `test:coverage`
-  // the instrumented run clears it on slower hardware while nothing is wrong.
+  // Spawns a node process that runs the real compiler over the fixture.
   it('writes one page per entry point plus an index', () => {
     const { status, stdout } = run();
     expect(status).toBe(0);
@@ -145,16 +125,14 @@ describe('generate-api-docs', () => {
     expect(index).toContain('fixture-lib v9.9.9 API reference');
     expect(index).toContain('[`fixture-lib`](index.md)');
     expect(index).toContain('[`fixture-lib/extra`](extra.md)');
-    // The word itself appears in the prose explaining the omission, so this
-    // asserts there is no iife ROW rather than no mention.
+    // The index prose mentions iife, so assert there is no iife row.
     expect(index).not.toContain('](iife.md)');
     expect(index).toContain('2 entry points');
   });
 
   it('resolves aliases through a re-export barrel', () => {
     const page = read('index.md');
-    // The doc comment and the tags live on the declaration in core.ts, not on
-    // the barrel's re-export - unresolved, all three of these are empty.
+    // The doc comment and tags live on the declaration in core.ts, not on the barrel's re-export.
     expect(page).toContain('Creates a widget.');
     expect(page).toContain('what to call it');
     expect(page).toContain("const w = makeWidget('a');");
@@ -167,7 +145,7 @@ describe('generate-api-docs', () => {
     expect(page).not.toContain('Creates a widget.');
     expect(page).toContain('Extra thing.');
     expect(page).toContain('A plain counter.');
-    // The control: the root's own page still documents it.
+    // Control: the root's own page still documents it.
     expect(read('index.md')).toContain('Creates a widget.');
   });
 
@@ -192,9 +170,6 @@ describe('generate-api-docs', () => {
     expect(page).toContain('**Variable**');
   });
 
-  // The repository URL and the package name are read from package.json, not
-  // hardcoded. They were literals until this fixture rendered the wrong
-  // project's name and repo into its own reference.
   it('builds source links from the package repository field', () => {
     expect(read('index.md')).toMatch(
       /\[src\/core\.ts:\d+\]\(https:\/\/github\.com\/fixture\/lib\/blob\/main\/src\/core\.ts#L\d+\)/,
@@ -207,7 +182,6 @@ describe('generate-api-docs', () => {
     expect(page).not.toMatch(/\]\(#\w+\), \[/);
   });
 
-  // Same spawn, same reason as above.
   it('regenerates deterministically', () => {
     const first = read('index.md');
     run();

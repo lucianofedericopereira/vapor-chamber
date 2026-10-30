@@ -1,15 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * `routerHttp()` - the router's HTTP client, in `vapor-chamber/router/remote`.
- *
- * Every other suite injects a stub client, and the router core never builds
- * one (it is passed in like any other option), so nothing exercises the REAL
- * client unless a test does so deliberately.
- *
- * Driven end to end against a stubbed `fetch`: the marker header reaches the
- * request, the payload becomes a usable table, and one client serves a reload.
- * The other half of the boundary - that the router core cannot reach this
- * code at all - is remote-boundary.test.ts.
+ * `routerHttp()`, the router's HTTP client in `vapor-chamber/router/remote`, and `bladeFetcher()` without a client.
+ * Why: other suites inject a stub client, so a broken real client would reach users unnoticed: the backend could not tell router traffic from command traffic, and a `{ url }` table with no client would crash instead of failing with a code.
+ * Shows: against a stubbed `fetch`, the marker header reaches the request, the payload becomes the route table, one client serves a reload, a caller header overrides the marker, `bladeFetcher()` builds its own client and extracts the blade root, and a `{ url }` table with no client reports `router:missing:http`.
+ * See: remote-boundary.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
@@ -51,7 +45,7 @@ describe('routerHttp', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0]?.url).toContain('/api/vc/routes');
-    // The marker a backend uses to tell router traffic from command traffic.
+    // The marker lets a backend tell router traffic from command traffic.
     expect(JSON.stringify(seen[0]?.headers)).toContain('X-Vapor-Router');
 
     expect(router.currentRoute.value.location.path).toBe('/');
@@ -88,7 +82,7 @@ describe('routerHttp', () => {
       history: createMemoryHistory(''),
       routes: { url: '/api/vc/routes' } as never,
       components: { Home: { name: 'Home' } },
-      // Caller options win over the preset marker - it is a default, not a lock.
+      // Caller headers win over the preset marker.
       http: routerHttp({ headers: { 'X-Vapor-Router': '0', 'X-Tenant': 'acme' } }),
       links: false,
       onError: () => {},
@@ -121,7 +115,7 @@ describe('bladeFetcher with no client of its own', () => {
         }),
     ) as never;
 
-    // No options at all: the zero-config path a consumer reaches for first.
+    // No options at all: the zero-config path.
     const html = await bladeFetcher()('/legacy');
 
     expect(html).toContain('<h1>Hi</h1>');
@@ -141,8 +135,7 @@ describe('a { url } table with no client', () => {
     });
     await router.isReady().catch(() => {});
 
-    // The router deliberately does not build a client for you; saying so with a
-    // code beats a TypeError from a null dereference.
+    // The router never builds a client; a code replaces a TypeError.
     const coded = errors.find((error) => isRouterError(error, 'router:missing:http'));
     expect(coded).toBeDefined();
     expect(String((coded as Error).message)).toContain('router/remote');

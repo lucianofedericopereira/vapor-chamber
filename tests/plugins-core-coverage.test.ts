@@ -1,8 +1,7 @@
 /**
- * plugins-core coverage - the leftover error-path catches and async rollback
- * branches in logger / history, and an optimistic undo that throws.
- * All reachable with deliberately-throwing handlers/undo/rollback fns + a
- * console.error spy. No Vue, no I/O mocks.
+ * The error paths of logger and history, and an optimistic undo that throws, on the sync and async buses.
+ * Why: a failed dispatch must be logged, and a throwing undo or redo must be reported through the console rather than escape into the caller. Also the only file reaching the `core:failed:undo` report, so the 100% floor needs it.
+ * Shows: logger prints `error:` for a dispatch with no handler, history.undo() and history.redo() swallow a throwing undo handler or redo dispatch and report `history:failed:move`, and a throwing optimistic undo is reported as `core:failed:undo` while the dispatch still returns its failure (sync) or its `done` settles with it (async).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, } from '../src/command-bus';
@@ -10,7 +9,6 @@ import { history, logger } from '../src/plugins-core';
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-// ── logger: failed-dispatch error branch (line 34) ────────────────────────────
 describe('plugins-core coverage - logger', () => {
   it('logs the error on a failed dispatch', () => {
     vi.spyOn(console, 'group').mockImplementation(() => {});
@@ -21,13 +19,12 @@ describe('plugins-core coverage - logger', () => {
 
     const bus = createCommandBus();
     bus.use(logger());
-    bus.dispatch('missing', {}); // no handler -> result.ok === false
+    bus.dispatch('missing', {}); // no handler: a failed result
 
     expect(errSpy).toHaveBeenCalledWith('error:', expect.anything());
   });
 });
 
-// ── history: undo handler throws + redo dispatch throws ────────────
 describe('plugins-core coverage - history undo/redo errors', () => {
   it('catches a throwing undo handler', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -35,8 +32,8 @@ describe('plugins-core coverage - history undo/redo errors', () => {
     const h = history({ bus });
     bus.register('act', () => 'ok', { undo: () => { throw new Error('undo boom'); } });
 
-    bus.dispatch('act', {});            // recorded in `past`
-    expect(() => h.undo()).not.toThrow(); // undo handler throws -> caught
+    bus.dispatch('act', {});
+    expect(() => h.undo()).not.toThrow();
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('history:failed:move: Undo handler threw'), expect.anything());
   });
@@ -47,16 +44,15 @@ describe('plugins-core coverage - history undo/redo errors', () => {
     const h = history({ bus });
     const unreg = bus.register('act', () => 'ok');
 
-    bus.dispatch('act', {}); // recorded
-    h.undo();                // past -> future
-    unreg();                 // remove handler -> redo's dispatch throws (onMissing:'throw')
+    bus.dispatch('act', {});
+    h.undo();
+    unreg(); // redo's dispatch now throws (onMissing: 'throw')
     expect(() => h.redo()).not.toThrow();
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('history:failed:move: Redo dispatch threw'), expect.anything());
   });
 });
 
-// ── register({ optimistic }): an undo that throws - sync + async ─────────────
 describe('plugins-core coverage - an optimistic undo that throws', () => {
   it('sync: the throwing undo is reported, and the failure returns', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -73,7 +69,7 @@ describe('plugins-core coverage - an optimistic undo that throws', () => {
     const bus = createAsyncCommandBus({ retry: false });
     bus.register('act', async () => { throw new Error('async fail'); }, { undo: () => { throw new Error('undo boom'); }, optimistic: true });
 
-    const r = await bus.dispatch('act', {}); // answers at once
+    const r = await bus.dispatch('act', {}); // optimistic: answers at once
     expect(r.ok).toBe(true);
     expect((await (r.value as { done: Promise<{ ok: boolean }> }).done).ok).toBe(false);
 

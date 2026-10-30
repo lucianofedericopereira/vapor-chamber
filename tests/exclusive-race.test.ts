@@ -1,17 +1,16 @@
-/** `register({ exclusive })` against the read-modify-write race, keys, failures and Web Locks. The long note is at the end. */
+/**
+ * `register({ exclusive })` against the read-modify-write race, with keys, failures and Web Locks.
+ * Why: two commands reading the same value across an await lose an update; an action holding a key must not stall on a failure or block what it does not cover.
+ * Shows: same key loses nothing, the control without it does; other keys and null run at once; a failure does not stall; the default key is the action; Web Locks with names, prefix and fallback.
+ * See: log 36.81.
+ */
 import { describe, expect, vi } from 'vitest';
 import { type Command, createAsyncCommandBus } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
-/**
- * N-party barrier - `arrive()` returns a promise that resolves only once N
- * callers have arrived. Makes concurrency/race tests DETERMINISTIC instead of
- * relying on timer windows: if commands that should run concurrently are instead
- * held in order, the barrier never reaches N and the test fails by timeout
- * rather than flaking.
- */
+/** N-party barrier, so a race test is deterministic: commands wrongly held in order never reach N and the test times out. */
 function barrier(n: number) {
   let count = 0;
   let release!: () => void;
@@ -147,12 +146,3 @@ describe('exclusive against the race', () => {
     });
   });
 });
-
-/*
- * The cases of tests/serialize.test.ts, moved to the plugin's home in step 4k (log 36.81):
- * `serialize` is gone and the action declares `exclusive`. The race, the control that proves
- * it real, concurrency for different keys and for `null`, no stall after a failure, the
- * default key, and Web Locks with its names, its prefix and its fallback. The `actions`
- * filter has no counterpart: an action without the option is simply not held. The lock name
- * is `vapor-chamber:exclusive:<key>` (was `vapor-chamber:serialize:<key>`).
- */

@@ -1,22 +1,11 @@
 /**
- * vDOM boundary regression - the base `vapor-chamber/router` entry must not
- * drag Vue's virtual-DOM runtime in.
+ * The base `vapor-chamber/router` entry keeps Vue's vDOM bindings out of a consumer's entry chunk.
+ * Why: a Vapor app that only calls createRouter() would otherwise retain the vDOM runtime through `defineComponent` or `h` from `outlet.ts` or `blade.ts`.
+ * Shows: createRouter() alone imports none of the vDOM marker names from `vue`, the vdom subpath does import `defineComponent` and `h`, and the entry types do not export `RouterOutlet` or `makeBladeComponent`.
+ * See: tests/router/vapor-boundary.test.ts
  *
- * A Vapor consumer that only calls createRouter() should end up importing
- * reactivity from `vue` and nothing else. `defineComponent` / `h` are the vDOM
- * tell: they live in `outlet.ts` and `blade.ts`, and if either is reachable
- * from the entry's live bindings, the vDOM runtime is retained.
- *
- * (`vue` is an optional peer, so it stays external in this bundle - what we
- * assert on is WHICH named bindings the router still asks `vue` for.)
- *
- * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
- * esbuild is unavailable. "Built" means both halves of `npm run build`: the
- * `.d.ts` below comes from `tsc`, not from the Vite pass that writes the `.js`
- * files, and a test run can end up with the second and not the first -
- * tests/dev-flag.test.ts imports scripts/build.mjs, whose top-level builds run
- * on import. Without the `.d.ts` in the check, the last case threw ENOENT
- * instead of naming the missing build (batch 2 audit, test:run before build).
+ * Fails when dist/ is not built (tests/require-dist.ts); skips when esbuild is unavailable.
+ * "Built" includes the `.d.ts` files from `tsc`, which the Vite pass that writes the `.js` files does not produce.
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,12 +26,8 @@ try {
 }
 
 /**
- * Named bindings the consumer's ENTRY chunk still imports from 'vue'.
- *
- * `splitting: true` matters: without it esbuild inlines dynamic `import()`
- * back into the single output, which would hide exactly the on-demand blade
- * chunk this boundary depends on. A real consumer bundler (Vite/Rollup) code-
- * splits it, so the entry is what a Vapor app actually pays on first load.
+ * Named bindings the consumer's entry chunk imports from 'vue'.
+ * `splitting: true` keeps the on-demand blade chunk out of the entry chunk, as a real bundler would.
  */
 async function vueImportsOf(source: string): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-vdom-'));

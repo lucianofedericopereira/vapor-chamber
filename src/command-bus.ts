@@ -2323,15 +2323,7 @@ function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandRes
     const handler = rec.handler;
     result = handler === undefined ? handleMissing(s, cmd, true) : tryCatchHandler(handler, cmd);
   } else {
-    const execute = executeOverride ?? ((): CommandResult => {
-      const handler = rec.handler;
-      if (!handler) return handleMissing(s, cmd, true);
-      return tryCatchHandler(handler, cmd);
-    });
-    // Only an `onMissing: 'throw'` bus can have a throw escape the work, so
-    // only that bus pays syncRunSettling's frame; every other bus keeps the
-    // bare call it had (speed over size - the check costs bytes, not time).
-    result = s.opts.onMissing === 'throw' ? syncRunSettling(s, cmd, rec, execute) : syncWork(rec, cmd, execute);
+    result = syncThunked(s, rec, cmd, executeOverride);
   }
   devWarnThenableResult(result, action);
   syncRunHooks(s, cmd, result);
@@ -2420,15 +2412,33 @@ function _syncQueryInner(s: SyncState, cmd: Command): CommandResult {
     const handler = rec.handler;
     result = handler === undefined ? handleMissing(s, cmd, false) : tryCatchHandler(handler, cmd);
   } else {
-    result = syncWork(rec, cmd, (): CommandResult => {
-      const handler = rec.handler;
-      if (!handler) return handleMissing(s, cmd, false);
-      return tryCatchHandler(handler, cmd);
-    });
+    result = syncQueryThunked(s, rec, cmd);
   }
   devWarnThenableResult(result, action);
   syncRunHooks(s, cmd, result);
   return result;
+}
+
+/** A sync dispatch with steps or a responder: the thunk, in a function of its own. */
+function syncThunked(s: SyncState, rec: ActionRecord, cmd: Command, executeOverride: (() => CommandResult) | undefined): CommandResult {
+  const execute = executeOverride ?? ((): CommandResult => {
+    const handler = rec.handler;
+    if (!handler) return handleMissing(s, cmd, true);
+    return tryCatchHandler(handler, cmd);
+  });
+  // Only an `onMissing: 'throw'` bus can have a throw escape the work, so
+  // only that bus pays syncRunSettling's frame; every other bus keeps the
+  // bare call it had (speed over size - the check costs bytes, not time).
+  return s.opts.onMissing === 'throw' ? syncRunSettling(s, cmd, rec, execute) : syncWork(rec, cmd, execute);
+}
+
+/** A sync query with steps: the thunk, in a function of its own. */
+function syncQueryThunked(s: SyncState, rec: ActionRecord, cmd: Command): CommandResult {
+  return syncWork(rec, cmd, (): CommandResult => {
+    const handler = rec.handler;
+    if (!handler) return handleMissing(s, cmd, false);
+    return tryCatchHandler(handler, cmd);
+  });
 }
 
 /** Fire a domain event - notifies on() listeners, no handler required, no result. */
@@ -3060,13 +3070,16 @@ function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult, depth
       let r: unknown;
       try { r = h.fn(cmd, result); }
       finally { s.dispatchDepth = at; }
-      if (r && typeof (r as PromiseLike<void>).then === 'function') {
-        const rest = (): void | Promise<void> => asyncRunHooks(s, cmd, result, depth, ah, i + 1, len);
-        return Promise.resolve(r).then(rest, (e) => { hookFailed(cmd, e); return rest(); });
-      }
+      if (r && typeof (r as PromiseLike<void>).then === 'function') return hookLater(r as PromiseLike<void>, s, cmd, result, depth, ah, i, len);
     } catch (e) { hookFailed(cmd, e); }
   }
   asyncFanOut(s, cmd, result, depth);
+}
+
+/** The hooks after a hook's thenable, on its settling. Its own function: a closure in asyncRunHooks costs every call a context. */
+function hookLater(r: PromiseLike<void>, s: AsyncState, cmd: Command, result: CommandResult, depth: number, ah: AsyncState['afterHooks'], i: number, len: number): Promise<void> {
+  const rest = (): void | Promise<void> => asyncRunHooks(s, cmd, result, depth, ah, i + 1, len);
+  return Promise.resolve(r).then(rest, (e) => { hookFailed(cmd, e); return rest(); });
 }
 
 /** An onAfter hook's throw or rejection: reported, and the dispatch goes on. Failure path only. */
@@ -3276,7 +3289,7 @@ async function _asyncRun(s: AsyncState, depth: number, cmd: Command, executeOver
     const at = s.dispatchDepth;
     s.dispatchDepth = depth;
     let p: CommandResult | Promise<CommandResult>;
-    try { p = asyncWork(s, rec, cmd, true, executeOverride && ((): Promise<CommandResult> => executeOverride(cmd))); }
+    try { p = asyncWork(s, rec, cmd, true, executeOverride && overrideThunk(executeOverride, cmd)); }
     finally { s.dispatchDepth = at; }
     result = await p;
     if (executeOverride === undefined) {
@@ -3289,6 +3302,9 @@ async function _asyncRun(s: AsyncState, depth: number, cmd: Command, executeOver
   if (h) await h;
   return result;
 }
+
+/** request()'s responder as the work's thunk, in a function of its own. */
+const overrideThunk = (execute: (cmd: Command) => Promise<CommandResult>, cmd: Command) => (): Promise<CommandResult> => execute(cmd);
 
 /**
  * The async bus's work behind the action's steps (PluginParts.reuse): the
@@ -3305,6 +3321,11 @@ function asyncWork(s: AsyncState, rec: ActionRecord, cmd: Command, dispatching: 
     if (retry !== null) retry.begin(cmd);
     return work(s, rec, cmd, dispatching);
   }
+  return asyncThunked(s, rec, cmd, dispatching, list, retry, execute);
+}
+
+/** asyncWork with steps or a responder: the thunks, in a function of their own. */
+function asyncThunked(s: AsyncState, rec: ActionRecord, cmd: Command, dispatching: boolean, list: ActionRecord['steps'], retry: AsyncState['retry'], execute?: () => CommandResult | Promise<CommandResult>): CommandResult | Promise<CommandResult> {
   const call = execute ?? ((): CommandResult | Promise<CommandResult> => work(s, rec, cmd, dispatching));
   if (list === null) return retry === null ? call() : retry.run(cmd, call);
   return _stepped(list, cmd, (): CommandResult | Promise<CommandResult> => (retry === null ? call() : retry.run(cmd, call)));

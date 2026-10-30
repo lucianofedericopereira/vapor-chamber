@@ -1,5 +1,8 @@
 /**
- * Tests for src/directives.ts - v-vc-command, v-vc-payload, v-vc-optimistic
+ * src/directives.ts through its hooks on mock elements: v-vc-command, v-vc-payload, v-vc-optimistic, with no renderer.
+ * Why: the direct listener never sees Vue's withModifiers, so the directive applies them itself; attribute order must not change what a dispatch carries.
+ * Shows: the three names and no `vc`; updated re-targets, unmount detaches; disabled is skipped; modifiers and a capped timeout; .delegate shares a listener per document, shadow roots too; any order works.
+ * See: tests/directives-vapor-fixture.test.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
@@ -24,9 +27,7 @@ function createMockApp() {
   };
 }
 
-// Minimal mock document - stands in for the real `document` the .delegate
-// modifier registers a shared listener on (tests/directives.test.ts runs in
-// the plain 'node' vitest environment, no real DOM/happy-dom).
+// A mock `document`, for the shared listener .delegate registers: this file runs with no DOM.
 function createMockDocument() {
   const listeners = new Map<string, Function>();
   return {
@@ -98,9 +99,7 @@ describe('createDirectivePlugin', () => {
     resetCommandBus();
   });
 
-  // The three NAMES are the public surface now that the selector lives in one.
-  // `vc` must be absent: leaving it registered alongside would be the two
-  // spellings this reshape removed, and nothing else in the suite would notice.
+  // `vc` must be absent: the selector lives in the name, so it would be a second spelling.
   it('installs vc-command, vc-payload and vc-optimistic, and not vc', () => {
     expect(app.getDirective('vc-command')).toBeDefined();
     expect(app.getDirective('vc-payload')).toBeDefined();
@@ -109,26 +108,6 @@ describe('createDirectivePlugin', () => {
   });
 
   describe('v-vc-command', () => {
-    it('registers click handler on mounted', () => {
-      const el = createElement();
-      const vcDir = app.getDirective('vc-command');
-      vcDir.mounted(el, { value: 'testAction', modifiers: {} });
-
-      // Should have registered a click listener
-      bus.register('testAction', () => 'success');
-      el.triggerClick();
-      // No error means handler was attached
-    });
-
-    // THE `ignores non-command args` CASE WAS DELETED HERE, deliberately, and
-    // not replaced with an inverted one. It asserted that `{ arg: 'other' }`
-    // did not mount - the selector-in-the-argument behaviour. There is no
-    // argument now, so there is nothing to ignore and nothing to assert: a
-    // test that passed `arg` and checked it was disregarded would be pinning
-    // the absence of a feature by feeding it an input Vue never sends. What
-    // replaced it is the name assertion above, which is the same question
-    // asked where the answer now lives.
-
     it('updated() changes the action', () => {
       const el = createElement();
       const ran: string[] = [];
@@ -154,7 +133,6 @@ describe('createDirectivePlugin', () => {
       expect(calls).toBe(0);
     });
 
-    // Vue 3.6.0-beta.15 alignment: skip disabled / in-flight direct handlers.
     it('skips dispatch when the element is disabled', () => {
       const el = createElement();
       el.disabled = true;
@@ -177,9 +155,7 @@ describe('createDirectivePlugin', () => {
       expect(calls).toBe(0);
     });
 
-    // Event modifiers - the direct listener never sees Vue's compiled withModifiers,
-    // so v-vc-command applies .stop/.prevent/.self/.left/.middle/.right/.capture/
-    // .once/.passive itself (the numeric modifier remains the dispatch timeout).
+    // The numeric modifier stays the dispatch timeout.
     describe('event modifiers', () => {
       it('honors .stop and .prevent on the DOM event', () => {
         const el = createElement();
@@ -265,15 +241,9 @@ describe('createDirectivePlugin', () => {
       });
     });
 
-    // Vue 3.6.0-rc.2 (#15127) flipped compiler-vapor event delegation to
-    // opt-in. v-vc-command mirrors the same trade-off with its own opt-in
-    // `.delegate` modifier: one shared document listener instead of one per
-    // element.
+    // Opt-in: one shared document listener instead of one per element.
     describe('.delegate modifier', () => {
-      // The delegation registry (attach/detach refcount) is shared MODULE
-      // state, same as it would be in a real page with one `document` - each
-      // test below mounts and unmounts in balance so it doesn't leak into
-      // the next test.
+      // The refcount is shared module state, as on a real page, so each test mounts and unmounts in balance.
 
       it('does not attach a direct listener on the element', () => {
         const doc = createMockDocument();
@@ -329,10 +299,7 @@ describe('createDirectivePlugin', () => {
         expect(doc.hasClickListener()).toBe(false);
       });
 
-      // Item 29: at document level the event target is retargeted to the
-      // shadow HOST, so a parentElement walk from it never reaches the real
-      // element and the click silently did nothing. `router/dom.ts` link
-      // interception already documents the composed-path fix.
+      // At document level the target is retargeted to the shadow host, so only composedPath() reaches the element.
       it('dispatches for a delegated element inside a shadow root', () => {
         const doc = createMockDocument();
         const host = createElement('my-widget', { ownerDocument: doc });
@@ -352,7 +319,7 @@ describe('createDirectivePlugin', () => {
           preventDefault() {},
         });
 
-        expect(calls).toBe(1); // was 0 - the control rendered and did nothing
+        expect(calls).toBe(1);
         vcDir.beforeUnmount(button);
       });
 
@@ -378,8 +345,6 @@ describe('createDirectivePlugin', () => {
       });
 
       it('attaches a listener per document (iframe / popup)', () => {
-        // The count was global and the document single, so delegated elements
-        // in a second document bumped the count and got no listener at all.
         const docA = createMockDocument();
         const docB = createMockDocument();
         const elA = createElement('button', { ownerDocument: docA });
@@ -392,10 +357,10 @@ describe('createDirectivePlugin', () => {
         vcDir.mounted(elB, { value: 'a', modifiers: { delegate: true } });
 
         expect(docA.hasClickListener()).toBe(true);
-        expect(docB.hasClickListener()).toBe(true); // was false
+        expect(docB.hasClickListener()).toBe(true);
 
         docB.dispatchClick(elB);
-        expect(calls).toBe(1); // was 0
+        expect(calls).toBe(1);
 
         // Unmounting every element of the first document must not strand the
         // second document's listener.
@@ -432,8 +397,7 @@ describe('createDirectivePlugin', () => {
     });
   });
 
-  // Attribute ORDER must not change what a dispatch carries. See the note at
-  // the end of this file.
+  // Attribute order must not change what a dispatch carries: on a page with no reactive state, no later patch recovers it.
   describe('order of v-vc-payload / v-vc-optimistic against v-vc-command', () => {
     it('delivers a payload authored BEFORE the command', () => {
       const el = createElement();
@@ -447,8 +411,7 @@ describe('createDirectivePlugin', () => {
       expect(seen).toEqual({ qty: 3 });
     });
 
-    // The control. This order always worked; if it ever stops, the fix for the
-    // case above broke the case it was meant to leave alone.
+    // The control: the cheapest wrong fix swaps which order works.
     it('delivers a payload authored AFTER the command', () => {
       const el = createElement();
       let seen: unknown = '(never dispatched)';
@@ -477,9 +440,7 @@ describe('createDirectivePlugin', () => {
       expect(rolledBack).toBe(1);
     });
 
-    // A binding held before the command must not outlive being replaced: the
-    // `updated` hook writes onto the state the command now owns, not back into
-    // the slot it was parked in.
+    // A held binding must not freeze: `updated` writes onto the state the command now owns.
     it('lets updated() replace a payload that was authored before the command', () => {
       const el = createElement();
       let seen: unknown = '(never dispatched)';
@@ -510,61 +471,3 @@ describe('createDirectivePlugin', () => {
     });
   });
 });
-
-describe('createDirectivePlugin factory', () => {
-  it('returns an object with install method', () => {
-    const plugin = createDirectivePlugin();
-    expect(plugin).toHaveProperty('install');
-    expect(typeof plugin.install).toBe('function');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Why `order of v-vc-payload / v-vc-optimistic against v-vc-command` exists
-// ---------------------------------------------------------------------------
-//
-// Vapor has a holding slot so that
-//
-//     <button v-vc-payload="p" v-vc-command="a">
-//
-// works: a compiled template applies directives in SOURCE ORDER, and
-// `mountCommand()` opens by deleting whatever state the element carries, so a
-// payload written first was thrown away. The vDOM half was left out, and the
-// source said so in as many words - that it "needs nothing equivalent",
-// because `updated` re-applies the binding on the next patch.
-//
-// That reasoning answers for the second click. The element is clickable before
-// the first. MEASURED against the real vDOM runtime (happy-dom + Vue), first
-// click, no re-render since mount:
-//
-//     <button v-vc-command   v-vc-payload>    payload {qty:3}    delivered
-//     <button v-vc-payload   v-vc-command>    payload undefined  DROPPED
-//     <button v-vc-optimistic v-vc-command>   optimistic never ran
-//
-// After one unrelated re-render both recover, which is exactly what made it
-// survivable and invisible: any test that renders before it asserts passes,
-// and the failure lands on a page with no reactive state - the Blade /
-// sprinkled shape this library exists to serve - where there is no next patch
-// and it never works at all.
-//
-// The cost was not only a dropped payload. It made ONE public spelling mean
-// two things: order-independent on Vapor, dead on vDOM. `examples/vapor-sfc`
-// writes payload-before-command and states flatly that the order does not
-// matter, which is true only because that file is `<script setup vapor>`. A
-// reader copying that markup into a vDOM component got a silent no-op, and a
-// documented claim was the reason nobody checked.
-//
-// So the four cases above are not one test and three variations. The
-// before-command pair are the regression. The after-command case is the
-// control, because the cheapest wrong fix is one that swaps which order
-// works. The `updated` case pins that claiming a held binding does not freeze
-// it. And the orphan case pins the two things a holding slot can get wrong
-// that nothing else would notice: dispatching for an element with no command,
-// and handing one element's held binding to the next element that mounts one.
-//
-// These run against the mock app rather than a real renderer on purpose: this
-// file's mock IS the vDOM contract (`mounted` / `updated` / `beforeUnmount`
-// with a `binding.value`), and calling the hooks directly is what lets the
-// order be stated in the test instead of inferred from a template. The real
-// renderer measurement above is what established the defect; this is what
-// keeps it fixed.

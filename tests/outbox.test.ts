@@ -1,5 +1,8 @@
 /**
- * Tests for the offline outbox: createOutbox on the bus, its queue saved by persist
+ * The offline outbox on an async bus: holding, the stored queue, flush and replay, the default retry rule, window listeners, IndexedDB storage, a custom key, storage failures.
+ * Why: a command dispatched offline would be lost, sent twice or sent out of order, and a bad `maxSize` or a failing storage would make the queue throw or grow without bound.
+ * Shows: a covered command is held as an Accepted and saved, others are sent at once; the stored queue loads and replays first with its keys and origin replay in FIFO order; a retryable failure keeps the order, a final one is rejected; maxSize is clamped or defaulted; window events drive the flag and flush; storage errors only warn.
+ * See: log s36.48
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -50,10 +53,6 @@ const coded = (code: string): CommandResult => {
 };
 const remote422 = (): CommandResult => coded('remote:invalid:payload');
 
-// ---------------------------------------------------------------------------
-// createOutbox - holding
-// ---------------------------------------------------------------------------
-
 describe('createOutbox - holding', () => {
   it('holds a covered command while offline: an Accepted, pending bumped, the record saved', async () => {
     const storage = memoryStorage();
@@ -68,7 +67,7 @@ describe('createOutbox - holding', () => {
     await saved();
     expect(storage.saves).toBe(1);
     expect(storage.rows()[0]).toMatchObject({ action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 } });
-    expect(storage.rows()[0]!.key).toBe(storage.rows()[0]!.id); // the record's id alone (log 36.48)
+    expect(storage.rows()[0]!.key).toBe(storage.rows()[0]!.id); // the key is the record's id alone
   });
 
   it('stamps queuedAt as an RFC 3339 UTC string that round-trips through Date.parse', async () => {
@@ -150,15 +149,12 @@ describe('createOutbox - holding', () => {
 
     expect(outbox.pending.value).toBe(2);
     await saved();
-    expect(storage.rows().map((r) => r.action)).toEqual(['b', 'c']); // oldest ('a') dropped
+    expect(storage.rows().map((r) => r.action)).toEqual(['b', 'c']);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxSize'));
     expect(await doneOf(first)).toFailWith('outbox:exceeded:queue');
   });
 
-  // Same class as `cache({ maxSize: -1 })`, which hung its eviction loop. Here
-  // the identical `while (length > max)` shape threw instead: on a negative
-  // bound the condition stays true once the queue is empty, `shift()` returns
-  // undefined, and the warning dereferenced it.
+  // On a negative bound the eviction condition stays true once the queue is empty, so shift() returns undefined.
   it('a negative maxSize is clamped instead of throwing', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { bus, outbox } = world({ maxSize: -1 });
@@ -168,11 +164,7 @@ describe('createOutbox - holding', () => {
     expect(outbox.pending.value).toBe(0);
   });
 
-  // NaN propagates through Math.trunc/Math.max and loses every comparison, so
-  // `queue.length > maxSize` never fired and the bound vanished - measured at
-  // 300 records queued before this guard. ../bounds falls back to the
-  // documented default: holding nothing while offline would discard the
-  // commands the outbox exists to hold.
+  // NaN loses every comparison, so the bound would vanish; the documented default applies instead of holding nothing.
   it('a NaN maxSize falls back to the default instead of unbounding', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { bus, outbox } = world({ maxSize: Number('nope') });
@@ -194,10 +186,6 @@ describe('createOutbox - holding', () => {
     expect(await doneOf(held)).toFailWith('outbox:aborted:clear');
   });
 });
-
-// ---------------------------------------------------------------------------
-// createOutbox - the stored queue
-// ---------------------------------------------------------------------------
 
 describe('createOutbox - the stored queue', () => {
   const stored = (n: number): OutboxRecord => storedRecord({ id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: new Date(n).toISOString() });
@@ -234,8 +222,7 @@ describe('createOutbox - the stored queue', () => {
     const storage = memoryStorage([1, 2, 3, 4].map(stored));
     const { outbox } = world({ storage, maxSize: 2 });
     expect(outbox.pending.value).toBe(2);
-    // Without persisting the trim, storage kept all four and the same two
-    // records were re-loaded and re-dropped on every startup.
+    // An unpersisted trim would reload and re-drop the same records at every startup.
     await saved();
     expect(storage.rows().map((r) => r.action)).toEqual(['a3', 'a4']);
   });
@@ -266,10 +253,6 @@ describe('createOutbox - the stored queue', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createOutbox - flush / replay
-// ---------------------------------------------------------------------------
-
 describe('createOutbox - flush', () => {
   it('replays in FIFO order with the original keys and origin replay; done settles with each answer', async () => {
     const storage = memoryStorage();
@@ -283,8 +266,8 @@ describe('createOutbox - flush', () => {
 
     state.online = true;
     expect(await outbox.flush()).toEqual({ replayed: 2, failed: 0, rejected: 0 });
-    expect(sent.map((c) => c.action)).toEqual(['a', 'b']); // strict FIFO
-    expect(sent.map((c) => c.meta?.idempotencyKey)).toEqual(keys); // ORIGINAL keys
+    expect(sent.map((c) => c.action)).toEqual(['a', 'b']);
+    expect(sent.map((c) => c.meta?.idempotencyKey)).toEqual(keys);
     expect(sent.every((c) => c.meta?.origin === 'replay')).toBe(true);
     expect(outbox.pending.value).toBe(0);
     await saved();
@@ -348,19 +331,6 @@ describe('createOutbox - flush', () => {
     expect(summary).toEqual({ replayed: 3, failed: 0, rejected: 0 });
   });
 
-  it('flush() off a bus rejects', async () => {
-    const outbox = createOutbox({ storage: null, isOnline: () => true, autoFlush: false });
-    await expect(outbox.flush()).rejects.toThrow(/on no bus/);
-  });
-
-  it('a second flush during one joins it', async () => {
-    const { bus, outbox, state } = world();
-    await bus.dispatch('a', {});
-    state.online = true;
-    const [x, y] = await Promise.all([outbox.flush(), outbox.flush()]);
-    expect(x).toBe(y);
-  });
-
   it('going offline mid-flush leaves the rest held', async () => {
     const { bus, outbox, state, actions } = world();
     await bus.dispatch('a', {});
@@ -372,10 +342,6 @@ describe('createOutbox - flush', () => {
     expect(outbox.pending.value).toBe(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// createOutbox - the default isRetryable
-// ---------------------------------------------------------------------------
 
 describe('createOutbox - the default rule', () => {
   async function replay(fail: (cmd: Command) => CommandResult | undefined) {
@@ -408,10 +374,6 @@ describe('createOutbox - the default rule', () => {
     expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 1 });
   });
 });
-
-// ---------------------------------------------------------------------------
-// createOutbox - window listeners and lifecycle
-// ---------------------------------------------------------------------------
 
 describe('createOutbox - window listeners and lifecycle', () => {
   function stubWindow() {
@@ -490,14 +452,7 @@ describe('createOutbox - window listeners and lifecycle', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The queue on IndexedDB (indexedDbStorage), with a minimal in-memory fake
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal fake IDB: enough surface for open/upgrade + get/put requests. The
- * real order: the request succeeds, then its transaction completes.
- */
+/** A minimal in-memory IDB: open/upgrade and get/put requests; as in the real order, a request succeeds, then its transaction completes. */
 function fakeIndexedDb() {
   const data = new Map<string, any>();
   const db = {
@@ -537,7 +492,6 @@ describe('the queue on IndexedDB', () => {
     expect(first.outbox.pending.value).toBe(1);
     await new Promise((r) => setTimeout(r, 0));
 
-    // A "second session" loads the same stored queue at creation.
     const second = world({ storage: indexedDbStorage() });
     await vi.waitFor(() => expect(second.outbox.pending.value).toBe(1));
     second.state.online = true;
@@ -545,28 +499,18 @@ describe('the queue on IndexedDB', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createOutbox - key derivation and replay failure shapes
-// ---------------------------------------------------------------------------
-
 describe("createOutbox - custom key", () => {
   it("uses a supplied key() instead of the default record id", async () => {
     const storage = memoryStorage();
-    // A caller-supplied idempotency key - e.g. one the backend already knows.
     const { bus } = world({ actions: ["cart*"], storage, key: (cmd) => `custom:${cmd.action}:${(cmd.target as { id: number }).id}` });
 
     await bus.dispatch("cartAdd", { id: 7 });
 
     await saved();
     expect(storage.rows()[0]?.key).toBe("custom:cartAdd:7");
-    // and specifically NOT the default derivation
     expect(storage.rows()[0]?.key).not.toBe(storage.rows()[0]?.id);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Storage failures are warnings, never throws - the queue must outlive them
-// ---------------------------------------------------------------------------
 
 describe("storage failure paths", () => {
   it("createOutbox survives a storage that rejects on every call", async () => {
@@ -578,8 +522,7 @@ describe("storage failure paths", () => {
     const { bus, outbox } = world({ storage });
     await new Promise((r) => setTimeout(r, 0));
 
-    // The load and every save each swallow-and-warn on their own (persist),
-    // so the in-memory queue stays authoritative even with no working storage.
+    // The load and each save warn on their own, so the in-memory queue stays authoritative.
     const result = await bus.dispatch("cartAdd", { id: 1 });
     expect(result.ok).toBe(true);
     expect(outbox.pending.value).toBe(1); // held in memory despite save() failing

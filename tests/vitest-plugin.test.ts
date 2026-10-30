@@ -1,10 +1,8 @@
 /**
- * `vaporChamberTest()` from `vapor-chamber/vite`, the plugin object.
- *
- * Acceptance assertion A11 (vitest5-plugin-study.md Rev 3 section 6, R5), plus
- * the plugin's own contract. Whether a real Vitest honours what the plugin
- * returns is asserted on a packed consumer in tests/vitest-consumer.test.ts;
- * this file drives the hooks with the arguments Vitest passes them.
+ * `vaporChamberTest()` from `vapor-chamber/vite`: the plugin object, its hooks driven with the arguments Vitest passes them.
+ * Why: a user's Vitest run would lose the setup file, skip files by accident, lose the island project, or print the banner line twice or on a machine reporter.
+ * Shows: the setup-file merge; the provided exclude list as root-anchored patterns; the package specifier; one warning for an unknown Vitest major; the banner line's reporters, colors and once-per-instance rule; the island project's injection, exclude, include and benchmark handling; a dist type that imports no vitest module.
+ * See: src/vite-hmr.ts, tests/vitest-consumer.test.ts (a real Vitest honouring what the plugin returns)
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -234,8 +232,7 @@ describe('the island project (R7)', () => {
       },
     });
     expect(project.config.exclude).toEqual(['**/node_modules/**', '**/*.island.{test,spec}.*', '{test,tests}/islands/**']);
-    // A new array: the injected project resolves its exclude to the SAME array
-    // object, and a push hid every island file from the island project.
+    // A new array, never a push: the injected project resolves its exclude to the same array object.
     expect(project.config.exclude).not.toBe(theirs);
     expect(theirs).toEqual(['**/node_modules/**']);
   });
@@ -261,8 +258,7 @@ describe('the island project (R7)', () => {
     // The project still gets the exclude list: it runs the same setup file.
     expect(provided).toHaveProperty('vaporChamber');
 
-    // Vitest merges the project's options into the inherited config with Vite's
-    // merge, so its include arrives EXTENDED with the root's; the hook replaces it.
+    // Vite's merge extends the island include with the root's; the hook replaces it.
     const config = { test: { name: 'vapor-chamber-islands', include: ['tests/**/*.test.ts', '**/*.island.{test,spec}.*'] } };
     vaporChamberTest().config(config);
     expect(config.test.include).toEqual(['**/*.island.{test,spec}.*', '{test,tests}/islands/**']);

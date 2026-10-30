@@ -1,14 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * The failure shape of docs/contract.md 5, from the outside.
- *
- * - `toJSON()` is the failure as an RFC 9457 problem with the members it needs:
- *   `detail`, `code`, `action`, the context as extensions, `type` implicit.
- * - `code` is read-only: the owner is the wiring's and the condition is the
- *   raiser's, so no holder can rewrite either.
- * - Production messages state the fact; the fix sentence is DEV's, and the
- *   catalogue (`ERROR_CODE_REGISTRY` `fix`) is where a production reader finds
- *   it (docs/contract.md rule 5). Each gated site is read here in production.
+ * The failure shape from the outside: toJSON as an RFC 9457 problem, a read-only code, and what production messages say.
+ * Why: the owner is the wiring's and the condition the raiser's, so no holder may rewrite them; production states the fact, while the fix is DEV's and the catalogue's.
+ * Shows: toJSON has detail, code, action, the context as extensions and an implicit type; a code outside the vocabulary warns in DEV; each gated message read in production.
+ * See: docs/contract.md section 5, log s35.117.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createCommandBus, conditionOf, ownerOf } from '../src/command-bus';
@@ -125,7 +120,7 @@ describe('production messages carry the fact, not the fix', () => {
     using _env = stubEnv('NODE_ENV', 'production');
     const { bus } = await production();
     const b = bus.createCommandBus({ naming: { pattern: /^[a-z]+$/, onViolation: 'throw' } });
-    // A BusError since s35.117: the code names the source, so no prefix.
+    // The code names the source, so no prefix.
     expect(() => b.register('Bad', () => 1)).toThrow(/^Action "Bad" does not match naming pattern \/\^\[a-z\]\+\$\/\.$/);
   });
 

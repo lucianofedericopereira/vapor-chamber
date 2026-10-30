@@ -1,7 +1,7 @@
 /**
- * Tests for the `idempotent` plugin - collapse duplicate commands (the
- * client-side half of exactly-once) and stamp an idempotency key that the HTTP
- * bridge forwards as an `Idempotency-Key` header (the wire half).
+ * The idempotent() plugin: collapsing duplicate commands and stamping meta.idempotencyKey.
+ * Why: a double click or repeated submit must run its handler once, while a failed run must stay retryable and different keys must stay independent.
+ * Shows: concurrent duplicates and repeats inside the TTL run the handler once, failures are not cached, the key defaults to the dispatch id, a custom key or null key is honoured, the actions filter scopes dedup, and maxSize evicts the oldest done entry.
  */
 import { describe, expect } from 'vitest';
 import { idempotent } from '../src/plugins-extra';
@@ -24,8 +24,8 @@ describe('idempotent plugin', () => {
       bus.dispatch('order', { id: 1 }),
       bus.dispatch('order', { id: 1 }),
     ]);
-    expect(runs).toBe(1);            // only one handler invocation
-    expect([a.value, b.value, c.value]).toEqual([1, 1, 1]); // all share the result
+    expect(runs).toBe(1);
+    expect([a.value, b.value, c.value]).toEqual([1, 1, 1]);
   });
 
   it('collapses sequential repeats within the TTL window', async ({ asyncBus: bus }) => {
@@ -33,7 +33,7 @@ describe('idempotent plugin', () => {
     bus.use(idempotent({ ttl: 10_000 }));
     bus.register('pay', async () => { runs++; return 'ok'; });
     await bus.dispatch('pay', { invoice: 7 });
-    await bus.dispatch('pay', { invoice: 7 }); // duplicate within TTL -> cached
+    await bus.dispatch('pay', { invoice: 7 });
     expect(runs).toBe(1);
   });
 
@@ -46,23 +46,6 @@ describe('idempotent plugin', () => {
       bus.dispatch('order', { id: 2 }),
     ]);
     expect(runs).toBe(2);
-  });
-
-  it('does NOT cache failures - a retry after error runs again', async () => {
-    // No bus retry: this is the dispatch after the failure, made by hand.
-    const bus = createAsyncCommandBus({ retry: false });
-    let n = 0;
-    bus.use(idempotent());
-    bus.register('flaky', async () => {
-      n++;
-      if (n === 1) throw new Error('boom');
-      return 'ok';
-    });
-    const r1 = await bus.dispatch('flaky', { id: 1 }); // fails
-    const r2 = await bus.dispatch('flaky', { id: 1 }); // same key, retried (not cached)
-    expect(r1.ok).toBe(false);
-    expect(r2.ok).toBe(true);
-    expect(n).toBe(2);
   });
 
   it("stamps cmd.meta.idempotencyKey (default: the dispatch's id)", async ({ asyncBus: bus }) => {
@@ -80,11 +63,11 @@ describe('idempotent plugin', () => {
     bus.register('act', async () => { runs++; return 1; });
     await Promise.all([
       bus.dispatch('act', { requestId: 'r1' }),
-      bus.dispatch('act', { requestId: 'r1' }), // same key -> collapsed
-      bus.dispatch('act', { requestId: null }), // null key -> never collapsed
+      bus.dispatch('act', { requestId: 'r1' }),
+      bus.dispatch('act', { requestId: null }),
       bus.dispatch('act', { requestId: null }),
     ]);
-    expect(runs).toBe(3); // r1 once + two un-keyed
+    expect(runs).toBe(3);
   });
 
   it('actions filter scopes dedup', async ({ asyncBus: bus }) => {
@@ -92,13 +75,9 @@ describe('idempotent plugin', () => {
     bus.use(idempotent({ actions: ['order*'] }));
     bus.register('ping', async () => { runs++; return 1; });
     await Promise.all([bus.dispatch('ping', {}), bus.dispatch('ping', {})]);
-    expect(runs).toBe(2); // 'ping' not in scope -> not deduped
+    expect(runs).toBe(2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// done-cache bounds + rejection path
-// ---------------------------------------------------------------------------
 
 describe('idempotent - done-cache eviction and rejection', () => {
   it('evicts the oldest done entry past maxSize, so the evicted command re-runs', async ({ asyncBus: bus }) => {
@@ -106,19 +85,18 @@ describe('idempotent - done-cache eviction and rejection', () => {
     let runs = 0;
     bus.register('op', async (cmd) => { runs++; return cmd.target.id; });
 
-    await bus.dispatch('op', { id: 'a' });   // cached
-    await bus.dispatch('op', { id: 'b' });   // caches b, evicts a (maxSize: 1)
-    await bus.dispatch('op', { id: 'a' });   // a was evicted - must run again
+    await bus.dispatch('op', { id: 'a' });
+    await bus.dispatch('op', { id: 'b' });
+    await bus.dispatch('op', { id: 'a' });
 
     expect(runs).toBe(3);
 
-    // And the still-cached key is served without a re-run:
-    await bus.dispatch('op', { id: 'a' });   // a is now the cached one
+    await bus.dispatch('op', { id: 'a' });
     expect(runs).toBe(3);
   });
 
   it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async () => {
-    // No bus retry: this is the dispatch after the failure, made by hand.
+    // retry is off so the second dispatch is the only re-run.
     const bus = createAsyncCommandBus({ retry: false });
     bus.use(idempotent());
     let attempts = 0;
@@ -133,6 +111,6 @@ describe('idempotent - done-cache eviction and rejection', () => {
 
     const second = await bus.dispatch('flaky', { id: 1 });
     expect(second.ok).toBe(true);
-    expect(attempts).toBe(2); // failure was not served from the done cache
+    expect(attempts).toBe(2);
   });
 });

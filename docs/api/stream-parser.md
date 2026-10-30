@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/stream-parser';
 
 ### createStreamParser
 
-**Function** - [src/stream-parser.ts:545](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L545)
+**Function** - [src/stream-parser.ts:542](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts#L542)
 
 ```ts
 createStreamParser(callbacks?: StreamParserCallbacks, options?: StreamParserOptions) => StreamParser

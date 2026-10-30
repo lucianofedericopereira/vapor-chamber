@@ -1,4 +1,9 @@
-/** The router's requests on the app's one client (plan 1.32 step 3d). The long note is at the end. */
+/**
+ * The router's requests (table, loaders, Blade pages) go through the app's one http client.
+ * Why: a client per feature would mean a second cache and dedupe map and no app interceptors or headers, so a write through the app's client could not invalidate a loader's cached read.
+ * Shows: loader reads and Blade fetches carry the app client's headers (Blade also X-Vapor-Router); a write on the app client reaches the next cached read; an explicit `http` wins; with no client each builds its own; routerHttp({ http }) shares the app client's cache and `create()` defaults; a 503 on the table is retried to the third attempt.
+ * See: log 36.50
+ */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -102,6 +107,7 @@ describe("fetchLoaders() reads through the router's client", () => {
   });
 
   it('control: with no client anywhere it builds its own', async () => {
+    // Rows plus an absolute loader URL: the `{ url }` table source needs a client.
     const routes = TABLE.routes.map((r) => (r.name === 'cart' ? { ...r, load: `${base}/cart` } : r));
     const router = await boot({ routes, loaders: fetchLoaders({ headers: { 'X-Loader': '1' } }) });
     await router.push('/cart');
@@ -166,22 +172,3 @@ describe('the routes table: the default re-sends, no count of its own', () => {
     router.dispose();
   });
 });
-
-/*
- * Plan 1.32 step 3d, plan-router.md gap 2: four clients for one app. The router
- * used its `http` option for the `{ url }` table only, so `fetchLoaders()` and
- * `bladeFetcher()` each built a client of their own beside it: a second cache, a
- * second dedupe map, interceptors the app never installed. A write through the
- * app's client then could not reach a loader's cached read (the record's hole F,
- * which invalidation in step 3g needs). Now the router hands its client to its
- * loaders (`LoaderContext.http`) and to `fetchBlade(href, http)`. An explicit
- * `http` still wins, and with no client anywhere each builds its own, as before.
- * A default `bladeFetcher` marks the router's client as router traffic
- * (`X-Vapor-Router`), as its own `routerHttp()` did. `routerHttp({ http })` is the
- * app's client with that marker: one cache, one dedupe map, one set of
- * interceptors. The `{ url }` table read lost its own `retry: 2`: the default is
- * the same three attempts.
- *
- * The "no client anywhere" control reads a table given as rows (the `{ url }`
- * source needs a client) and an absolute loader URL.
- */

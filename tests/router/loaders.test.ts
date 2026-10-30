@@ -1,3 +1,11 @@
+/**
+ * Load-template interpolation, loader dispatch and defaultAffects in src/router/loaders.ts.
+ * Why: a wrong loader URL, handler or refetch decision would load the wrong data for a route or refetch on unrelated query keys.
+ * Shows: placeholders fill from path params then typed query params, encoded, unknown keys blank, array params comma-joined
+ * (default array when absent); runLoaders dispatches by prefix with the ref stripped or to the url handler, a missing handler
+ * is router:missing:loader, a handler failure is router:failed:loader with cause, an aborted signal is router:aborted:navigation;
+ * defaultAffects reacts to declared and pagination keys or mentioned placeholders; loadChain lists ancestors with load templates.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { defaultAffects, interpolateLoad, runLoaders } from '@router/loaders';
 import { createRouteTable } from '@router/table';
@@ -53,7 +61,7 @@ describe('runLoaders - the SPI', () => {
       locationWith({}),
       new AbortController().signal,
     );
-    // 5th arg is the LoaderContext (the stale-while-revalidate channel).
+    // The 5th argument is the LoaderContext (the stale-while-revalidate channel).
     expect(handler).toHaveBeenCalledWith(
       'products',
       expect.anything(),
@@ -113,8 +121,6 @@ describe('loadChain precompute', () => {
 
 describe('interpolateLoad - array query values', () => {
   it('joins an array param with commas, each part encoded', () => {
-    // type 'array' is what makes a repeated key decode to a list; the template
-    // then gets one comma-joined value rather than the last occurrence.
     const url = interpolateLoad(
       '/api/items?tags={tag}',
       { params: {}, query: { tag: ['a b', 'c&d'] } } as never,

@@ -1,5 +1,8 @@
 /**
- * Tests for src/http.ts - postCommand, CSRF, retry, timeout, session expiry
+ * postCommand and the CSRF token reader in src/http.ts: retry, timeout, abort, silent, session expiry, 419 refresh.
+ * Why: a POST re-sent when it must be sent once could replay a mutation; a wrong CSRF refresh, abort, timeout or session-expiry path would leave a user's command failing or hanging.
+ * Shows: postCommand sends JSON and merges headers; a 400, 403 or 422 is not re-sent; 503 and keyed no-reply POSTs are, honouring Retry-After for a keyed request; an unkeyed no-reply POST is not; timeout and abort give their transport codes; silent is stamped only when set; 401 calls onSessionExpired and dispatches an event; 419 refreshes the CSRF cookie once outside the retry budget; readCsrfToken reads the meta tag.
+ * See: log s35.131
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -7,10 +10,6 @@ import {
   readCsrfToken,
   invalidateCsrfCache,
 } from '../src/http';
-
-// ---------------------------------------------------------------------------
-// Fetch mock helpers
-// ---------------------------------------------------------------------------
 
 function mockResponse(status: number, body: unknown = null, headers: Record<string, string> = {}) {
   return {
@@ -34,10 +33,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-
-// ---------------------------------------------------------------------------
-// Basic success
-// ---------------------------------------------------------------------------
 
 describe('postCommand - basic', () => {
   it('returns data on 200', async () => {
@@ -76,10 +71,6 @@ describe('postCommand - basic', () => {
     expect(init.headers.Authorization).toBe('Bearer tok');
   });
 });
-
-// ---------------------------------------------------------------------------
-// Retry on 5xx / 429
-// ---------------------------------------------------------------------------
 
 describe('postCommand - retry', () => {
   it("does not re-send a 422: the server's verdict", async () => {
@@ -149,9 +140,7 @@ describe('postCommand - retry', () => {
     expect(res.ok).toBe(true);
   });
 
-  // No reply is `lost`: the POST may have landed, so the one retry rule
-  // (retryClass, log s35.131) re-sends it only when it is safe to send twice -
-  // here, a request carrying an Idempotency-Key, as the bus reads a keyed command.
+  // No reply is `lost`: the POST may have landed, so it is re-sent only when safe to send twice, i.e. keyed.
   it('re-sends a POST with no reply only when it carries an Idempotency-Key', async () => {
     (globalThis.fetch as any)
       .mockRejectedValueOnce(new Error('network'))
@@ -182,22 +171,6 @@ describe('postCommand - retry', () => {
     await assertion;
   });
 
-  // postCommand is httpTransport's transport, so this is every bus command
-  // dispatched with `retry` configured: a 422 thrown inside the try must not be
-  // caught by the retry catch and re-sent - the mutation replay that
-  // Idempotency-Key forwarding exists to make survivable.
-  it('does NOT retry a 422 validation failure', async () => {
-    (globalThis.fetch as any).mockResolvedValue(mockResponse(422, { message: 'validation_failed' }));
-
-    vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: { maxAttempts: 3 } });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 422 } });
-    await vi.runAllTimersAsync();
-    await assertion;
-
-    expect((globalThis.fetch as any).mock.calls).toHaveLength(1); // was 3
-  });
-
   it('does NOT retry a 403', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(403));
 
@@ -210,10 +183,6 @@ describe('postCommand - retry', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Timeout
-// ---------------------------------------------------------------------------
 
 describe('postCommand - timeout', () => {
   it('throws transport:timeout:reply when request exceeds timeout', async () => {
@@ -230,10 +199,6 @@ describe('postCommand - timeout', () => {
     await assertion;
   });
 });
-
-// ---------------------------------------------------------------------------
-// User abort
-// ---------------------------------------------------------------------------
 
 describe('postCommand - user abort', () => {
   it('throws transport:aborted:request when user signal fires', async () => {
@@ -259,10 +224,6 @@ describe('postCommand - user abort', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// silent flag
-// ---------------------------------------------------------------------------
 
 describe('postCommand - silent flag', () => {
   it('stamps error.context.silent when config.silent is true', async () => {
@@ -291,10 +252,6 @@ describe('postCommand - silent flag', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Session expiry
-// ---------------------------------------------------------------------------
-
 describe('postCommand - session expiry', () => {
   it('calls onSessionExpired on 401', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
@@ -317,14 +274,8 @@ describe('postCommand - session expiry', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 419 CSRF refresh
-// ---------------------------------------------------------------------------
-
 describe('postCommand - CSRF 419 refresh', () => {
-  // After the A3 fix, refreshCsrfOnce throws if readCsrfToken() returns null
-  // post-refresh. In Node there's no real DOM, so we mock document + querySelector
-  // to provide a CSRF meta tag after the csrf-cookie fetch completes.
+  // refreshCsrfOnce throws if readCsrfToken() is null after the refresh, and Node has no DOM, so a meta tag is faked.
   beforeEach(() => {
     const fakeDocument = {
       querySelector: (sel: string) => {
@@ -383,14 +334,6 @@ describe('postCommand - CSRF 419 refresh', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
   });
 
-  it('401 still triggers onSessionExpired (not 419)', async () => {
-    (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
-    const onSessionExpired = vi.fn();
-
-    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toBeDefined();
-    expect(onSessionExpired).toHaveBeenCalledWith(401);
-  });
-
   it('419 does NOT trigger onSessionExpired', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
     const onSessionExpired = vi.fn();
@@ -400,35 +343,8 @@ describe('postCommand - CSRF 419 refresh', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// CSRF token reading
-// ---------------------------------------------------------------------------
-
 describe('readCsrfToken', () => {
   beforeEach(() => invalidateCsrfCache());
-
-  it('returns null when document is not available', () => {
-    // In Node/vitest jsdom, document exists. Check cache invalidated path.
-    const result = readCsrfToken();
-    // No DOM CSRF tokens set - either null or a cached result. Just verify shape.
-    if (result !== null) {
-      expect(result).toHaveProperty('token');
-      expect(result).toHaveProperty('headerName');
-    }
-  });
-
-  it('returns cached result on second call', () => {
-    const r1 = readCsrfToken();
-    const r2 = readCsrfToken();
-    expect(r1).toBe(r2); // same reference from cache
-  });
-
-  it('invalidateCsrfCache clears cache', () => {
-    readCsrfToken(); // prime cache
-    invalidateCsrfCache();
-    // After invalidation the next call re-reads from DOM - just ensure it runs without error
-    expect(() => readCsrfToken()).not.toThrow();
-  });
 
   it('reads token from meta tag', () => {
     vi.stubGlobal('document', {

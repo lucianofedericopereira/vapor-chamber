@@ -1,4 +1,9 @@
-// /vue's build-time tracking pair is not replaced by the runtime lookup's; rationale at the end.
+/**
+ * The tracking pair /vue wires at build time is not replaced by the runtime lookup's pair.
+ * Why: in a bundle that inlines Vue and runs in Node, the lookup resolves Node's own @vue/reactivity, a second instance; if it replaced the build-time pair, untracked() would pause the wrong instance and effects would re-run on a handler's read.
+ * Shows: on src, a pair wired before the lookup settles is still the one untracked() calls; on a built bundle, untracked() keeps suspending tracking after the lookup settles (wrapped 1, raw control 2).
+ * See: log s35.229
+ */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,8 +20,7 @@ describe('the build-time pair wins over the runtime lookup', () => {
   it('src: a pair wired as /vue wires it is still the one untracked() calls once the lookup settles', async () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
-    // What src/vue.ts does on import, with a pair that records its calls, wired
-    // before the runtime lookup (started by chamber's import) has settled.
+    // Wire a recording pair as src/vue.ts does on import, before chamber's runtime lookup settles.
     const calls: string[] = [];
     chamber._wireUntrack(() => { calls.push('pause'); }, () => { calls.push('reset'); }, true);
     await chamber.waitForVueDetection();
@@ -62,23 +66,8 @@ describe('untracked() in a bundle that inlines Vue, run in Node', () => {
     const app = await import(pathToFileURL(file).href);
     // raw is the control: without untracked() the handler's read re-runs the effect.
     expect(app.run()).toEqual({ wrapped: 1, raw: 2 });
-    // The runtime lookup's import('@vue/reactivity') resolves Node's copy, not
-    // the one inlined in the bundle. Let it settle, then ask again.
+    // The lookup resolves Node's @vue/reactivity, not the inlined copy; wait for it to settle.
     await new Promise((r) => setTimeout(r, 50));
     expect(app.run()).toEqual({ wrapped: 1, raw: 2 });
   });
 });
-
-/*
- * Why this file exists. vapor-chamber/vue wires untracked() at build time: it
- * imports pauseTracking and resetTracking from @vue/reactivity, so the
- * consumer's bundler resolves the copy the app's Vue uses. The root's runtime
- * lookup also imports @vue/reactivity, by a specifier assembled at runtime so
- * no bundler folds it. In a browser bundle that import fails. In a bundle run
- * in Node (a server build that inlines Vue, a test harness) it resolves Node's
- * own copy, a second reactivity instance. It then replaced the build-time pair,
- * and untracked() paused the wrong instance: the effect re-ran on the
- * handler's read (wrapped 2), measured on Vue 3.6.0-rc.10 and 3.5.43 (log
- * s35.229). vue.ts promises "no probe to lose a race with"; the build-time
- * pair now wins.
- */

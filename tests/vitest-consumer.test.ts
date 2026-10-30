@@ -1,25 +1,8 @@
 /**
- * `vapor-chamber/vitest` on a packed and installed consumer.
- *
- * Every probe in the study imported `src/` by relative path, which cannot see
- * the failures that matter here: two module instances, a setup file resolved
- * the wrong way, a declaration file that breaks a consumer without vitest.
- * These run a real Vitest, in a subprocess, on a project outside this repo that
- * has the built package installed the way npm leaves it.
- *
- * Acceptance assertions from vitest5-plugin-study.md Rev 3 section 6.
- * A7 (our own suite on Node 22 and 24) and A9 (suite wall time, interleaved)
- * are measurements of this repository, recorded with the batch, not tests.
- *
- * THE PACKAGE IS COPIED, NOT LINKED, into each project's node_modules. Vite
- * follows a symlink to its real path, and a package whose real path is outside
- * node_modules is treated as source rather than a dependency - which is exactly
- * the difference module identity depends on (tests/vite-wire-plugin.test.ts
- * makes the same choice for the same reason). Vitest, happy-dom and TypeScript
- * are linked: their real paths are inside this repository's node_modules.
- *
- * The projects live in the OS temp dir, never under this repository, so
- * nothing resolves through the workspace self-link to the working tree.
+ * `vapor-chamber/vitest`, `vapor-chamber/vitest/pure`, `vaporChamberTest()` and `vc-vitest-mcp` on packed, installed consumer projects, each running a real Vitest in a subprocess.
+ * Why: importing src/ by relative path cannot see two module instances, a setup file resolved the wrong way, or a declaration file that breaks a consumer without vitest.
+ * Shows: adoption by setup file and by plugin (each with a control), failure output that lists dispatches, the plugin's brand line, the MCP server over stdio, the doc page's blocks, strict typechecks, emitted-file packaging, one module instance across five configurations and a duplicate install, user setup-file merge, and the island project.
+ * See: docs/integrations/vitest.md, tests/vite-wire-plugin.test.ts
  */
 import { execFile, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -33,13 +16,9 @@ const REPO = process.cwd();
 const dist = (f: string) => resolve(REPO, 'dist', f);
 requireDist(existsSync(dist('vitest.js')) && existsSync(dist('vitest-pure.js')) && existsSync(dist('index.d.ts')));
 
-// ---------------------------------------------------------------------------
-// Consumer projects
-// ---------------------------------------------------------------------------
-
 const roots: string[] = [];
 
-/** The built package as npm installs it: package.json and dist/, source maps left behind. */
+// The built package as npm installs it. It is copied, not linked: Vite follows a symlink to its real path, and a package whose real path is outside node_modules is treated as source, which module identity depends on.
 function installCopy(at: string): void {
   mkdirSync(at, { recursive: true });
   cpSync(join(REPO, 'package.json'), join(at, 'package.json'));
@@ -47,11 +26,7 @@ function installCopy(at: string): void {
   cpSync(join(REPO, 'bin'), join(at, 'bin'), { recursive: true });
 }
 
-/**
- * `vc-vitest-mcp` started as an MCP client starts it, in `root`: each message
- * written to stdin as a line, every stdout line kept, then stdin closed once
- * every request (a message with an id) has its reply.
- */
+// `vc-vitest-mcp` started as an MCP client starts it: each message written to stdin as a line, every stdout line kept, stdin closed once every request has its reply.
 function mcpOverStdio(root: string, messages: object[]): Promise<{ replies: Map<unknown, any>; stdout: string[]; stderr: string }> {
   return new Promise((done, fail) => {
     const child = spawn(process.execPath, [join(root, 'node_modules/vapor-chamber/bin/vc-vitest-mcp.mjs')], { cwd: root, env: childEnv });
@@ -88,11 +63,8 @@ function mcpOverStdio(root: string, messages: object[]): Promise<{ replies: Map<
   });
 }
 
-/**
- * A project in the OS temp dir: `files` written, the package installed as a
- * copy at node_modules/vapor-chamber (and at every path in `copies`), and each
- * of `links` linked from this repository's node_modules.
- */
+// A project in the OS temp dir, never under this repository, so nothing resolves through the workspace self-link.
+// Vitest, happy-dom and TypeScript are linked (their real paths are inside node_modules); the package is copied at node_modules/vapor-chamber and at every path in `copies`.
 function consumer(files: Record<string, string>, { links = ['vitest'], copies = [] as string[] } = {}): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'vc-consumer-')));
   roots.push(root);
@@ -110,7 +82,7 @@ function consumer(files: Record<string, string>, { links = ['vitest'], copies = 
   return root;
 }
 
-/** The child must not believe it is a worker of this run. */
+// The child must not believe it is a worker of this run.
 const childEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(VITEST|TEST$|NODE_ENV$)/.test(key)));
 
 function exec(root: string, args: string[]): Promise<{ status: number; output: string; stdout: string; stderr: string }> {
@@ -121,7 +93,7 @@ function exec(root: string, args: string[]): Promise<{ status: number; output: s
   });
 }
 
-/** `vitest run` with one CLI reporter writing to the terminal streams: what a user sees, colors stripped. */
+// `vitest run` with one CLI reporter writing to the terminal streams: what a user sees, colors stripped.
 async function runWithReporter(root: string, reporter: string) {
   const { stdout, stderr } = await exec(root, [join(REPO, 'node_modules/vitest/vitest.mjs'), 'run', `--reporter=${reporter}`]);
   const plain = (s: string) => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
@@ -130,7 +102,7 @@ async function runWithReporter(root: string, reporter: string) {
 
 type Outcome = { file: string; title: string; status: string; failure: string };
 
-/** `vitest run` in the project, every test's outcome read from the JSON reporter. */
+// `vitest run` in the project, every test's outcome read from the JSON reporter.
 async function runVitest(root: string): Promise<Outcome[]> {
   const out = join(root, 'results.json');
   const { output } = await exec(root, [join(REPO, 'node_modules/vitest/vitest.mjs'), 'run', '--reporter=json', `--outputFile=${out}`]);
@@ -145,7 +117,7 @@ async function runVitest(root: string): Promise<Outcome[]> {
   );
 }
 
-/** `tsc -p` on a tsconfig written for `file`: strict, and NEVER skipLibCheck. */
+// `tsc -p` on a tsconfig written for `file`: strict, never skipLibCheck.
 async function typecheck(root: string, file: string, types: string[]): Promise<{ status: number; output: string }> {
   cpSync(join(REPO, 'tests/types/vitest', file), join(root, file));
   writeFileSync(
@@ -158,7 +130,7 @@ async function typecheck(root: string, file: string, types: string[]): Promise<{
   return exec(root, [join(REPO, 'node_modules/typescript/bin/tsc'), '-p', root]);
 }
 
-/** `vitest bench --run` in the project: how many times each file ran, and in which projects. */
+// `vitest bench --run` in the project: how many times each file ran, and in which projects.
 async function runBench(root: string): Promise<{ file: string; project: string }[]> {
   const out = join(root, 'bench.json');
   const { output } = await exec(root, [join(REPO, 'node_modules/vitest/vitest.mjs'), 'bench', '--run', '--reporter=json', `--outputFile=${out}`]);
@@ -170,11 +142,9 @@ async function runBench(root: string): Promise<{ file: string; project: string }
 const passed = (outcomes: Outcome[], file: string) => outcomes.filter((o) => o.file === file && o.status === 'passed');
 const failedIn = (outcomes: Outcome[], file: string) => outcomes.filter((o) => o.file === file && o.status !== 'passed');
 
-// ---------------------------------------------------------------------------
-// Test files the consumers run. Plain JS, globals off (Vitest's default).
-// ---------------------------------------------------------------------------
+// The test files the consumers run are plain JS with globals off (Vitest's default).
 
-/** The adoption test, identical in every A1 arm, so only the config differs. */
+// The adoption test, identical in every adoption arm, so only the config differs.
 const ADOPTION = `import { expect, it } from 'vitest';
 import { getCommandBus } from 'vapor-chamber';
 it('a matcher on getCommandBus() sees the dispatch', () => {
@@ -262,7 +232,7 @@ it('control: the copy the setup file loaded is tapped', () => {
 });
 `;
 
-/** The fixtures, from `it` imported off the entry, beside the test's own import of the library. */
+// The fixtures, from `it` imported off the entry, beside the test's own import of the library.
 const FIXTURE = `import { expect, it } from 'vapor-chamber/vitest';
 import * as vc from 'vapor-chamber';
 it('bus and asyncBus come from the module instance this file imports', ({ bus, asyncBus }) => {
@@ -284,7 +254,7 @@ shopTest('a snippet built on bus with .extend', ({ shop }) => {
 });
 `;
 
-/** The control for FIXTURE's identity check: a second installed copy's inspectBus does not see the tap. */
+// The control for FIXTURE's identity check: a second installed copy's inspectBus does not see the tap.
 const FIXTURE_DUPLICATE = `import { expect, it } from 'vapor-chamber/vitest';
 import { inspectBus } from 'vapor-chamber';
 import { inspectBus as nestedInspectBus } from 'some-lib';
@@ -294,7 +264,7 @@ it('a second installed copy reads no hook on the fixture bus', ({ bus }) => {
 });
 `;
 
-/** Fails on purpose, on an assertion that is not ours, after a dispatch. */
+// Fails on purpose, on an assertion that is not ours, after a dispatch.
 const EXPLAIN = `import { expect, it } from 'vitest';
 import { getCommandBus } from 'vapor-chamber';
 it('fails on an unrelated toBe', () => {
@@ -303,15 +273,14 @@ it('fails on an unrelated toBe', () => {
 });
 `;
 
-/** One cheap benchmark: the file is the unit under test, not the number. */
+// One cheap benchmark: the file is the unit under test, not the number.
 const BENCH = `import { it } from 'vitest';
 it('noop', async ({ bench }) => {
   await bench('noop', () => {}).run({ time: 1, iterations: 3 });
 });
 `;
 
-// docs/integrations/vitest.md: every fenced block carries a tag after its
-// language, and each tag says how this file checks it.
+// docs/integrations/vitest.md: every fenced block carries a tag after its language, and each tag says how this file checks it.
 const DOC = readFileSync(join(REPO, 'docs/integrations/vitest.md'), 'utf8');
 const docBlocks = [...DOC.matchAll(/^```(\S*)(?: (\S+))?\n([\s\S]*?)^```$/gm)].map((m) => ({ lang: m[1], tag: m[2] ?? '', code: m[3] }));
 const docBlock = (tag: string) => docBlocks.filter((b) => b.tag === tag);
@@ -320,10 +289,6 @@ const docTests = Object.fromEntries(docBlock('test').map((b, i) => [`tests/doc-s
 const config = (body: string, imports = '') => `import { defineConfig } from 'vitest/config';\n${imports}export default defineConfig(${body});\n`;
 
 const SETUP_LINE = ["setupFiles: ['vapor-chamber/vitest']"];
-
-// ---------------------------------------------------------------------------
-// Runs, all started together
-// ---------------------------------------------------------------------------
 
 let setupPath: Promise<Outcome[]>;
 let noIntegration: Promise<Outcome[]>;
@@ -342,8 +307,7 @@ let withoutVitest: Promise<{ status: number; output: string }>;
 let hazardControl: Promise<{ status: number; output: string }>;
 
 beforeAll(() => {
-  // Every promise gets a handler now, so a rejection surfaces in its own test
-  // rather than as an unhandled rejection while the others still run.
+  // Every promise gets a handler now, so a rejection surfaces in its own test, not as an unhandled rejection.
   const settle = <T>(p: Promise<T>) => {
     p.catch(() => {});
     return p;
@@ -355,8 +319,7 @@ beforeAll(() => {
     'tests/explain.test.js': EXPLAIN,
   })));
 
-  // A1's control for BOTH paths: removing the setupFiles line and removing the
-  // plugin leave the same config. A12 rides along: it needs no integration.
+  // The control for both adoption paths: removing the setupFiles line and removing the plugin leave the same config. The pure file rides along: it needs no integration.
   noIntegration = settle(runVitest(consumer({
     'vitest.config.js': config('{ test: {} }'),
     'tests/adoption.test.js': ADOPTION,
@@ -371,8 +334,7 @@ beforeAll(() => {
       `{
   resolve: { alias: { '@aliased': new URL('./aliased.js', import.meta.url).pathname } },
   plugins: [vaporChamberTest({ sharedBus: { exclude: ['tests/excluded.test.js'] } })],
-  // An explicit include, as most suites have: Vitest 5 extends it into the
-  // island project unless the plugin replaces it there.
+  // An explicit include, as most suites have: Vitest extends it into the island project unless the plugin replaces it there.
   test: { setupFiles: './user-setup.js', include: ['tests/**/*.test.js'] },
 }`,
       "import { vaporChamberTest } from 'vapor-chamber/vite';\n",
@@ -399,10 +361,7 @@ beforeAll(() => {
     'tests/fixture.test.js': FIXTURE,
   }, { links: ['vitest', 'happy-dom'] })));
 
-  // The island project inherits the declaring config, benchmark.include
-  // included: without the plugin replacing it there, every bench file ran once
-  // per project (measured on this repository: tests/perf.bench.ts twice, the CI
-  // bench job 89s -> 179s).
+  // The island project inherits the declaring config, benchmark.include included; unless the plugin replaces it there, every bench file would run once per project.
   benchRuns = settle(runBench(consumer({
     'vitest.config.js': config(`{ plugins: [vaporChamberTest()] }`, "import { vaporChamberTest } from 'vapor-chamber/vite';\n"),
     'tests/speed.bench.js': BENCH,
@@ -437,9 +396,7 @@ beforeAll(() => {
     ...docTests,
     'tests/doc-sample-fails.test.ts': docBlock('fails')[0]?.code ?? '',
   }, { links: ['vitest', 'happy-dom'] });
-  // One after the other: started together with every run above, the extra
-  // Vitest process pushed this suite's router-stamp-ab shared-bus hook past its
-  // 10 s timeout (1 of 3 full runs).
+  // One after the other: started together with every run above, the extra Vitest process would push other suites' hooks past their timeout.
   const docs = settle((async () => ({ setup: await runVitest(docProject('config:setup')), plugin: await runVitest(docProject('config:plugin')) }))());
   docSetup = docs.then((d) => d.setup);
   docPlugin = docs.then((d) => d.plugin);
@@ -467,7 +424,7 @@ beforeAll(() => {
   pureOnly = settle(typecheck(consumer({}), 'pure-only.ts', []));
   withoutVitest = settle(typecheck(consumer({}, { links: [] }), 'no-vitest.ts', []));
 
-  // The hazard A.14 measured, injected: a root declaration file that imports vitest.
+  // The TS2882 hazard, injected: a root declaration file that imports vitest.
   const hazard = consumer({}, { links: [] });
   const rootTypes = join(hazard, 'node_modules/vapor-chamber/dist/index.d.ts');
   writeFileSync(rootTypes, `import 'vitest';\n${readFileSync(rootTypes, 'utf8')}`);
@@ -477,10 +434,6 @@ beforeAll(() => {
 afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
-
-// ---------------------------------------------------------------------------
-// Assertions
-// ---------------------------------------------------------------------------
 
 describe('A1 adoption', () => {
   it('setupFiles: [vapor-chamber/vitest], globals false: a matcher on getCommandBus() passes', async () => {
@@ -541,7 +494,7 @@ describe('the vc-vitest-plugin line, in a real run', () => {
   it('control: only a machine reporter (json) prints no line, and its report is intact', async () => {
     const { json, root } = await brand;
     expect(`${json.stdout}${json.stderr}`).not.toContain('vc-vitest-plugin');
-    // Vitest 5 writes the json report to .vitest/json/output.json when no outputFile is set.
+    // With no outputFile set, Vitest writes the json report to .vitest/json/output.json.
     expect(JSON.parse(readFileSync(join(root, '.vitest/json/output.json'), 'utf8')).numPassedTests).toBe(1);
   });
 
@@ -667,7 +620,7 @@ describe('A4 types, without skipLibCheck', () => {
   });
 });
 
-/** Static `import ... from "x"` and dynamic `import("x")` specifiers of an emitted file. */
+// Static `import ... from "x"` and dynamic `import("x")` specifiers of an emitted file.
 function emittedImports(file: string) {
   const code = readFileSync(dist(file), 'utf8');
   return {
@@ -676,11 +629,7 @@ function emittedImports(file: string) {
   };
 }
 
-/**
- * Module names a declaration file declares or augments with `declare module
- * 'x'`. From the AST: preProcessFile's `ambientExternalModules` lists only a
- * script file's declarations, never an augmentation inside a module.
- */
+// Module names a declaration file declares or augments with `declare module 'x'`, from the AST: preProcessFile's `ambientExternalModules` misses an augmentation inside a module.
 function augmentedModules(text: string): string[] {
   const source = ts.createSourceFile('x.d.ts', text, ts.ScriptTarget.ES2022, true);
   return source.statements.filter(ts.isModuleDeclaration).map((m) => m.name.text);
@@ -713,7 +662,7 @@ describe('A5 packaging', () => {
           const base = join(dirname(file), fileName).replace(/\.js$/, '');
           queue.push(existsSync(dist(`${base}.d.ts`)) ? `${base}.d.ts` : join(base, 'index.d.ts'));
         }
-        // A bare 'vitest' anywhere in the root's types is the TS2882 hazard (A.14).
+        // A bare 'vitest' anywhere in the root's types is the TS2882 hazard.
         expect(fileName, `${file} imports ${fileName}`).not.toMatch(/^vitest/);
       }
       expect(augmentedModules(text), file).not.toContain('vitest');

@@ -1,4 +1,11 @@
-// The runtime lookup starts when chamber.ts loads, so composables need not start it; rationale at the end.
+/**
+ * The runtime Vue lookup starts when chamber.ts loads, so composables need not start it.
+ * Why: tryAutoCleanup and tryKeepAliveHooks rely on the load-time probeVue() call; if it did not run
+ * at load, a composable created before any other wiring would find no Vue and arm no cleanup.
+ * Shows: after the module loads, with no composable and no wait, the registry holds the app's Vue `ref`,
+ * and a composable created afterwards arms its cleanup in a scope.
+ * See: log s35.234
+ */
 import { afterEach, describe, expect, vi } from 'vitest';
 import { it } from '../src/vitest';
 
@@ -28,12 +35,3 @@ describe('the runtime lookup', () => {
     expect(ran).toBe(true);
   });
 });
-
-/*
- * Why this file exists. tryAutoCleanup and tryKeepAliveHooks used to call
- * probeVue() on every composable created. Those calls always returned at
- * once: chamber.ts calls probeVue() when it loads, and that call sets the
- * flag the later ones return on. They were removed (log s35.234), so this
- * pins the load-time call they relied on. Seeded: with the load-time call
- * removed, the first case fails.
- */

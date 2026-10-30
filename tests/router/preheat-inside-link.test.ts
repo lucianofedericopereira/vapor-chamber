@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// The pointer moving inside a link keeps that link's warm-up delay. See the note at the end of this file.
+/**
+ * The pointer moving inside a link (onto its icon and back) keeps that link's warm-up delay.
+ * Why: a hover warms a link's page after a delay; moving onto an icon inside the link fires mouseout then mouseover, and restarting the timer would make a user resting on a link with an icon wait longer than the delay.
+ * Shows: a move within the link warms it once at 100 ms; leaving the link, from the link or from its icon, warms nothing; moving to another link warms that one at 160 ms.
+ * See: log 36.21
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration } from '@router/dom';
 
@@ -96,19 +101,3 @@ describe('the pointer moving inside a link keeps its warm-up delay', () => {
     ).toEqual({ at100: [], at160: ['/b'], at500: ['/b'] });
   });
 });
-
-// ---------------------------------------------------------------------------
-// Why this file exists
-// ---------------------------------------------------------------------------
-//
-// Plan-preheat M11, log 36.21. A hover warms a link's page after a 100 ms
-// delay: `mouseover` arms a timer, `mouseout` clears it. A pointer moving from
-// a link onto an icon inside it fires `mouseout` on the link, then `mouseover`
-// on the icon (UI Events), so the timer was cleared and armed again and the
-// delay restarted. A user resting on a link with an icon waited longer than
-// the delay for no reason. The pointer timer now remembers the link that armed
-// it: a `mouseout` or `mouseover` whose `relatedTarget` is inside that link is
-// a move inside it and leaves the timer alone. The focus timer is unchanged.
-// Red before: the two "inside" tests (`at100: []`, warmed at 160 ms). The three
-// controls are green before and after: a move out of the link, from the link
-// or from its icon, still cancels, and a move to another link arms that one.

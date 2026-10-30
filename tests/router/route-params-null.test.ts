@@ -1,4 +1,8 @@
-/** A route row whose `params` is `null` (a nullable column, a JSON table) compiles as a row with none. Rationale at the end. */
+/**
+ * A route row whose `params` is `null` (a nullable column, a JSON table) compiles as a row with none.
+ * Why: a route table from a database, a JSON file or a Blade-inlined table carries `null` for an absent field; the whole table would fail to compile with a TypeError.
+ * Shows: the row compiles and its param matches as a string, createRouter() accepts the table, and typed params still type the match.
+ */
 import { describe, expect, it } from 'vitest';
 import { createRouteTable } from '@router/table';
 import type { RouteRecord } from '@router/types';
@@ -23,10 +27,3 @@ describe('a route row with params: null', () => {
     expect(createRouteTable(rows({ id: 'int' })).resolve('/orders/7')?.params).toEqual({ id: 7 });
   });
 });
-
-/*
- * A route table from a database, a JSON file or a Blade-inlined table carries
- * `null` where a field is absent. The row already read `params ?? {}` for its
- * param types, but compiled its path with the raw value, so `null` threw a
- * TypeError inside the path compiler. One value now serves both.
- */

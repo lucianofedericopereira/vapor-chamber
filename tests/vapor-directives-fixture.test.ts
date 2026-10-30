@@ -1,52 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - custom directives on a real Vapor app, vue@3.6.0-rc.3.
- *
- * WHY THIS FILE EXISTS. Four places in this repo asserted that custom
- * directives are a VDOM-only feature and will never work in Vapor:
- * ROADMAP's "what is not on the roadmap" list ("the Vue team has consistently
- * signaled directives remain a VDOM-only feature"), whitepaper §7.7, the
- * README composables note, and a runtime `console.warn` in
- * `src/directives.ts` fired at plugin install whenever Vapor is detected.
- *
- * The claim is false, and was false when it was written. `withVaporDirectives`
- * is a public export of the with-vapor build and ships in EVERY Vue version
- * this project has tracked - verified by unpacking the published
- * `@vue/runtime-vapor` dist for 3.6.0-alpha.3, beta.8, beta.10, beta.15,
- * beta.17, rc.1 and rc.2: the helper is present in all of them. rc.3 did not
- * add the feature; it hardened it (#15258 codegen parens, #15167 async
- * component roots, #15158 fragment roots).
- *
- * So this fixture measures the thing the docs asserted about, the same way
- * `tests/router/vapor-fixture.test.ts` measures provide/inject rather than
- * trusting a roadmap checkbox. The rule that file states cuts both ways: an
- * unchecked box never meant missing - and a confident sentence in our own
- * docs is not evidence either.
- *
- * WHAT IS ACTUALLY DIFFERENT IN VAPOR (the reason a port is not a rename):
- * a Vapor directive is a PLAIN FUNCTION, not the VDOM object-hook record.
- *
- *   VDOM   { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
- *   Vapor  (el, value, argument, modifiers) => cleanup | void
- *
- * It is invoked ONCE per root element inside a detached `EffectScope`, and a
- * returned function is registered via `onScopeDispose`. There is no `updated`
- * hook at all - a Vapor directive that must react to changing values creates
- * its own effect inside that scope, because `value` is delivered as a getter.
- * That is the substantive porting cost for `v-vc-command`, and the reason
- * this fixture asserts the shape rather than just "it runs".
- *
- * UPDATED FOR 3.6.0-rc.9. The ARGUMENT is a getter too now (#15490), for the
- * same reason the value is: so `v-probe:[dynamic]` can be tracked. This file
- * had frozen rc.3's `argument?: string` into its types, its tuple and its
- * assertion, and went on passing while the argument's contract moved under it -
- * see the note at the end of tests/directives-vapor-fixture.test.ts for what
- * that cost. The shape it pins is the shape the INSTALLED Vue requires.
- *
- * Everything is imported from the single with-vapor browser build on purpose -
- * two separately-imported Vue dists are two disconnected reactivity instances
- * (chamber.ts §probeVue, whitepaper §9.6), so mixing builds here would
- * silently measure nothing.
+ * Custom directives on a real Vapor app, built from the single with-vapor browser build of Vue.
+ * Why: a Vapor directive is a plain function `(el, value, argument, modifiers) => cleanup | void`, run once per root element in a detached `EffectScope`; a port that reads `value` once would freeze on the first value, and one that expects an `updated` hook would never react.
+ * Shows: `withVaporDirectives` is exported; the directive receives the element and getters for value and argument plus the modifiers; a directive's click listener works on the mounted DOM; the returned cleanup runs on unmount; the directive function is not re-invoked on a value change while an effect it opened itself sees the new value.
+ * See: vuejs/core#15490 (argument is a getter), tests/directives-vapor-fixture.test.ts, tests/router/vapor-fixture.test.ts
  */
 
 import { describe, expect, it } from 'vitest';
@@ -72,8 +29,6 @@ async function vapor(): Promise<VaporApi> {
 describe('custom directives on a vapor app (rc.3)', () => {
   it('exposes withVaporDirectives as a public export', async () => {
     const v = await vapor();
-    // The lib's own claim ("VDOM-only, no Vapor port planned") rests on this
-    // being absent. It is not absent, and never was.
     expect(typeof v.withVaporDirectives).toBe('function');
   });
 
@@ -83,16 +38,14 @@ describe('custom directives on a vapor app (rc.3)', () => {
     const seen: Array<{ tag: string; value: unknown; argType: string; argument: unknown; modifiers?: Record<string, boolean> }> = [];
 
     const vProbe: VaporDir = (el, value, argument, modifiers) => {
-      // Both the type AND the read, because the point of this test is the shape
-      // the runtime hands over, not the string that comes back out of it.
+      // Records the type as well as the read: the shape the runtime hands over is what is pinned.
       seen.push({ tag: el.tagName, value: value(), argType: typeof argument, argument: argument?.(), modifiers });
     };
 
     const Comp = defineVaporComponent({
       setup() {
         const el = template('<button>go</button>', true)();
-        // Shape mirrors what compiler-vapor emits for
-        //   <button v-probe:cmd.stop="'cartAdd'">
+        // Same shape compiler-vapor emits for <button v-probe:cmd.stop="'cartAdd'">
         withVaporDirectives(el, [[vProbe, () => 'cartAdd', () => 'cmd', { stop: true }]]);
         return el;
       },
@@ -101,10 +54,7 @@ describe('custom directives on a vapor app (rc.3)', () => {
     const host = document.createElement('div');
     createVaporApp(Comp).mount(host);
 
-    // MEASURED on 3.6.0-rc.3, re-measured on rc.9: the directive runs, against a
-    // real element, with the full binding surface v-vc-command needs (action
-    // value, arg, modifiers). Since #15490 the argument is a GETTER - asserting
-    // `typeof` is what makes this fixture notice the next time that moves.
+    // Asserting `typeof` on the argument pins that it is a getter.
     expect(seen).toHaveLength(1);
     expect(seen[0].tag).toBe('BUTTON');
     expect(seen[0].value).toBe('cartAdd');
@@ -140,8 +90,6 @@ describe('custom directives on a vapor app (rc.3)', () => {
     btn.click();
     btn.click();
 
-    // This is the exact behaviour `v-vc-command` needs: a direct listener on a
-    // real element inside a Vapor component. It works.
     expect(clicks).toEqual(['cartAdd', 'cartAdd']);
   });
 
@@ -167,9 +115,6 @@ describe('custom directives on a vapor app (rc.3)', () => {
 
     app.unmount();
 
-    // The returned function is registered with onScopeDispose on a detached
-    // scope, so teardown is scope-driven - which is exactly the lifecycle
-    // every composable in this lib already uses (tryAutoCleanup).
     expect(cleaned).toBe(1);
   });
 
@@ -177,8 +122,8 @@ describe('custom directives on a vapor app (rc.3)', () => {
     const { createVaporApp, defineVaporComponent, withVaporDirectives, template, shallowRef, renderEffect, nextTick } = await vapor();
 
     const action = shallowRef('cartAdd');
-    const invocations: string[] = [];   // how many times the directive fn itself ran
-    const effectReads: string[] = [];   // what an effect INSIDE the directive saw
+    const invocations: string[] = []; // values seen by each run of the directive function itself
+    const effectReads: string[] = []; // values seen by an effect opened inside the directive
 
     const vTracked: VaporDir = (_el, value) => {
       invocations.push(String(value()));
@@ -200,11 +145,7 @@ describe('custom directives on a vapor app (rc.3)', () => {
     action.value = 'cartRemove';
     await nextTick();
 
-    // THE PORTING CONSTRAINT, pinned: the directive function is NOT re-invoked
-    // on a value change (no `updated` hook exists). Only an effect the
-    // directive opened itself sees the new value. A port of v-vc-command that
-    // reads `binding.value` once and stores it would silently freeze on the
-    // first action name.
+    // No `updated` hook: only an effect the directive opened itself sees the new value.
     expect(invocations).toEqual(['cartAdd']);
     expect(effectReads).toEqual(['cartAdd', 'cartRemove']);
   });

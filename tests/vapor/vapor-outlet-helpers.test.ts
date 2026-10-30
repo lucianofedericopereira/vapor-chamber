@@ -1,59 +1,25 @@
 /**
- * The Vapor outlet's DEPENDENCY SURFACE, enumerated - so an upstream rename
- * fails in this repo before it fails at a consumer.
- *
- * WHY THIS IS A FIXTURE AND NOT A PARAGRAPH. `vapor-chamber/router/vapor` is
- * the first place this library depends on Vue API that is compiler-output
- * rather than documented user-facing surface: these are the helpers a compiled
- * Vapor SFC calls. That was accepted as an explicit risk, on the condition
- * that the surface is pinned and small. This file is that pin, and it is
- * modelled on `tests/vue-bundler-vapor-exports.test.ts`: a hand-quoted export
- * line is how such a question gets answered wrong.
- *
- * THE SURFACE IS A SHORT LIST, not "the compiler contract":
- *   - the named imports in the two lists below, reachable from bare `vue`, and
- *   - one property read: `instance.slots`, because Vapor's `setup` receives
- *     the component INSTANCE as its second argument and no public
- *     slot-existence helper exists. It is only a property read, but it is an
- *     internals-adjacent one, so it is counted and pinned like the rest.
- *
- * THE RESOLUTION QUALIFIER IS LOAD-BEARING. These names are reachable from
- * bare `vue` only under BUNDLER resolution, via the
- * `export * from "@vue/runtime-vapor"` in `vue.runtime.esm-bundler.js`. Under
- * raw Node ESM, bare `vue` resolves to an entry that re-exports none of them,
- * and grep cannot see through a star re-export in either direction. So the
- * enumeration goes through the bundler entry explicitly, exactly as the
- * sibling fixture does.
- *
- * Two Vue module instances are in play here on purpose and they never meet:
- * the bundler entry below is READ for its export names only, while the mount
- * in the second test uses the project-aliased with-vapor build. Nothing is
- * passed between them.
+ * The Vue helpers and property reads the Vapor outlet (src/router/vapor.ts) depends on.
+ * Why: the outlet calls compiler-output Vue API, so an upstream rename or a narrower setup context would break every consumer's build or silently empty the outlet's fallback.
+ * Shows: each named import exists in vue's bundler entry and matches the outlet's import block; its createIf flags equal the installed compiler's; setup's second argument carries `slots`, and a conditional slot that is off shows as `rawSlots.$`.
+ * See: tests/vue-bundler-vapor-exports.test.ts, tests/vapor/vapor-outlet-fixture.ts
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createComponent, createVaporApp, defineVaporComponent, setInsertionState, template } from 'vue';
+import { bundlerEntryExports } from '../bundler-entry';
 import { compileVapor } from '../compile-vapor';
 
-// Read rather than imported: this project aliases bare `vue` to the with-vapor
-// dist, and a `vue/package.json` subpath import does not resolve through that
-// alias the way it does in the unaliased project.
+// Read, not imported: the bare-`vue` alias to the with-vapor dist blocks a `vue/package.json` subpath import.
 const vueVersion = (
   JSON.parse(readFileSync(resolve(process.cwd(), 'node_modules', 'vue', 'package.json'), 'utf8')) as {
     version: string;
   }
 ).version;
 
-/**
- * The named helpers. `defineVaporComponent`, `inject` and `provide` are
- * deliberately in the list too even though the first is already covered by the
- * sibling fixture and the last two are ordinary public API: what this file
- * pins is everything `src/router/vapor.ts` statically imports, and a test
- * below compares the list with that file's import block.
- */
+// Everything src/router/vapor.ts statically imports from vue; a test below compares this list with its import block.
 const OUTLET_IMPORTS = [
   'createDynamicComponent',
   'createIf',
@@ -63,26 +29,14 @@ const OUTLET_IMPORTS = [
   'provide',
 ] as const;
 
-/**
- * The remaining helpers from the feasibility enumeration. The outlet does not
- * import these, but every fixture that mounts it does, and they are the same
- * compiler-output surface - a rename here breaks the fixtures rather than the
- * shipped module, which is still a break worth catching in this repo first.
- */
+// Not imported by the outlet, but used by every fixture that mounts it.
 const FIXTURE_HELPERS = ['createComponent', 'template', 'insert', 'renderEffect', 'child', 'setInsertionState'] as const;
 
 describe('Vapor outlet - dependency surface', () => {
   it('every helper it imports is statically exported by vue\'s bundler entry', async () => {
-    // By absolute file URL, not by the `vue/dist/...` specifier the sibling
-    // fixture uses: this project aliases bare `vue`, and the alias swallows
-    // the deep specifier too. The file reached is identical either way - it is
-    // the entry a consumer's bundler resolves bare `vue` to.
-    const bundlerEntry = resolve(process.cwd(), 'node_modules', 'vue', 'dist', 'vue.runtime.esm-bundler.js');
-    const mod = (await import(/* @vite-ignore */ pathToFileURL(bundlerEntry).href)) as Record<string, unknown>;
-    const names = Object.keys(mod);
+    const names = await bundlerEntryExports();
 
-    // Guard the enumeration itself: a resolution failure must fail loudly
-    // rather than vacuously reporting "nothing missing".
+    // A resolution failure must fail here, not report "nothing missing".
     expect(names.length).toBeGreaterThan(100);
 
     const missingOutlet = OUTLET_IMPORTS.filter((n) => !names.includes(n));
@@ -95,15 +49,11 @@ describe('Vapor outlet - dependency surface', () => {
         `    missing                         : ${[...missingOutlet, ...missingFixture].join(', ') || '(none)'}\n`,
     );
 
-    // If this fails, an upstream rename has landed. The shipped module's
-    // static imports mean a consumer would get a BUILD error rather than a
-    // silent runtime null, but this is where it should be caught first.
     expect(missingOutlet).toEqual([]);
     expect(missingFixture).toEqual([]);
   });
 
   it('the import list above is the import block of src/router/vapor.ts', () => {
-    // "Checked by eye" is how a list like this goes stale; this reads the file.
     const source = readFileSync(resolve(process.cwd(), 'src', 'router', 'vapor.ts'), 'utf8');
     const block = source.match(/^import \{([^}]*)\} from 'vue';$/m);
     expect(block).not.toBeNull();
@@ -112,10 +62,7 @@ describe('Vapor outlet - dependency surface', () => {
   });
 
   it('its createIf call carries the flags compiler-vapor emits for the same template', async () => {
-    // The outlet hand-writes the call a compiled
-    // `<component :is="c" v-if="c" /><slot v-else />` makes. A hand-written
-    // copy of compiler output records one compiler release, so this asks the
-    // installed compiler and compares the flags argument.
+    // The outlet hand-writes the call that `<component :is="c" v-if="c" /><slot v-else />` compiles to; the installed compiler is the reference.
     const vue = await import('vue');
     const { code } = await compileVapor(vue, '<component :is="c" v-if="c" /><slot v-else />');
     expect(code).toContain('_createDynamicComponent(');
@@ -130,12 +77,7 @@ describe('Vapor outlet - dependency surface', () => {
   });
 
   it("Vapor setup receives the instance as its second argument, with `slots` on it", () => {
-    // The property read. `src/router/vapor.ts` destructures `{ slots }` out of
-    // setup's second parameter to decide whether to build a `createSlot`
-    // fallback at all - and that decision is what keeps the no-slot case a
-    // literal null. If Vapor ever passes a narrower context object here, the
-    // outlet's fallback gate silently stops seeing slots and every no-match
-    // branch renders empty even where a fallback was provided.
+    // The outlet reads `{ slots }` from setup's second parameter to decide whether to build a `createSlot` fallback.
     let secondArg: unknown;
     const Probe = defineVaporComponent({
       setup(_props: unknown, ctx: unknown) {
@@ -144,9 +86,7 @@ describe('Vapor outlet - dependency surface', () => {
       },
     } as never);
 
-    // Slots arrive through `createComponent`'s third argument, which is how
-    // the outlet receives its own default slot in real use - `createVaporApp`
-    // takes no slots, so mounting the probe as the root would prove nothing.
+    // Slots arrive through `createComponent`'s third argument; `createVaporApp` takes none, so the probe cannot be the root.
     const Root = defineVaporComponent({
       setup() {
         const el = (template('<div></div>', 1) as () => Element)();
@@ -165,8 +105,6 @@ describe('Vapor outlet - dependency surface', () => {
 
     expect(secondArg).toBeTypeOf('object');
     expect(secondArg).not.toBeNull();
-    // `slots` present and object-shaped is the whole contract the outlet
-    // depends on; which slots it holds is the app's business, not ours.
     expect((secondArg as { slots?: unknown }).slots).toBeTypeOf('object');
 
     app.unmount();
@@ -174,10 +112,7 @@ describe('Vapor outlet - dependency surface', () => {
   });
 
   it('a conditional slot that is off arrives as a dynamic source: no `slots.default`, but `rawSlots.$`', async () => {
-    // The second property read. `<template v-if="on" #default>` is a slot that
-    // may appear later; the outlet tells it from "no slot" by `rawSlots.$`.
-    // Compiled on the installed Vue, because the shape of a dynamic source is
-    // compiler output, and the outlet fixture builds the same shape by hand.
+    // The outlet tells a conditional slot from "no slot" by `rawSlots.$`; the shape is compiler output, so it is compiled here.
     const vue = (await import('vue')) as any;
     const seen: Record<string, { hasDefault: boolean; sources: unknown }> = {};
     const probe = (name: string) =>
@@ -190,7 +125,6 @@ describe('Vapor outlet - dependency surface', () => {
 
     const conditional = await compileVapor(vue, '<Late><template v-if="s.on" #default><em>x</em></template></Late>');
     const unconditional = await compileVapor(vue, '<Plain><template #default><em>x</em></template></Plain>');
-    // The hand-built source in vapor-outlet-fixture.ts, arm (h), is this shape.
     expect(conditional.code).toMatch(/\$: \[/);
     expect(conditional.code).toMatch(/name: "default"/);
     expect(conditional.code).toMatch(/\bfn: /);

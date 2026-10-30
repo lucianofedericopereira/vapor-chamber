@@ -1,12 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * register()'s cleanup removes only what it registered.
- *
- * Deleting whatever held the name when the cleanup runs is wrong in the order
- * the framework produces: KeepAlive with a max sets up the new page and THEN
- * evicts the old one, whose cleanup would delete the new page's handler while
- * it is on screen (measured on rc.9: `register B -> dispose A`, dispatch ->
- * ok: false). (v1.25.0)
+ * register()'s cleanup removes only what it registered, and the newest live registration answers.
+ * Why: KeepAlive with a max sets up the new page and then evicts the old one, so a cleanup that deleted whatever held the name would remove the page on screen's handler; and when the newer owner leaves first, the older one must answer again.
+ * Shows: a stale or repeated cleanup leaves a newer owner's handler and undo; the older owner's handler, undo, answer and cache groups return when the newer leaves; the test bus agrees; under KeepAlive max 1 the page on screen still answers.
+ * See: log s36.F42
  */
 import { describe, expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';
@@ -43,8 +40,7 @@ describe('register() cleanup ownership', () => {
   });
 
   it('the test bus behaves the same (a double must not diverge)', () => {
-    // The double records dispatches instead of running handlers, so ownership
-    // is read through what it does expose: the registered undo handler.
+    // The double records dispatches instead of running handlers, so ownership is read through its undo handler.
     const bus = createTestBus();
     const undoB = () => 'undo B';
     const offA = bus.register('save', () => 'A', { undo: () => 'undo A' });

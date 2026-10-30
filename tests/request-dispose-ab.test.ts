@@ -1,34 +1,8 @@
 /**
- * Real-path A/B for the request() / dispose() work, in the house three-arm
- * shape: a baseline DERIVED from the shipped
- * src/command-bus.ts with the change reverted, a byte-identical second copy
- * of that baseline as the self-control, and the shipped source - every timed
- * arm a derived copy, loaded the same way.
- *
- * WHAT IS REVERTED for the baseline: both request() functions go back to
- * their v1.19 text (a timer armed first on every sync request; the async one
- * racing an abort promise only for a caller signal), the `waiting: null`
- * field leaves both state literals, and the two dispose() lines that run the
- * pending cancels go. So the CONTROL dispatch rows also read what the field
- * itself costs a bus that never waits. abortedResult's optional parameter
- * stays in every arm: a parameter's type is not runtime.
- *
- * WHAT IS MEASURED: request() throughput on both buses. Shipped, a sync
- * request whose responder answers at once takes no timer; one that waits
- * takes its timer plus one Set add and delete; an async request takes the
- * Set add and delete and one closure inside the timeout promise it already
- * had. Two dispatch rows are the controls, since dispatch is not touched.
- *
- * READ EVERY ROW AGAINST ITS SELF-CONTROL ROW. NO TIMING THRESHOLD IS
- * ASSERTED; the printed table is the evidence. Asserted: the arms agree on
- * every settled result and on the sync command's shape, and differ where
- * intended (dispose() settles a waiting request, and a sync request honours
- * its caller's signal, on the shipped arm only). Numbers quoted anywhere come
- * from three runs of:
- *
- *   NODE_ENV=production NODE_OPTIONS=--expose-gc npx vitest run tests/request-dispose-ab.test.ts --silent=false
- *
- * Ratios are TIME ratios: above 1.00 is slower than the denominator arm.
+ * request() / dispose() against a baseline derived from src/command-bus.ts with the change reverted, a byte-identical self-control copy, and the shipped source.
+ * Why: request() and dispose() would regress every user's bus if they changed a settled result or slowed request() throughput; dispatch must stay untouched.
+ * Shows: the arms agree on every settled result and the sync command's shape; they differ only where intended (dispose() settles a waiting request, a sync request honours its caller's signal, shipped only). Timing rows are printed under `npm run test:timing`, with no threshold asserted: read each row against its self-control row (time ratios, above 1.00 is slower).
+ * See: src/command-bus.ts, tests/under-coverage.ts
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -226,7 +200,6 @@ describe('request() / dispose() - real path A/B', () => {
     await load('self', true);
     await load('shipped', false);
 
-    // --- equivalence: every settled result, and the sync command's shape -------
     const shape = (r: any) => ({ ok: r.ok, value: r.value, code: r.error?.code, msg: r.error?.message });
     const settled = async (m: Mod) => {
       const out: unknown[] = [];
@@ -238,8 +211,7 @@ describe('request() / dispose() - real path A/B', () => {
       s.respond('slow', () => new Promise((r) => setTimeout(() => r('late'), 50)));
       for (const a of ['now', 'later', 'fails', 'rejects', 'missing']) out.push(shape(await s.request(a, 1)));
       out.push(shape(await s.request('slow', 1, undefined, { timeout: 5 })));
-      // A live caller signal changes nothing on either arm, and the sync command
-      // has the same five fields with or without one, `signal` undefined: one shape, both arms.
+      // A live signal changes nothing; the sync command keeps the same five fields with or without one.
       const live = new AbortController();
       let keys: string[] = [];
       s.respond('keys', (c) => { keys = Object.keys(c); return c.target; });
@@ -259,7 +231,6 @@ describe('request() / dispose() - real path A/B', () => {
     expect(shipped).toEqual(await settled(arms.pre));
     expect(shipped.filter((v) => Array.isArray(v))).toEqual([['action', 'target', 'payload', 'meta', 'signal'], ['action', 'target', 'payload', 'meta', 'signal']]);
 
-    // --- intended difference 1: dispose() settles a waiting request -----------
     for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'core:aborted:dispatch']] as const) {
       for (const make of [() => m.createCommandBus(), () => m.createAsyncCommandBus()]) {
         const bus: any = make();
@@ -273,7 +244,6 @@ describe('request() / dispose() - real path A/B', () => {
       }
     }
 
-    // --- intended difference 2: the sync request honours its caller's signal ---
     for (const [m, expectedCode, expectedCalls] of [[arms.pre, undefined, 1], [arms.shipped, 'core:aborted:dispatch', 0]] as const) {
       const bus = m.createCommandBus();
       let calls = 0;
@@ -288,7 +258,6 @@ describe('request() / dispose() - real path A/B', () => {
     // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
     if (!runTiming) return;
 
-    // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);
     const lines: string[] = [];
     for (const [label, row] of ROWS) {

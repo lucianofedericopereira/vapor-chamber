@@ -1,26 +1,8 @@
 /**
- * Real-path A/B: the async bus's `execute` closure as a plain function
- * returning `tryCatchAsyncHandler`'s promise, against the `async` closure it
- * replaced.
- *
- * WHAT CHANGED. `_asyncDispatchInner` and `asyncQuery` built
- * `async () => { ...; return tryCatchAsyncHandler(handler, cmd); }`. An async
- * function whose body returns a promise allocates its own promise, resumes its
- * own frame, and resolves through a thenable job - two extra microtask turns -
- * all to pass along a promise it already had. The closure is now a plain
- * arrow; the missing-handler path goes through the `async` `asyncMissing`
- * helper so `onMissing: 'throw'` stays a rejection
- * (tests/async-missing-rejects.test.ts pins that).
- *
- * HOW THE BASELINE IS BUILT, per the house rule (see
- * tests/wildcard-prefix-ab.test.ts): derived from the shipped source at run
- * time, the two closures reverted to their previous `async` form, written to
- * tests/__ref/async-execute/ and imported as a real module. If a revert target stops
- * matching, the transform throws rather than measuring one arm twice.
- *
- * NO TIMING THRESHOLD IS ASSERTED; the printed table is the evidence. The
- * audit's verdict (docs/rc-alignment-log.md s27) comes from the three-arm,
- * gc()-controlled, seven-process run, not from this single in-suite pass.
+ * A/B on the real path: the async bus's `execute` as a plain arrow returning the handler's promise, against an `async` closure.
+ * Why: an async function returning a promise it already holds adds its own promise and two microtask turns per command.
+ * Shows: both arms answer the same (values, errors, every onMissing mode, dispatch and query); timing prints a table, asserts no threshold.
+ * See: log s27, log 36.F46, tests/wildcard-prefix-ab.test.ts, tests/async-missing-rejects.test.ts.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -34,16 +16,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REF_DIR = resolve(HERE, '__ref', 'async-execute');
 const BASELINE = resolve(REF_DIR, 'command-bus-async-execute-baseline.ts');
 
-// Since phase 2 C2 (log 36.F46) a no-step action calls the work itself, with no
-// closure: the baseline puts back the async closure through `retry.run` for both
-// dispatch and query, and the retry's no-step half returns the result untouched.
+// The baseline is src/command-bus.ts with these swaps: the async closure back, the retry's no-step half untouched.
 const REVERTS: Array<[string, string]> = [
   [
     `  if (list === null && execute === undefined) {
     if (retry !== null) retry.begin(cmd);
     return work(s, rec, cmd, dispatching);
   }
-  const call = execute ?? ((): CommandResult | Promise<CommandResult> => work(s, rec, cmd, dispatching));`,
+`,
+    '',
+  ],
+  [
+    `  const call = execute ?? ((): CommandResult | Promise<CommandResult> => work(s, rec, cmd, dispatching));`,
     `  const call = execute ?? (async (): Promise<CommandResult> => {
     const transport = rec.transport;
     if (transport !== undefined) return send(transport, cmd, () => runLocal(s, rec, cmd, dispatching), s);

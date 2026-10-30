@@ -1,6 +1,8 @@
 /**
- * Platform facts the source comments rely on, read in a real Chromium (audit B rows).
- * Each case states the fact, then checks it with a control. Note at the end.
+ * Platform facts the source comments rely on, each checked with a control in Chromium, the one engine configured.
+ * Why: a comment stating a DOM, Fetch or timer fact is only as true as the engine, and happy-dom is not one.
+ * Shows: events, abort, fetch and headers, timers, structured clone, history and elements behave as the comments say; each case names its audit row.
+ * See: log 36.11, vitest.browser.config.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -186,11 +188,3 @@ describe('elements', () => {
     expect(() => { (o as { state: number }).state = 2; }).toThrow(TypeError);
   });
 });
-
-/*
- * Audit, session 8 (log 36.11): the B rows that state a DOM, Fetch or timer
- * fact are checked here in Chromium, the engine test:browser runs, rather
- * than in happy-dom. Each case is the fact as the comment states it, with its
- * row id. A fact that holds only in other engines would need an instance for
- * them (vitest.browser.config.ts is Chromium only).
- */

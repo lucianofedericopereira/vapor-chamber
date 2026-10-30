@@ -1,27 +1,11 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the transition bridge bound to a REAL mounted `<Transition>`.
- *
- * WHY THIS FILE EXISTS. `tests/transitions.test.ts` covers all nine hooks, the
- * phase signal and the done() paths - but every one of those tests calls the
- * hooks directly on a mock element (`{ tagName: 'DIV' }`). Nothing in the suite
- * ever handed the bridge to Vue. So the one thing this module's own docs tell
- * you to write - `<Transition v-bind="t">` - had no coverage at all, and a
- * defect living exactly there survived 1750 passing tests.
- *
- * The defect: `v-bind="obj"` spreads an object's own ENUMERABLE keys as props.
- * The eight spread `on*` hooks match `<Transition>`'s declared props; `phase`
- * and `dispose` match nothing, so they fell through as ATTRIBUTES and were
- * stringified into the DOM -
- *
- *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
- *
- * - on every consumer following the documented usage, unless both are defined
- * non-enumerable (see `assembleBridge` in src/transitions.ts).
- *
- * This is the same lesson the rc.4 KeepAlive bug taught, applied preemptively:
- * a fixture that substitutes a mock for the integration it is reasoning about
- * can only ever check the half you already understood. So this one mounts.
+ * The transition bridge bound to a real mounted <Transition> via v-bind.
+ * Why: v-bind spreads own enumerable keys as props, so an enumerable phase or dispose would fall through
+ * onto the transitioned element as stringified DOM attributes for every consumer of `<Transition v-bind="t">`.
+ * Shows: the element carries only its class, Vue still receives the hooks, phase and dispose stay reachable
+ * by direct access and destructuring, onMove is not spread, and useTransitionCommand behaves the same.
+ * See: assembleBridge in src/transitions.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -52,7 +36,6 @@ describe('transition bridge bound to a real <Transition>', () => {
     const el = host.querySelector('.panel') as HTMLElement;
 
     expect(el).toBeTruthy();
-    // The assertion that fails against the pre-fix code.
     expect(el.hasAttribute('phase')).toBe(false);
     expect(el.hasAttribute('dispose')).toBe(false);
     expect(Array.from(el.attributes).map((a) => a.name)).toEqual(['class']);
@@ -69,12 +52,9 @@ describe('transition bridge bound to a real <Transition>', () => {
     const show = ref(true);
     const { app } = mountWithBridge(bridge, show);
 
-    // Hiding the child drives the leave hooks through Vue's own machinery.
     show.value = false;
     await new Promise((r) => setTimeout(r, 0));
 
-    // Hooks reached Vue and dispatched: hiding them from SPREADS must not hide
-    // them from the props they are actually for.
     expect(dispatched.length).toBeGreaterThan(0);
     expect(dispatched).toContain('modalBeforeLeave');
 
@@ -85,17 +65,14 @@ describe('transition bridge bound to a real <Transition>', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const bridge = createTransitionBridge({ bus, namespace: 'modal' });
 
-    // Direct access - the documented `modal.phase.value` template read.
     expect(bridge.phase.value).toBe('idle');
     expect(typeof bridge.dispose).toBe('function');
 
-    // Destructuring reads the property directly; enumerability is irrelevant.
     const { phase, dispose } = bridge;
     expect(phase.value).toBe('idle');
     expect(() => dispose()).not.toThrow();
 
-    // The intentional casualty, pinned so it is a decision and not a surprise:
-    // spreading does not carry them - which is the whole fix.
+    // Spreading must not carry phase or dispose.
     expect(Object.keys({ ...bridge })).not.toContain('phase');
     expect(Object.keys(bridge)).toEqual([
       'onBeforeEnter', 'onEnter', 'onAfterEnter', 'onEnterCancelled',
@@ -103,8 +80,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     ]);
   });
 
-  // No Vue hook is named onMove, so a spread onMove only falls through as a
-  // `move` DOM listener that nothing fires. See the note on `onMove` in src.
+  // No Vue hook is named onMove: a spread onMove would only become a `move` DOM listener.
   it('spreads no onMove: the child gets no `move` listener, and t.onMove still dispatches', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const dispatched: string[] = [];
@@ -114,7 +90,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     const add = vi.spyOn(Element.prototype, 'addEventListener');
     const { host, app } = mountWithBridge(bridge, ref(true));
     const moves = add.mock.calls.filter((c) => c[0] === 'move').length;
-    // Positive control for the spy: a `move` listener added here is counted.
+    // Positive control: proves the spy counts `move` listeners.
     (host.querySelector('.panel') as HTMLElement).addEventListener('move', () => {});
     expect([moves, add.mock.calls.filter((c) => c[0] === 'move').length]).toEqual([0, 1]);
     add.mockRestore();

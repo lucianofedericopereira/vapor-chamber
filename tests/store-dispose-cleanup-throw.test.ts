@@ -1,4 +1,8 @@
-/** A cleanup that throws in `$dispose` is logged, and the store is still removed. Rationale at the end. */
+/**
+ * A cleanup that throws in `$dispose` is logged, and the store is still removed.
+ * Why: if a throwing cleanup left the registry entry behind, the next `useStore(bus)` of the same definition would join the disposed store, whose handlers are gone, and every action would answer `core:missing:handler`.
+ * Shows: on both runtimes `$dispose` does not throw, removes the handlers, logs `store:failed:cleanup` with the error as its own argument, and the next use builds a working store; on the Vue store the same holds when the last holder's scope ends.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus, type CommandResult } from '../src/command-bus';
@@ -51,15 +55,3 @@ describe('vue store', () => {
     again.$dispose();
   });
 });
-
-/*
- * `$dispose` ran its cleanups in a plain
- * loop and cleared the registry entry after it. A cleanup that threw stopped
- * the loop before the registry line, so the entry stayed: the next
- * `useStore(bus)` of the same definition joined the disposed store, whose
- * handlers were already gone, and every action returned
- * `core:missing:handler`. That is the failure the StoreEntry docblock exists
- * to prevent. Each cleanup now runs in its own try, a throw is logged with the
- * error as its own argument, and the loop, the field watch's stop and the
- * registry line always run.
- */

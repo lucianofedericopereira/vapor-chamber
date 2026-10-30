@@ -1,34 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the public composables running inside a REAL Vapor component.
- *
- * WHY THIS FILE EXISTS. The suite had 93 files and 1500+ tests, and exactly one
- * of the eight public `use*` composables had ever executed inside a real Vapor
- * component (`useCommandHistory`, and only from the rc.4 KeepAlive fixture).
- * Everything else was exercised under VDOM, under a bare `effectScope()`, or
- * with no scope at all. For a library named for Vapor that is the wrong way
- * round, and it is not a theoretical gap: the rc.4 cycle found
- * `tryKeepAliveHooks` gated on `getCurrentInstance()`, which answers null in a
- * Vapor `setup()`, so KeepAlive pause/resume had been inert on Vapor for
- * several releases while every test stayed green.
- *
- * The class of bug is specific: an API that behaves DIFFERENTLY under Vapor
- * than under VDOM, silently. A VDOM test cannot see it and a bare
- * `effectScope()` cannot either, because neither is the environment that
- * differs. Only mounting a real `createVaporApp` can.
- *
- * WHAT IS PINNED HERE, per composable: that it runs at all inside a Vapor
- * `setup()`, that the reactive values it hands back actually update, and - the
- * load-bearing one - that `tryAutoCleanup()` really disposes it when the Vapor
- * component unmounts. That last is the Vapor-sensitive part: auto-cleanup rides
- * on `getCurrentScope()`/`onScopeDispose()`, and if those answered the way
- * `getCurrentInstance()` does, every composable here would leak its bus
- * subscription on unmount with nothing to show for it.
- *
- * Chamber is pointed at the same module object the components are built from
- * via `configureVue()` - two separately-imported Vue dists are two disconnected
- * reactivity instances (chamber.ts §probeVue), so skipping that would measure
- * nothing.
+ * The public composables (`useCommand`, `useSharedCommandState`, `useCommandQuery`, `useCommandGroup`, `useCommandError`, `defineVaporCommand`) run inside a real `createVaporApp` component.
+ * Why: an API that behaves differently under Vapor than under VDOM fails silently, and only a real Vapor mount sees it; auto-cleanup rides on `getCurrentScope()`/`onScopeDispose()`, so a composable that is not disposed on unmount would leak its bus subscription.
+ * Shows: each composable runs in a Vapor `setup()`, its returned refs update, and its listener or handler is gone from the bus after the component unmounts; the shared state is refcounted across two mounted components.
+ * See: src/chamber.ts probeVue
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -57,6 +32,7 @@ async function vapor(): Promise<VaporApi> {
 /** Mount `setup` as the root of a real Vapor app; returns an unmount handle. */
 async function mountVapor(setup: () => void) {
   const v = await vapor();
+  // Same module object as the components: two imported Vue dists have disconnected reactivity.
   configureVue(v);
   const Root = v.defineVaporComponent({
     setup() {
@@ -97,10 +73,9 @@ describe('composables inside a real Vapor component', () => {
     expect(key.value).toBe(false);
     expect(seen).toEqual(['cartAdd']);
 
-    // The Vapor-sensitive half: tryAutoCleanup must have armed on this scope.
     unmount();
     bus.dispatch('cartAdd', 'b');
-    expect(seen).toEqual(['cartAdd']); // no growth - listener really went away
+    expect(seen).toEqual(['cartAdd']);
   });
 
   it('useSharedCommandState - two Vapor components observe the same bus-wide error state', async () => {
@@ -114,13 +89,11 @@ describe('composables inside a real Vapor component', () => {
 
     bus.dispatch('boom', null);
 
-    // One shared entry per bus - both Vapor components read the same node.
     expect(a.lastError.value?.message).toBe('shared-boom');
     expect(b.lastError.value?.message).toBe('shared-boom');
     expect(a.errors.value.length).toBe(1);
 
-    // Refcounted: the first unmount must not tear the entry out from under the
-    // component still using it.
+    // Refcounted: the first unmount must not tear the entry out from under the other component.
     first.unmount();
     bus.dispatch('boom', null);
     expect(b.errors.value.length).toBe(2);
@@ -150,18 +123,16 @@ describe('composables inside a real Vapor component', () => {
       group.register('add', () => { calls++; return 'ok'; });
     });
 
-    // Registered under the namespaced name, reachable from the raw bus.
     const res = bus.dispatch('cartAdd', 1);
     expect((res as any).ok).toBe(true);
     expect(calls).toBe(1);
 
-    // Exercises the memoised prefix cache on a repeat name.
     group.dispatch('add', 2);
     expect(calls).toBe(2);
 
     unmount();
     const after = bus.dispatch('cartAdd', 3);
-    expect((after as any)).toFailWith('core:missing:handler'); // handler unregistered with the scope
+    expect((after as any)).toFailWith('core:missing:handler');
     expect(calls).toBe(2);
   });
 
@@ -178,7 +149,7 @@ describe('composables inside a real Vapor component', () => {
 
     unmount();
     bus.dispatch('boom', null);
-    expect(err.errors.value.length).toBe(1); // no capture after disposal
+    expect(err.errors.value.length).toBe(1);
   });
 
   it('defineVaporCommand - the zero-overhead path works under a real Vapor app', async () => {
@@ -195,7 +166,7 @@ describe('composables inside a real Vapor component', () => {
 
     unmount();
     const after = bus.dispatch('telemetry', { name: 'after' });
-    expect((after as any)).toFailWith('core:missing:handler'); // handler released with the scope
+    expect((after as any)).toFailWith('core:missing:handler');
     expect(handled).toBe(1);
   });
 });

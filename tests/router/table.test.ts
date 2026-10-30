@@ -1,3 +1,9 @@
+/**
+ * The route table: path compilation, resolution, typed params, chains, path building and dev-only validation.
+ * Why: a table that mis-compiles a path, resolves rows out of server order or mis-types a param would render the wrong page or none.
+ * Shows: segment forms compile and match, first row wins, params cast by type, chains precompute, bad tables throw in dev and degrade in production.
+ * See: docs/router.md
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { compilePath, createRouteTable } from '@router/table';
@@ -116,10 +122,6 @@ describe('createRouteTable', () => {
 
 describe('malformed param segments are a dev-time error, not a dead route', () => {
   it('rejects vue-router style /:name* instead of compiling it to a literal', () => {
-    // Regression: PARAM_RE does not match ":pathMatch*", so the segment fell
-    // through to `static` and compiled to the LITERAL "/:pathMatch*". The row
-    // matched nothing, every unknown URL became `router:missing:route`, and - behind a
-    // catch-all server - the hard-navigation fallback reloaded forever.
     expect(() => compilePath('/:pathMatch*')).toThrow(/not a valid param/);
     expect(() => compilePath('/products/:id(\\d+')).toThrow(/not a valid param/);
   });
@@ -175,21 +177,15 @@ describe('renderSegments - the one path builder both callers share', () => {
 
 describe('decodePathPart - malformed percent-encoding', () => {
   it('returns the raw segment rather than throwing on a bad escape', () => {
-    // decodeURIComponent('%E0%A4%A') throws URIError; a bad URL must not take
-    // the router down, it just does not decode.
+    // decodeURIComponent('%E0%A4%A') throws URIError; a bad URL must not take the router down.
     const t = createRouteTable([{ name: 'u', path: '/users/:id', component: 'U' }]);
     const hit = t.resolve('/users/%E0%A4%A');
     expect(hit?.params.id).toBe('%E0%A4%A');
   });
 });
 
-// ---------------------------------------------------------------------------
-// castParam - typed path params
-// ---------------------------------------------------------------------------
-
 describe('typed path params', () => {
-  // `component` matters: a row without one compiles as a pure GROUP, and
-  // groups never match a URL (resolve() skips them).
+  // A row without `component` compiles as a group, and groups never match a URL.
   const typed = createRouteTable([
     { name: 'post', path: '/post/:id', component: 'Post', params: { id: 'int' } },
     { name: 'flag', path: '/flag/:on', component: 'Flag', params: { on: 'bool' } },
@@ -212,13 +208,6 @@ describe('typed path params', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The static fast-path map keys on a CASE-FOLDED, trailing-slash-stripped path
-// (staticKey), so two distinct rows can collide on one key. `if
-// (!staticByPath.has(key))` keeps the first - nothing exercised that false arm,
-// because no existing table declares two colliding static rows.
-// ---------------------------------------------------------------------------
-
 describe('colliding static rows - first one wins, like the scan', () => {
   it('keeps the earlier row when two static paths fold to the same key', () => {
     const table = createRouteTable([
@@ -228,8 +217,7 @@ describe('colliding static rows - first one wins, like the scan', () => {
       { name: 'helpSlash', path: '/help/', component: 'H2' }, // same key: trailing slash stripped
     ]);
 
-    // The map must agree with server priority - the FIRST declared row wins,
-    // whichever spelling the URL arrives in.
+    // The first declared row wins, whichever spelling the URL arrives in.
     expect(table.resolve('/about')?.record.name).toBe('about');
     expect(table.resolve('/About')?.record.name).toBe('about');
     expect(table.resolve('/ABOUT')?.record.name).toBe('about');
@@ -237,17 +225,14 @@ describe('colliding static rows - first one wins, like the scan', () => {
     expect(table.resolve('/help')?.record.name).toBe('help');
     expect(table.resolve('/help/')?.record.name).toBe('help');
 
-    // The shadowed rows still exist as records - they are just unreachable by URL.
+    // Shadowed rows stay records; only the URL cannot reach them.
     expect(table.getRecord('aboutCased')?.name).toBe('aboutCased');
     expect(table.getRecord('helpSlash')?.name).toBe('helpSlash');
   });
 });
 
 describe('unknown parent in production (DEV=false)', () => {
-  // The FALSE arm of `if (DEV)` in pass 2. The dev arm throws router:missing:parent
-  // (asserted above); production instead `return`s and leaves the record
-  // unlinked, so a bad table degrades to a flat one rather than taking the app
-  // down at import time.
+  // Production leaves the record unlinked instead of throwing router:missing:parent.
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -265,20 +250,13 @@ describe('unknown parent in production (DEV=false)', () => {
 
     const table = prod.createRouteTable(rows);
     expect(table.resolve('/orphan')?.record.name).toBe('orphan');
-    // Unlinked: the chain is the row itself, with no phantom ancestor.
     expect(table.getRecord('orphan')?.chain.map((r) => r.name)).toEqual(['orphan']);
     expect(table.getRecord('orphan')?.parent ?? null).toBeNull();
-    // The well-formed sibling is unaffected.
     expect(table.resolve('/real')?.record.name).toBe('real');
   });
 });
 describe('cyclic parent chains', () => {
-  // Before the guard this was not a failing test, it was a HANG: the chain walk
-  // in pass 3 is a synchronous `for (; r; r = r.parent)` with no terminator,
-  // so a cycle spins the main thread forever - no error, no stack, a locked
-  // tab. Measured as exactly that, holding a vitest worker until the run was
-  // killed at 120s. A test that hangs the suite is worse than no test, so this
-  // is the one defect in this file recorded by its fix rather than by a red run.
+  // The chain walk is synchronous, so an unguarded cycle would hang the thread, not fail.
   const cyclic: RouteRecord[] = [
     { name: 'a', path: '/a', parent: 'b', component: 'A' },
     { name: 'b', path: '/b', parent: 'a', component: 'B' },
@@ -299,21 +277,16 @@ describe('cyclic parent chains', () => {
     const prod = await import('@router/table');
 
     const table = prod.createRouteTable(cyclic);
-    // Stops at the repeat rather than looping: each row sees itself and its
-    // one distinct ancestor, and no row appears twice.
+    // The walk stops at the repeat: no row appears twice.
     const chain = table.getRecord('a')?.chain.map((r) => r.name) ?? [];
     expect(chain).toHaveLength(new Set(chain).size);
     expect(chain).toContain('a');
-    // A wrong page beats a frozen tab: the route still resolves.
     expect(table.resolve('/a')?.record.name).toBe('a');
   });
 });
 
 describe('the rest of the dev-only table checks, in production (DEV=false)', () => {
-  // docs/router.md, "Dev trusts the generator": table validation runs in dev only,
-  // and production trusts the generated rows. The two checks above have their
-  // production arm pinned (unknown parent, cyclic chain); these are the other
-  // two, so the statement holds for every check, not for some.
+  // Table validation runs in dev only; production trusts the generated rows (docs/router.md).
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -352,7 +325,7 @@ describe('typed params match only values of their type', () => {
   it('an int param takes digits only: /products/7x is not product 7', () => {
     expect(t.resolve('/products/7')?.params).toEqual({ id: 7 });
     expect(t.resolve('/products/-3')?.params).toEqual({ id: -3 });
-    // Falls through to the next row instead of reading a garbage URL as id 7.
+    // Falls through to the next row instead of reading the URL as id 7.
     expect(t.resolve('/products/7x')?.record.name).toBe('slug');
     expect(t.resolve('/products/7.5')?.record.name).toBe('slug');
     expect(t.resolve('/products/abc')?.record.name).toBe('slug');

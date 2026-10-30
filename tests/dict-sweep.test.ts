@@ -1,5 +1,8 @@
 /**
- * The prototype-key invariant, enforced over every module rather than remembered.
+ * The prototype-key invariant, enforced over every module in src/ rather than remembered.
+ * Why: a map keyed by strings an app supplies must not see Object.prototype; one membership test or spread that forgets it brings the bug back.
+ * Shows: no module tests membership with `in` or `!== undefined`; no null-prototype object is spread into a plain one; the sweep reaches every site src/dict.ts names.
+ * See: src/dict.ts, tests/prototype-keys.test.ts.
  */
 
 import { describe, expect } from 'vitest';
@@ -19,13 +22,7 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/**
- * Comments AND string literals out, line numbers and columns preserved.
- * Without the string pass this sweep reports 26 sites, every one of them an
- * error message containing the word "in" ("Retry in 200ms", "no token found in
- * DOM"). Without the comment pass it reports `dict.ts` itself, which spells
- * the banned constructs out in prose.
- */
+/** Comments and string literals blanked, lines and columns kept: messages say "in", and dict.ts names the banned constructs. */
 function blank(text: string): string {
   return text
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
@@ -41,9 +38,7 @@ const files = sourceFiles(SRC).map((path) => ({
 }));
 
 describe('prototype-key sweep', () => {
-  // src/dict.ts: "Use `dict()` to build any map keyed by strings you did not
-  // author, and `Object.hasOwn()` (never `in`, never `!== undefined`) to test
-  // membership on one you did."
+  // The rule in src/dict.ts: membership is `Object.hasOwn()`, never `in`, never `!== undefined`.
   it('no module tests membership with `in` or `!== undefined`', () => {
     const offenders: string[] = [];
 
@@ -65,10 +60,7 @@ describe('prototype-key sweep', () => {
     expect(offenders).toEqual([]);
   });
 
-  // dict.ts records this as the FIFTH site of the class: router/engine.ts's
-  // setQuery rebuilt the merged query with a spread, and a spread of a
-  // null-prototype object produces a plain one - so the fix above it survived
-  // only until the first typed query write.
+  // A spread of a null-prototype object produces a plain one, undoing the dict().
   it('never spreads a prototype-free object back into a plain one', () => {
     const offenders: string[] = [];
 
@@ -93,9 +85,7 @@ describe('prototype-key sweep', () => {
     expect(offenders).toEqual([]);
   });
 
-  // The sweep that fixed `onSettled` was scoped by filename to `plugins-*.ts`
-  // and missed two modules. This one is scoped by nothing, and this assertion
-  // is what keeps it that way: every site dict.ts names must be inside it.
+  // The sweep is scoped by nothing, and this keeps it so: every site dict.ts names must be in it.
   it('reaches every site src/dict.ts names as fixed', () => {
     const scanned = files.map((f) => f.path);
     for (const site of ['command-bus.ts', 'mcp.ts', 'router/url.ts', 'router/loaders.ts', 'router/index.ts', 'router/engine.ts']) {

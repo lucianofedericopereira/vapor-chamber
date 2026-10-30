@@ -1,13 +1,8 @@
 /**
- * WCAG 2.1.1 (keyboard): an element with role="button" carrying v-vc-command
- * must work from the keyboard, as a native <button> does.
- *
- * ARIA Authoring Practices, button pattern: focusable; Enter activates on key
- * down; Space activates on key UP, with its page scroll prevented. A native
- * <button> does all of it; a <div role="button"> does none of it unless code
- * does, and the directive owns the element's interaction. Guards pinned here:
- * a native button still dispatches once, and a key the app already handled
- * (defaultPrevented) is not handled twice. docs/accessibility.md.
+ * A role="button" element carrying v-vc-command works from the keyboard, as a native <button> does.
+ * Why: WCAG 2.1.1; a <div role="button"> gets none of a button's keyboard behaviour unless code adds it, and the directive owns the interaction.
+ * Shows: it becomes focusable (an app's tabindex kept), Enter activates, Space activates on key up without scrolling; a native button dispatches once; an app-handled key is not handled again.
+ * See: ARIA Authoring Practices button pattern, docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';

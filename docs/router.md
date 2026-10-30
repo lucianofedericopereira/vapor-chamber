@@ -435,7 +435,7 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 
 ## Vapor interop
 
-Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->, the installed version the fixtures run on, not
+Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->, the installed version the fixtures run on, not
 inferred from the [Vapor roadmap](https://github.com/vuejs/core/issues/13687). Two fixtures, and
 the split matters:
 
@@ -466,12 +466,12 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it needs:
 
-- **Measured saving: <!-- vc:outletSaving -->17.97<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.0<!-- /vc:outletSavingRaw --> KB raw** against the same
+- **Measured saving: <!-- vc:outletSaving -->18.16<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.2<!-- /vc:outletSavingRaw --> KB raw** against the same
   app rendering through the vDOM outlet plus interop. The subpath's own cost is
   <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli. The guard holds two limits:
   - the saving stays at least <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB.
   - the Vapor outlet's own machinery, over a router-without-outlet floor, stays at most
-    <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (measured <!-- vc:outletOwnArm -->4.14<!-- /vc:outletOwnArm --> KB).[^outlet-guard]
+    <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (measured <!-- vc:outletOwnArm -->4.03<!-- /vc:outletOwnArm --> KB).[^outlet-guard]
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled SFCs are). This is a
   real constraint, not a convention. The outlet checks the `__vapor` marker itself and throws a
   coded `router:invalid:component`: a loud failure in place of wrong-mode
@@ -481,6 +481,12 @@ What it costs, and what it needs:
   message pointing here. An app that mixes blade rows and Vapor pages renders through
   `vapor-chamber/router/vdom` and pays for interop. That is the most likely way to get a
   disappointing result from this subpath.
+- **A scoped slot hands out the changing component.**
+  `<RouterOutlet v-slot:view="{ Component }"><Transition><Component /></Transition></RouterOutlet>`
+  wraps the routed component, and `<Component />` follows the route. The slot is `view` because
+  `default` is the no-match fallback. With a `default` slot, no match shows that slot. Without one,
+  the `view` slot stays mounted and `Component` is null. A `view` slot is read once, when the outlet
+  is created. `./vdom` has no such slot.[^view-slot]
 - **Parity with the vDOM outlet on everything else.**
   - It is keyless, so the same record at a depth keeps its instance across param and query
     changes.
@@ -491,6 +497,8 @@ What it costs, and what it needs:
     reuse the instance.
 
 [^outlet-guard]: `tests/vapor/vapor-outlet-size.test.ts` re-derives the saving on every test run from a Vite production build rather than quoting it. The same harness builds the baseline, so the two arms cannot differ by method.
+
+[^view-slot]: Compiled on the installed Vue and mounted with a real router: `tests/vapor/vapor-outlet-view-slot.test.ts`.
 
 [^vapor-marker]: With no interop installed, `createDynamicComponent` would otherwise create a vDOM component in Vapor mode, with no error of its own. The outlet deliberately does not fall back to interop, which would restore the whole interop cost the subpath exists to avoid (the saving above).
 
@@ -540,8 +548,8 @@ Still not usable here, for different reasons:
     boundary, needs no revision whichever way VTU lands.
   - **DevTools Integration** (unchecked): `src/devtools.ts` builds its inspector tree from
     buffered `bus.onAfter` entries, never from Vue's component tree. So the Commands timeline and
-    inspector panel do not depend on the Vapor component-tree bookkeeping upstream has not built
-    yet.
+    inspector panel do not depend on Vapor's component events, which Vue sends to the devtools
+    hook, or on a component tree, which it does not build for Vapor.
 - **Transition:** route transitions. The View Transitions API is the DOM-native way around it.
 - **SSR/hydration** for blade rows: no server-side render path exists.
   - `fetchBlade` is caller-supplied everywhere. A blade row without one throws

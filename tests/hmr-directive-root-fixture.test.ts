@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - `v-vc-command` on a component follows its root through a real HMR
- * rerender, on both renderers. Fails on Vue 3.6.0-rc.10, passes from rc.11.
- * The long note is at the end of this file.
+ * `v-vc-command` on a component follows its root element through a real HMR rerender, under a Vapor and a vDOM parent.
+ * Why: after a hot reload the directive would sit on the replaced root, so the new button dispatches nothing while the detached one still does (a dead control in the dev editing loop).
+ * Shows: the directive dispatches on the first root, after the rerender only the new root dispatches, and after unmount neither does; uses the real __VUE_HMR_RUNTIME__ of the with-vapor build.
+ * See: docs/rc-alignment-log.md, tests/compile-vapor.ts.
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -19,8 +20,7 @@ describe('v-vc-command across an HMR rerender of the component it sits on', () =
   let v: VaporApi;
 
   beforeAll(async () => {
-    // The probe's `import('vue')` loads a second Vue that also writes
-    // __VUE_HMR_RUNTIME__; settled first, the with-vapor build writes last.
+    // The probe's import('vue') loads a second Vue that also writes __VUE_HMR_RUNTIME__; settle it first so the with-vapor build writes last.
     await waitForVueDetection();
     v = await import(/* @vite-ignore */ WITH_VAPOR);
     configureVue(v);
@@ -69,7 +69,7 @@ describe('v-vc-command across an HMR rerender of the component it sits on', () =
       app.mount(host);
 
       const first = host.querySelector('#a');
-      // Positive control: the directive is live on the first root.
+      // Positive control: without it, "the new root dispatches" could pass on a directive that never mounted.
       expect(await click(first)).toEqual(['cartAdd']);
 
       hmr.rerender(id, () => v.template('<button id="b">B</button>', true)());
@@ -86,24 +86,3 @@ describe('v-vc-command across an HMR rerender of the component it sits on', () =
     });
   }
 });
-
-/*
- * WHY THIS FILE EXISTS. `v-vc-command` written on a COMPONENT lands on that
- * component's root element: through `withVaporDirectives` in a Vapor parent,
- * through interop's directive hooks in a vDOM parent. An HMR rerender of the
- * component swaps the root in place without the parent rendering again.
- *
- * Measured on Vue 3.6.0-rc.10 (docs/rc-alignment-log.md, the rc.11 cycle),
- * both parents: after the rerender the new root dispatched nothing and the
- * detached one still did. A dev-only dead control, gone at the next full
- * reload, so nothing a production page sees - but it is the editing loop.
- *
- * Vue 3.6.0-rc.11 `e6f62259` re-applies root-chain state after a rerender:
- * custom directives (`hmrRootHooks` in `withVaporDirectives`), interop
- * directive hooks, v-show and transitions. Nothing in `src` changed for it.
- *
- * The HMR runtime is the real `__VUE_HMR_RUNTIME__` of the with-vapor build,
- * and the parent templates go through tests/compile-vapor.ts on the installed
- * Vue. The first click is the positive control: without it, "the new root
- * dispatches" could pass on a directive that never mounted at all.
- */

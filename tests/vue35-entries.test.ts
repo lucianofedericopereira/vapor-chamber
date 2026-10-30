@@ -1,4 +1,9 @@
-// Every entry that reaches Vue loads and works on Vue 3.5, except the documented 3.6-only ones; rationale at the end.
+/**
+ * Every package export whose built module graph imports bare `vue` or `@vue/reactivity`, bundled as a consumer ships it with Vue resolved to 3.5.
+ * Why: the peer range promises Vue >=3.5.0, so an entry that fails to load on 3.5, other than the documented 3.6-only ones, would break a user on 3.5.
+ * Shows: a control that `vue35` is a 3.5 release without the Vapor runtime; the entry list holds `./vue` and the 3.6-only entries and not the root; each other entry builds and loads; each 3.6-only entry fails to build on a missing export; `/vue` on 3.5 returns a 3.5 ref from the composable and `untracked()` suspends tracking while a plain effect re-runs.
+ * See: log s35.228, log s36.F26
+ */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -10,6 +15,7 @@ import { it } from '../src/vitest';
 const repo = resolve(__dirname, '..');
 const dist = join(repo, 'dist');
 const require = createRequire(import.meta.url);
+// vue35 is a devDependency alias of vue@^3.5.43; its @vue/* packages nest under it, apart from the 3.6 ones the suite uses.
 const vue35Dir = dirname(require.resolve('vue35/package.json'));
 const reactivity35Dir = dirname(require.resolve('@vue/reactivity/package.json', { paths: [vue35Dir] }));
 
@@ -23,7 +29,7 @@ function reachesVue(file: string, seen = new Set<string>()): boolean {
   if (seen.has(file)) return false;
   seen.add(file);
   const src = readFileSync(file, 'utf8');
-  // A static import, or a literal dynamic one. The root holds neither (36.F26).
+  // A static import, or a literal dynamic one. The root holds neither.
   if (/from\s*["'](?:vue|@vue\/reactivity)["']|import\(\s*(?:\/\*[^*]*\*\/\s*)?["']vue["']\s*\)/.test(src)) return true;
   for (const m of src.matchAll(/(?:from|import)\s*["'](\.{1,2}\/[^"']+)["']/g)) {
     if (reachesVue(resolve(dirname(file), m[1]), seen)) return true;
@@ -41,7 +47,7 @@ const entries = Object.entries(pkg.exports)
 const out = mkdtempSync(join(repo, 'node_modules', '.cache', 'vc-vue35-'));
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 
-/** Bundle `code` the way a consumer's build does, with Vue resolved to 3.5. */
+/** Bundle `code` the way a consumer's build does: esm-bundler build, production defines, `vue` and `@vue/reactivity` both the 3.5 copies so one reactivity instance is shared. */
 async function bundle35(name: string, code: string): Promise<string> {
   mkdirSync(out, { recursive: true });
   const entry = join(out, `${name}.in.mjs`);
@@ -119,20 +125,3 @@ describe('Vue 3.5', () => {
     expect(m.run()).toEqual({ loadingIsRef: true, wrapped: 1, raw: 2 });
   });
 });
-
-/*
- * Why this file exists. The peer range promises Vue >=3.5.0, and nothing ran
- * on 3.5. A manual run on 3.5.43 found every entry loading except the three
- * documented as 3.6-only (log s35.228). This keeps that true on every run.
- *
- * `vue35` is a devDependency alias, `npm:vue@^3.5.43`. Its own @vue/* packages
- * nest under it, apart from the 3.6 ones the suite uses. Each entry is bundled
- * the way a consumer ships it, Vue's esm-bundler build with production
- * defines, and `vue` and `@vue/reactivity` both resolve to the 3.5 copies, so
- * the library and Vue share one reactivity instance.
- *
- * Which entries: every export whose built module graph imports bare `vue` or
- * `@vue/reactivity`. A new entry that reaches Vue is checked without editing
- * this file. The three 3.6-only entries must FAIL to build, on a missing
- * export: that, with the first test, proves the build really used 3.5.
- */

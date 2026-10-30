@@ -1,4 +1,9 @@
-// Async after-hooks: a sync hook costs no microtask turn, an async one is still awaited. The long note is at the end.
+/**
+ * Async after-hooks: a sync hook costs no microtask turn, an async one is still awaited.
+ * Why: history(), useCommandHistory, useCommandError and the devtools each add a hook; a hook that returns nothing must not cost every dispatch a promise.
+ * Shows: sync hooks settle in the turns of none, a promise-returning one costs turns; an async hook holds later hooks and listeners on every path; a rejection is core:failed:hook and the rest run.
+ * See: tests/hook-removal-parity.test.ts.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { configureReport } from '../src/report';
@@ -154,13 +159,3 @@ describe('async after-hooks: an async hook is awaited on every path', () => {
     await waitsForTheHook((r.value as { done: Promise<unknown> }).done, g);
   });
 });
-
-// Why: on the async bus every dispatch and query with any onAfter hook (history(),
-// useCommandHistory, useCommandError, the devtools) ran its hooks inside an async
-// function, so it paid that function's promise and its caller's `await`, two
-// microtask turns, even when every hook returned nothing. The phase 2 study counted
-// it as 9 promise units against 7. The turn counts above pin the claim: a sync hook
-// adds none. The control keeps the counter honest, a hook's own promise still
-// costs turns. The other cases pin what must not change: an async hook delays the
-// hooks after it and the listeners, its rejection is `core:failed:hook` and the rest
-// run, and a dispatch walks the hooks it started with (tests/hook-removal-parity).

@@ -1,4 +1,12 @@
-/** A plugin's memory of a command ends when its undo lands, so a redo runs (log s35.181). Rationale at the end. */
+/**
+ * A plugin's memory of a command ends when its undo lands, so a redo runs.
+ * Why: history's redo dispatches the recorded action again; a cache or idempotent plugin that kept the first
+ * answer would return it, the handler would not run, and the store would stay undone while history reads the step
+ * as redone. An undone command's kept answer is stale, as a write makes a stored response stale (RFC 9111 4.4).
+ * Shows: redo restores the step past cache and idempotent, including a scope that does not match the $undo name;
+ * only an undo that lands forgets (a throw or { ok: false } does not); and unrelated memory is kept.
+ * See: docs/rc-alignment-log.md s35.181, s35.150, RFC 9111 4.4
+ */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, idempotent } from '../src/plugins-extra';
@@ -133,16 +141,3 @@ describe('controls: memory that no undo touched is kept', () => {
     expect(runs).toBe(1);
   });
 });
-
-/*
- * history's redo dispatches the recorded action again (origin 'redo'). A
- * cache or idempotent plugin that kept the first run's answer gave it back,
- * so the handler never ran: the store stayed undone and history read the step
- * as redone (log s35.150, finding F6a). The rule of item 6 is that a state
- * change is never answered from memory. An undo that landed makes the kept
- * answer stale, as a write makes a stored response stale in RFC 9111 4.4. The
- * bus tells every installed plugin through `forget(cmd)` after the `$undo`
- * inverse lands, so a plugin whose scope does not match the `$undo` name (an
- * exact `['cartAdd']`) still hears it. "Landed" is the ledger's rule: no
- * throw, no rejection, no `{ ok: false }`. Log s35.181.
- */

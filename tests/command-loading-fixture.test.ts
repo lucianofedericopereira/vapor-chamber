@@ -1,29 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - per-(action, target) loading from `useSharedCommandState().pending`.
- *
- * The question a panel asks is "is THIS service restarting", which the global
- * `anyPending` cannot answer. Everything here runs against the
- * real thing: a real Vapor component mounted from the with-vapor browser dist,
- * the chamber pointed at that same module via `configureVue()` (two Vue dists
- * are two disconnected reactivity engines - see keepalive-input-scope-fixture),
- * and real sync and async buses dispatched through the RAW `bus.dispatch`, not
- * a composable - loading is bus-wide, so any dispatch counts.
- *
- * Atomicity is measured, not assumed: each key is read inside its own
- * `watchEffect({ flush: 'sync' })` in the component's setup, and the run
- * counters must show that a transition on one key never re-runs a reader of
- * another.
- *
- * The pairing this rests on: the start is the bus's `started` fact (before every
- * before-hook) and the settle its `settled` fact (before every listener), matched
- * by the Command object itself. So a settle with no start - a pre-flight abort,
- * a query - is ignored rather than decremented from someone else's count. The one exit
- * with a start and no settle is a PLUGIN that throws or rejects: neither runner
- * catches it, so no after-hook or listener fires. Pinned at the end.
- * That was true until plugin:failed:plugin: both runners now convert the throw into
- * a result, and `onMissing: 'throw'` is settled before it is re-thrown, so the
- * cases at the end pin that every start settles (tests/plugin-throw-fixture.test.ts).
+ * FIXTURE: per-(action, target) loading from `useSharedCommandState().pending`, in a real Vapor component.
+ * Why: a panel asks "is THIS service restarting", which `anyPending` cannot answer; a change on one key must never re-run another key's reader.
+ * Shows: a key is true while its target is in flight, false once the last settles; a settle with no start is ignored; refusals, plugin throws, onMissing 'throw' all settle.
+ * See: tests/plugin-throw-fixture.test.ts, tests/isloading-profile.test.ts.
  */
 
 import { beforeEach, describe, expect, vi } from 'vitest';
@@ -35,6 +15,7 @@ const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 type VaporApi = any;
 let v: VaporApi;
 
+// The chamber uses the component's own dist: two Vue dists are two disconnected reactivity engines.
 beforeEach(async () => {
   v = await import(/* @vite-ignore */ WITH_VAPOR);
   configureVue(v);
@@ -78,6 +59,7 @@ function mountPanel(bus: CommandBus, keys: Array<[string, unknown?]>) {
   };
 }
 
+// A start is the bus's `started` fact, a settle its `settled` fact, matched by the Command object.
 describe('pending - async bus', () => {
   it('true while THIS target is in flight, false once it settles; another target never re-runs', async () => {
     const bus = createAsyncCommandBus() as unknown as CommandBus;

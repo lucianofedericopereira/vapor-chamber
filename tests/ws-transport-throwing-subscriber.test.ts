@@ -1,8 +1,8 @@
 /**
- * FIXTURE - a synchronous subscriber that THROWS on `wsTransport`'s
- * `connected` signal must not stop the bookkeeping behind the write: the queue
- * flush on open, the reconnect on close, the teardown in `disconnect()`. Real
- * Vue `effect`s. The long note is at the end.
+ * A synchronous Vue `effect` that throws on `wsTransport`'s `connected` signal, and the bookkeeping behind that write.
+ * Why: a Vue effect runs inside the write that triggers it, so a throwing subscriber would skip the queue flush and `onConnect` on open, `onDisconnect` and the reconnect on close, and the failing of in-flight requests and closing of the socket in `disconnect()`.
+ * Shows: with a throwing subscriber each of those still happens and the error still escapes the handler (or `disconnect()`); with none, the order of the write, sends, callbacks, reconnect socket, close and settled request is pinned as an event list.
+ * See: log s35.18, log s35.23
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -115,7 +115,7 @@ describe('wsTransport: a throwing sync subscriber on `connected`', () => {
     const escaped = open(socket);
 
     expect(threw).toBe(1);
-    // Unchanged: the error still leaves the socket's `onopen` handler.
+    // The error still leaves the socket's `onopen` handler.
     expect(escaped).toBe(boom);
     expect({ connected: bridge.connected.value, sent: socket.sent.length, onConnect: counts.onConnect }).toEqual({
       connected: true,
@@ -215,28 +215,3 @@ describe('wsTransport: a throwing sync subscriber on `connected`', () => {
     runner.effect.stop();
   });
 });
-
-/*
- * Why this file exists. Found by reading `transports.ts` against Vue
- * `ef5ff106` (log s35.18) and fixed in s35.23: the shape `runDispatch` had.
- *
- * `connected.value = ...` was the first statement of the socket's `onopen`
- * and `onclose` handlers and the second of `disconnect()`, with the
- * bookkeeping after it. A Vue effect runs inside the write that triggers it,
- * so a subscriber that throws there skipped the bookkeeping:
- *
- *   onopen       the queue was not flushed (a command dispatched while the
- *                socket was connecting was never sent, and sat until its own
- *                timeout) and `onConnect` did not run.
- *   onclose      `onDisconnect` did not run and no reconnect was scheduled:
- *                the bridge stayed down.
- *   disconnect   in-flight requests were not failed and the socket was not
- *                closed.
- *
- * Each write now sits in a `try` whose `finally` holds the bookkeeping. The
- * subscriber's error still leaves the handler (or `disconnect()`), as before;
- * each test pins that too. The last test is the control: the order of the
- * subscriber's run against sends, callbacks, the reconnect socket, the close
- * and the settled request. The lists are the ones this test produced before
- * the move.
- */

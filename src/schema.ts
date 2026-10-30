@@ -297,12 +297,15 @@ export function schemaValidator(schema: BusSchema): PluginParts {
   // Precompile per-action checks once. The validator sits on the default-on
   // dispatch path of createSchemaCommandBus and the schema is fixed at creation,
   // so walking Object.entries(fields) per command is pure re-allocation.
+  // A side with no fields is null, not an empty list: it has nothing to check,
+  // so a non-object there passes.
+  const checksOf = (fields: FieldMap | undefined): CompiledChecks | null => {
+    const checks = fields ? compileFields(fields) : [];
+    return checks.length > 0 ? checks : null;
+  };
   const compiled = new Map<string, { target: CompiledChecks | null; payload: CompiledChecks | null }>();
   for (const [action, def] of Object.entries(schema)) {
-    compiled.set(action, {
-      target: def.target ? compileFields(def.target) : null,
-      payload: def.payload !== undefined ? compileFields(def.payload) : null,
-    });
+    compiled.set(action, { target: checksOf(def.target), payload: checksOf(def.payload) });
   }
   // Coded through the plugin's own `fail`: `schemaValidator:invalid:payload`,
   // a verdict (a plain Error would read `failed`, and an outbox would keep the
@@ -318,20 +321,15 @@ export function schemaValidator(schema: BusSchema): PluginParts {
     // malformed. This gate's most important caller is an LLM (the MCP layer
     // forwards `args?.payload` raw), the caller most likely to send a string
     // where an object belongs.
-    if (c.target && c.target.length > 0 && !isPlainObject(cmd.target)) {
-      return reject(fail, cmd.action, [`target: expected object, got ${describe(cmd.target)}`]);
-    }
-    if (c.target && isPlainObject(cmd.target)) {
+    if (c.target) {
+      if (!isPlainObject(cmd.target)) return reject(fail, cmd.action, [`target: expected object, got ${describe(cmd.target)}`]);
       const errs = runChecks(c.target, cmd.target);
       if (errs.length) return reject(fail, cmd.action, errs);
     }
     // An ABSENT payload still skips: `actionToMcpTool` only declares (and
-    // requires) `payload` for actions whose schema has one, and a schema with
-    // no payload fields compiles to zero checks anyway.
-    if (c.payload && c.payload.length > 0 && cmd.payload !== undefined && !isPlainObject(cmd.payload)) {
-      return reject(fail, cmd.action, [`payload: expected object, got ${describe(cmd.payload)}`]);
-    }
-    if (c.payload && isPlainObject(cmd.payload)) {
+    // requires) `payload` for actions whose schema has one.
+    if (c.payload && cmd.payload !== undefined) {
+      if (!isPlainObject(cmd.payload)) return reject(fail, cmd.action, [`payload: expected object, got ${describe(cmd.payload)}`]);
       const errs = runChecks(c.payload, cmd.payload);
       if (errs.length) return reject(fail, cmd.action, errs);
     }
@@ -341,7 +339,7 @@ export function schemaValidator(schema: BusSchema): PluginParts {
     id: 'schemaValidator',
     validate(action) {
       const c = compiled.get(action);
-      return c && check(c);
+      return c && (c.target || c.payload) ? check(c) : undefined;
     },
   };
 }

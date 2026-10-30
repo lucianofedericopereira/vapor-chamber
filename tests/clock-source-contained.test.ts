@@ -1,19 +1,8 @@
 /**
- * `_configureClock` must move `meta.ts` and NOTHING else.
- *
- * The swappable clock exists so a dispatch-bound consumer can trade exact
- * per-command timestamps for ~15-17ns (see clock-source-ab.test.ts). That trade
- * is only acceptable if it is contained: every TTL / expiry / backoff decision
- * in this library reads `Date.now()` DIRECTLY, never through `stampMeta`, so a
- * frozen or coarse clock cannot silently extend a cache entry, hold a circuit
- * breaker open, or defeat a rate limiter.
- *
- * That containment is currently true by construction rather than by design -
- * `cache`, `idempotent`, `circuitBreaker`, `rateLimit`, `pace`, the
- * transport queues, the CSRF cache and the outbox all call `Date.now()` at their
- * own call sites. This file pins it, so a future refactor that routes any of
- * them through the injectable clock fails here instead of in production, where
- * the symptom would be an entry that never expires.
+ * `_configureClock` moves `meta.ts` and nothing else.
+ * Why: every TTL, expiry and backoff reads `Date.now()` at its own call site, so a frozen clock cannot keep a cache entry, a circuit or a rate limit alive.
+ * Shows: a frozen clock freezes meta.ts while meta.id stays unique; cache and idempotent still expire on system time; the default clock follows faked time.
+ * See: tests/clock-source-ab.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _configureClock, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -22,24 +11,12 @@ import { cache, idempotent } from '../src/plugins-extra';
 /** A deliberately FROZEN clock - the worst case for anything that expires. */
 const FROZEN = 1_000_000;
 
-/**
- * The TTL handed to the plugins in the two expiry tests below, and the wait
- * derived from it.
- *
- * Both run under FAKE timers, so no real time passes and the exact value is
- * immaterial - these are names, not tuned numbers. Real timers would make a
- * cache HIT asserted right after the write flaky: on a loaded machine a
- * scheduling hiccup between two adjacent statements can outlive a short TTL.
- */
+/** Names, not tuned values: fake timers pass no real time, and real ones would make the hit right after the write flaky. */
 const EXPIRY_TTL = 10;
 const PAST_EXPIRY = EXPIRY_TTL * 3;
 
 afterEach(() => {
-  // `_configureClock()` with no argument restores the default. Restoring with
-  // `_configureClock(Date.now)` looks equivalent and is not: it pins the
-  // intrinsic captured at that moment, so a later `vi.setSystemTime` cannot
-  // reach it. The first version of this teardown did exactly that and made the
-  // fake-timer test below fail for a reason that had nothing to do with it.
+  // No argument: `_configureClock(Date.now)` would pin the intrinsic, which vi.setSystemTime cannot reach.
   _configureClock();
   vi.useRealTimers();
 });
@@ -58,15 +35,12 @@ describe('_configureClock - containment', () => {
     // Both commands share the frozen timestamp - the documented trade.
     expect(seen[0].ts).toBe(FROZEN);
     expect(seen[1].ts).toBe(FROZEN);
-    // ...but identity is still unique and ordered, which is what ordering must
-    // rely on. This is the reason the trade is defensible at all.
+    // ...but identity stays unique and ordered, which is what ordering relies on.
     expect(seen[0].id).not.toBe(seen[1].id);
   });
 
   it('does NOT freeze cache TTL expiry', async () => {
-    // Fake timers move Date.now(), which is what cache() reads, while the
-    // injected clock stays FROZEN - so this still proves the two are separate,
-    // and proves it deterministically instead of racing a real sleep.
+    // Fake timers move Date.now(), which cache() reads, while the injected clock stays frozen.
     vi.useFakeTimers();
     _configureClock(() => FROZEN);
     let calls = 0;
@@ -84,9 +58,7 @@ describe('_configureClock - containment', () => {
   });
 
   it('does NOT freeze idempotent TTL expiry', async () => {
-    // Same reasoning as the cache test above: fake time is deterministic, a
-    // real sleep is a race. The handler settles on a microtask, which fake
-    // timers do not touch, so the awaits below still resolve normally.
+    // The handler settles on a microtask, which fake timers leave alone.
     vi.useFakeTimers();
     _configureClock(() => FROZEN);
     let calls = 0;
@@ -103,9 +75,7 @@ describe('_configureClock - containment', () => {
   });
 
   it('leaves meta.ts tracking faked system time by DEFAULT', () => {
-    // 12+ files in this suite fake time. With the default clock, meta.ts must
-    // follow it - this is precisely what a cached clock would break, and why
-    // caching is opt-in rather than the default.
+    // Many files fake time and the default clock must follow it, which is why caching is opt-in.
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
 

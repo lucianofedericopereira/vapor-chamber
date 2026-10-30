@@ -1,4 +1,9 @@
-// vapor-chamber/vitest/mcp: the three tools, on a real Vitest and a real project. More at the end of the file.
+/**
+ * vapor-chamber/vitest/mcp: the runTests, getTestResults and getCoverageGaps tools, on a real Vitest and a project written to the OS temp dir.
+ * Why: an agent would get stale results after an edit, a crash instead of a coded error, or a way to pass an option through a filter.
+ * Shows: the three tool names; counts and failure messages; filters; edits seen on a re-run and staleness reported; runs serialized; unhandled rejections and load failures as run errors; bad filters refused; coverage gaps from a real coverage run; a coded error when no report is written; serveVitestMcp on stdio.
+ * See: src/vitest-mcp.ts, tests/vitest-consumer.test.ts
+ */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -77,6 +82,7 @@ describe('runTests and getTestResults, on a warm Vitest', () => {
 
   it('a re-run sees an edited test file and an edited source file, and getTestResults says when it is stale', async () => {
     writeFileSync(join(root, 'tests/cart.test.js'), CART_TEST.replace('toBe(2)', 'toBe(3)'));
+    // Each sleep after a write gives fs.watch time to report it; a warm Vitest only sees an edit the server invalidated.
     await sleep(300);
     expect(json(await mcp.call('runTests', { target: { files: ['tests/cart.test.js'] } }))).toMatchObject({ passed: 0, failed: 1 });
     expect(json(await mcp.call('getTestResults'))).toMatchObject({ failed: 1, stale: false, changedSince: [] });
@@ -228,17 +234,3 @@ describe('serveVitestMcp', () => {
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('createMcpHandler'));
   });
 });
-
-/**
- * `vapor-chamber/vitest/mcp`, in-repo: `createVitestMcp` on a real Vitest
- * created in this test worker, driving a project written to the OS temp dir.
- * The tools are called the way an agent calls them, through the real
- * `createMcpHandler` and `mcpClient`.
- *
- * The coverage tool runs `vitest run --coverage` in a child process, as it does
- * for a user, so its report is real too. The stdio server from a packed
- * install, started as an MCP client starts it, is tests/vitest-consumer.test.ts.
- *
- * The waits after writing a file give `fs.watch` time to report it; a warm
- * Vitest only sees an edit the server invalidated (see src/vitest-mcp.ts).
- */

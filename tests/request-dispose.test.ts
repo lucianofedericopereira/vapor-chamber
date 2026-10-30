@@ -1,29 +1,8 @@
 /**
- * dispose() settles waiting request()s at once, and the sync request()
- * honours its caller's signal.
- *
- * Before: dispose() cancelled only its own throttle timers. A request() still
- * waiting on its responder kept its timer (default 5000 ms), which held a
- * Node process open - SSR is dispose()'s named use case - and then resolved
- * as core:timeout:request, which the registry marks retryable, inviting a
- * retry against a bus whose responders were gone. Now each bus keeps one
- * cancel per waiting request (`waiting`, lazily null like `deferred`):
- * dispose() runs them, every waiting request settles as core:aborted:dispatch (not
- * retryable) with its timer cleared, and the next request() works. There is
- * no disposed state - the stance of Vue 3.6's EffectScope.stop() (rc.8,
- * @vue/reactivity), which polices nothing after stopping.
- *
- * The responder is not told: only the caller's own signal reaches
- * cmd.signal, and only on the async bus. The sync command keeps the four
- * fields every sync command has - Command.signal says sync bus paths ignore
- * the field, and docs/performance.md's shape note says why: a `signal` store
- * on the sync path is the class of change measured 25% worse. A bus-owned
- * signal on every request, composed with the caller's, was built first and
- * measured slower on both waiting paths (docs/rc-alignment-log.md s33, V5).
- *
- * The sync request() also honours the caller's { signal } now: its type
- * accepted one and its body ignored it. Pre-aborted, it settles before the
- * responder runs; aborted while waiting, at once, timer cleared.
+ * dispose() settles waiting request()s at once, and the sync request() honours its caller's signal.
+ * Why: a waiting request left alive by dispose() would keep its timer (default 5000 ms) holding a Node process open (SSR) and resolve as the retryable core:timeout:request against a bus whose responders are gone; dispose() settles it as the non-retryable core:aborted:dispatch. There is no disposed state, so the next request() works.
+ * Shows: on both buses dispose() settles a waiting request with core:aborted:dispatch and no timer left, leaves a caller's signal unaborted, and a later request() succeeds; on the sync bus a pre-aborted or mid-flight abort settles the request (responder not run in the first case); the sync command keeps its five fields with signal undefined; on the async bus the responder gets an AbortSignal that a lone caller's abort aborts, with its reason.
+ * See: docs/performance.md, tests/v8-shapes.test.ts
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, type BusError, type Command, type CommandResult } from '../src/command-bus';
@@ -142,7 +121,6 @@ describe('sync bus: request() honours the caller signal', () => {
   });
 
   it('the sync command carries no signal: its slot stays undefined, the five fields every command has', async ({ bus }) => {
-    // The engine's own map check for this sits in tests/v8-shapes.test.ts.
     let requested: Command | undefined;
     bus.respond('q', (cmd) => { requested = cmd; return 'answer'; });
     const caller = new AbortController();
@@ -164,8 +142,7 @@ describe('async bus: the caller signal still reaches the responder', () => {
     const r = await bus.request('q', {}, undefined, { signal: caller.signal });
 
     expect(r.value).toBe('answer');
-    // The bus's own signal, aborted once every caller holding the request has
-    // aborted (tests/request-join.test.ts): with one caller, that caller's abort.
+    // cmd.signal is the bus's own signal, aborted once every caller holding the request has aborted (tests/request-join.test.ts).
     expect(seen).toBeInstanceOf(AbortSignal);
     expect(seen?.aborted).toBe(false);
   });

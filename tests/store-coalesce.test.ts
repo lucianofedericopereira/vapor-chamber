@@ -1,4 +1,9 @@
-/** A store with `coalesce: true` writes its state once per microtask, every write chained on the pending one. Rationale at the end. */
+/**
+ * A store with `coalesce: true` writes its state once per microtask, every write chained on the pending one.
+ * Why: a burst of dispatches should cost one state write, one field event and one persist save; a state from outside (a server's, a tab's, a seed) is a fact and must land at once; undo is refused because a coalesced write has no "after" until the microtask.
+ * Shows: on both runtimes, three dispatches give chained results and one write, `$reset` chains, a seed lands at once, persist saves once, a write before an async read chains and the replay keeps it, undo throws `store:invalid:coalesce` (code only in production); without coalesce each dispatch writes.
+ * See: log s36.62, tests/store-facts-lane.test.ts
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createCommandBus, type CommandResult } from '../src/command-bus';
 import { defineChamberStore as defineVue } from '../src/store';
@@ -103,15 +108,3 @@ describe('coalesce, refused in production', () => {
     }
   });
 });
-
-/*
- * `useCommandState(initial, handlers, { coalesce: true })` wrote its signal once
- * per microtask, each handler chained on the pending value. It folds into the
- * store (plan 1.32 4e): `coalesce` is a write mode chosen at definition, and
- * the store's own commands take it, its actions and `$reset`. A state from
- * outside (a server's, a tab's, a seed) is a fact written at once, after the
- * pending chain lands (tests/store-facts-lane.test.ts). An action's result is
- * the pending state. With
- * `undo` it is refused: the ring records [command, before, after] at the write,
- * and a coalesced write has no "after" until the microtask.
- */

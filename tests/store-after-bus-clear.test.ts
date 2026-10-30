@@ -1,4 +1,9 @@
-/** After `bus.clear()` on the async bus, `useStore(bus)` builds a store whose actions run. Rationale at the end. */
+/**
+ * After `bus.clear()` on the async bus, `useStore(bus)` builds a new store whose actions run.
+ * Why: clear() removes every handler and empties the bus's store registry together; joining a store from before the clear would answer `core:missing:handler`.
+ * Shows: the next use builds a different store whose action succeeds and writes state; without clear() the same definition joins its store.
+ * See: log s36.62
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store/core';
@@ -25,14 +30,3 @@ describe('a store after bus.clear()', () => {
     first.$dispose();
   });
 });
-
-/*
- * `bus.clear()` removes every handler and, on the async bus, empties the map
- * a server's state finds its store in. The store registry was a second map
- * that clear() never reached: the next `useStore(bus)` joined the old store,
- * whose actions then answered `core:missing:handler`. Since 4e (log 36.62) the
- * registry IS that map, one entry per store, so clear() empties both and the
- * next `useStore(bus)` builds a new store. The sync bus has no such map of its
- * own: its stores live in the registry the first store makes, untouched by
- * clear(), as before.
- */

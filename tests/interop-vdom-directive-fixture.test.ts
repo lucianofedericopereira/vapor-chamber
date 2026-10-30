@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - the vDOM directive plugin on a VAPOR child of a vDOM parent, under
- * `vaporInteropPlugin`. Fails on Vue 3.6.0-rc.9, passes from rc.10. The long
- * note is at the end of this file.
+ * Fixture: the vDOM directive plugin (v-vc-command, v-vc-payload, v-vc-optimistic) on a Vapor child of a vDOM parent, under vaporInteropPlugin.
+ * Why: a directive on a component applies to its root element, and a Vapor child can swap that root (v-if / v-else) without the parent re-rendering; if the directive does not follow the root, the new root dispatches nothing, the detached one still does, and a .delegate listener is never released.
+ * Shows: listeners follow the root through a branch switch and a binding update, 50 parent re-renders add no listener, .delegate releases its document listener on unmount, payload and optimistic reach the new root, KeepAlive keeps one element and one listener, and a text root mounts nothing and only Vue warns.
+ * See: docs/rc-alignment-log.md, src/directives.ts, tests/compile-vapor.ts.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +39,7 @@ describe('vDOM directive plugin on a Vapor child (vaporInteropPlugin)', () => {
     });
   });
 
-  /** Click listeners on elements (the direct mode) and on the document (`.delegate`), added minus removed. */
+  /** Click listeners on elements (the direct mode) and on the document (`.delegate`), added minus removed. Spies sit on Element.prototype and document: EventTarget.prototype counts nothing under happy-dom. */
   function listenerSpies() {
     const add = vi.spyOn(Element.prototype, 'addEventListener');
     const remove = vi.spyOn(Element.prototype, 'removeEventListener');
@@ -218,36 +219,3 @@ describe('vDOM directive plugin on a Vapor child (vaporInteropPlugin)', () => {
     host.remove();
   });
 });
-
-/*
- * WHY THIS FILE EXISTS. `createDirectivePlugin()` registers `v-vc-command`,
- * `v-vc-payload` and `v-vc-optimistic` as vDOM directives. Put on a COMPONENT,
- * a vDOM directive is applied to the component's root element. When the
- * component is a Vapor one, inside a vDOM parent with `vaporInteropPlugin`,
- * the root is Vapor's to replace: a root `v-if` / `v-else` swaps the element
- * without the vDOM parent rendering again.
- *
- * On Vue 3.6.0-rc.9 the directive stayed on the element that left. Measured
- * with the probe this fixture was promoted from (docs/rc-alignment-log.md,
- * s35.8): after the switch the new root dispatched nothing, the detached
- * element still dispatched, a binding update did not reach the new root, and a
- * `.delegate` registration never released its document listener at unmount.
- * No test of ours installed the plugin together with interop, so the suite was
- * green throughout.
- *
- * Vue 3.6.0-rc.10 (`437abc2a`, `8cf0c49c`, `8d272536`, `19c79908`) moved the
- * directive hooks of a Vapor child into interop, which follows the child's
- * root: `beforeUnmount` on the root that leaves, `mounted` on the one that
- * replaces it, each with the bindings it was mounted with. That is the rule at
- * the top of src/directives.ts (teardown is keyed to what was mounted),
- * implemented on Vue's side of the call. Nothing in `src` changed for it; this
- * file is what keeps it true.
- *
- * Every template here goes through tests/compile-vapor.ts, so the fixture is
- * held to what the installed compiler emits for the notation a consumer types.
- *
- * THE SPY IS ON `Element.prototype`, and on `document` for `.delegate`. A spy
- * on `EventTarget.prototype` counts nothing under happy-dom. The first
- * assertion of the direct test is the positive control: one listener on the
- * first root at mount.
- */

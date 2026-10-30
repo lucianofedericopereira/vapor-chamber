@@ -1,4 +1,9 @@
-/** A store's own keyed field events ($onField) and their Vue binding (fieldRef). Log s35.104 (measured), s35.125. */
+/**
+ * A store's keyed field events ($onField) and their Vue binding (fieldRef).
+ * Why: a subscriber or reader of one field would fire or re-run on unrelated fields, or miss undo and $reset changes.
+ * Shows: $onField fires only for the changed field with its new value, also on undo and $reset, unsubscribes safely, and is reserved against actions; fieldRef re-runs only on its own field and is one shared binding per field.
+ * See: log s35.104, s35.125.
+ */
 import { describe, expect, it } from 'vitest';
 import { effectScope, watchEffect } from 'vue';
 import { createCommandBus } from '../src/command-bus';

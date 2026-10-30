@@ -1,5 +1,12 @@
 // @vitest-environment happy-dom
-// FIXTURE - the transition bridge on a Vapor <Transition> around <KeepAlive>: the leave runs in every mode. The long note is at the end.
+/**
+ * The transition bridge on a Vapor <Transition> around <KeepAlive>, in in-out and out-in modes.
+ * Why: the bridge only supplies hook bodies, so an app using v-bind="t" waits on the *Leave commands
+ * and expects the old element gone after them; the kept-alive branch's leave must run in every mode.
+ * Shows: on a sync and an async bus, in-out dispatches B's enter then A's leave and leaves only B in the DOM
+ * with phase idle, and out-in (control) dispatches A's leave and B's enter, with no errors.
+ * See: vuejs/core#15895, docs/rc-alignment-log.md s36.46, tests/compile-vapor.ts
+ */
 
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -60,20 +67,3 @@ describe('transition bridge on a Vapor <Transition> around <KeepAlive>', () => {
     });
   }
 });
-
-/*
- * WHY THIS FILE EXISTS. On Vue 3.6.0-rc.11 a Vapor `<Transition mode="in-out">`
- * around `<KeepAlive>` never ran the leave of the branch it switched away
- * from. The bridge dispatched B's three enter commands and nothing for A, and
- * A stayed in the DOM beside B, on a sync bus and an async one alike. Vue
- * 3.6.0-rc.12 (#15895, "start the in-out leave of a kept-alive branch after
- * the incoming enter") runs it. The in-out cases fail on rc.11 and pass on
- * rc.12 (docs/rc-alignment-log.md, the rc.12 section). out-in is the control:
- * it is right on both.
- *
- * The bridge only supplies hook bodies, so the fix is Vue's. This file pins
- * what an app using `v-bind="t"` observes: the `*Leave` commands it waits on,
- * and the element gone after them.
- *
- * Every template goes through tests/compile-vapor.ts on the installed Vue.
- */

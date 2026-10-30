@@ -1,37 +1,10 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - a Vue app that imports the composables from the package ROOT only,
- * under production-bundle conditions.
- *
- * WHY THIS FILE EXISTS. The root reaches Vue through `probeVue()`: a sync read
- * of two global slots, then a bare `import('vue')`. In a built bundle the bare
- * specifier cannot resolve, and `__VUE__` holds Vue's own boolean `true` (set
- * by `createVaporApp()` / `createApp()`, production builds included - see
- * tests/vue-detection-global-clobber.test.ts). So nothing ever calls
- * `applyVueModule()`: `configureSignal()` never runs, `onScopeDispose` and
- * `hasInjectionContext` stay unset, and every composable silently hands back
- * a plain `{ value }`, arms no cleanup, and skips the KeepAlive guard.
- *
- * Nothing in the suite pinned this. `tests/vue-subpath-wiring-fixture.test.ts`
- * calls `configureVue()`; `tests/untracked-production.test.ts` covers
- * `untracked()` only; every other composable test lets vitest resolve `vue`,
- * which is the dev-server asymmetry that hides the failure. The docs led users
- * straight into it: the README Vapor samples imported `useCommand` from the root.
- *
- * WHAT IT PINS:
- *   1. The degradation itself, so it is evidence rather than prose: `pending()`
- *      is not a Vue ref, and a listener from `on()` outlives `app.unmount()`.
- *   2. The fix: a warning, NOT dev-gated (production is the only place this
- *      state exists), fired exactly once, naming the remedy.
- *   3. The control: the same app with the namespace handed over gets a real
- *      ref, cleanup on unmount, and no warning.
- *
- * Production conditions are reproduced the way the wiring fixture does it:
- * `vue` made unresolvable, a fresh module registry, `src/` imported directly.
- * Only src/chamber and src/command-bus are imported - no src/vue, no
- * configureVue - because that is exactly the consumer this is about.
+ * A Vue app importing the composables from the package root only, under production-bundle conditions.
+ * Why: the root reaches Vue through `probeVue()`, a sync read of two global slots then a bare `import('vue')`. In a built bundle the bare specifier cannot resolve and `__VUE__` holds Vue's own `true`, so `applyVueModule()` never runs: composables would silently return a plain `{ value }`, arm no cleanup and skip the KeepAlive guard. The warning must therefore not be dev-gated (production is the only place this state exists), must fire once, and must name the remedy. Production conditions: `vue` made unresolvable, a fresh module registry, `src/chamber` and `src/command-bus` imported directly with no src/vue and no configureVue.
+ * Shows: without configureVue, `pending()` is not a Vue ref, a listener from `on()` outlives `app.unmount()`, and one warning names the remedy; with the namespace handed over, a real ref, cleanup on unmount and no warning; no warning on a page where Vue made no app; useCommandQuery warns; an IIFE build omits the subpath advice; the DEV probe-path hint needs a window, and on a server with NODE_ENV=production the probe still resolves a real ref.
+ * See: tests/vue-detection-global-clobber.test.ts, tests/vue-subpath-wiring-fixture.test.ts
  */
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
@@ -64,11 +37,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
     vi.resetModules();
   });
 
-  /**
-   * Import order of a real bundle: the library module evaluates first (its
-   * probe sees no Vue), then the app is created - which is when Vue writes
-   * `__VUE__ = true` - then setup() runs the composables.
-   */
+  // Import order of a real bundle: the library evaluates first (its probe sees no Vue), then the app is created (Vue writes `__VUE__ = true`), then setup() runs.
   async function mountRootOnly(configure: boolean) {
     makeBareSpecifierUnresolvable();
     vi.resetModules();
@@ -110,7 +79,6 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
     // The state the warning keys off, produced by Vue itself, not arranged.
     expect(vueFlagInSetup).toBe(true);
 
-    // 1. The degradation, measured against the same dist the app runs on.
     expect(v.isRef(api.pending('probe'))).toBe(false);
     expect(v.isRef(second.past)).toBe(false);
     bus.register('noop', () => 'ok');
@@ -119,7 +87,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
     bus.dispatch('ping', null);
     expect(seen).toEqual(['ping']); // the listener outlived the component
 
-    // 2. The fix: one warning for two composables (and any number after).
+    // One warning for two composables, and for any number after.
     const msgs = rootOnlyWarnings(warn);
     expect(msgs).toHaveLength(1);
     expect(msgs[0]).toMatch(/vapor-chamber\/vue/);
@@ -168,8 +136,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
   });
 
   it('IIFE builds drop the subpath advice: a <script> page can only configureVue(Vue)', async () => {
-    // `__VC_IIFE__` is a build-time define; with no define (vitest) the
-    // `typeof` guard reads the global, so setting it models the IIFE build.
+    // `__VC_IIFE__` is a build-time define; with none (vitest) the `typeof` guard reads the global, so setting it models the IIFE build.
     g.__VC_IIFE__ = true;
     makeBareSpecifierUnresolvable();
     vi.resetModules();
@@ -187,17 +154,7 @@ describe('root-only Vue consumer under production-bundle conditions', () => {
   });
 });
 
-/**
- * SSR: the DEV probe-path hint needs a `window`.
- *
- * The hint tells a PAGE that its production bundle cannot resolve the bare
- * `import('vue')`. On a server that is false - Node resolves it from
- * node_modules in production too. Measured on Node with the package
- * externalized (dist/index.js): under NODE_ENV=production a root composable
- * gets a real Vue ref and nothing degrades, so the advice would be wrong
- * there. vitest resolves `vue` here exactly as Node does; `window` is removed
- * to model the server.
- */
+// The hint tells a page its bundle cannot resolve `import('vue')`; on a server Node resolves it, so the advice would be wrong. Removing `window` models the server.
 describe('probe-path hint on a server (no window)', () => {
   const HINT = /detected at runtime rather than at build time/;
 

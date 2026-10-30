@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # scripts/ab/session.sh <jobs-file> <out-dir>
 #   npm run ab:session -- <jobs-file> <out-dir>
-# One measurement session (docs/V8-RULES.md rule 17), started on the owner's
-# "go": the user's other busy processes are demoted to background QoS for the
+# One measurement session (docs/V8-RULES.md rule 17), only when the owner asks
+# for one: plain `npm run ab` is the default. The user's other busy processes are demoted to background QoS for the
 # session (macOS `taskpolicy -b`, which keeps them on the efficiency cores;
 # their work goes on, slower), never this shell's ancestry, whose children
 # would inherit it; restored on any exit. No load ceiling: each row of

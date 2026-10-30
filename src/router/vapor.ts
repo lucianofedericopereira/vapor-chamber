@@ -43,8 +43,12 @@
  *   render through `./vdom` plus `vaporInteropPlugin`.
  * - **No interop fallback.** Falling back silently would restore the whole
  *   cost the module exists to avoid; the guard below refuses instead.
- * - **No transition / KeepAlive / SSR integration**, parity with `./vdom`,
- *   which is keyless and exposes no scoped slot around the changing component.
+ * - **No transition / KeepAlive / SSR integration of its own.** A scoped slot
+ *   hands out the changing component, `<RouterOutlet v-slot:view="{ Component }">`,
+ *   so an app wraps it itself. It is named `view` because `default` is the
+ *   no-match fallback, and `./vdom` has no such slot.
+ *   Hydrating is not only unbuilt: the `createIf` below counts as a `v-if` chain
+ *   there, and would read a route's own `<!--[1-->` as its branch and recreate it.
  *
  * The helpers used here are what compiled Vapor SFCs call, not documented
  * user-facing API. `tests/vapor/vapor-outlet-helpers.test.ts` enumerates that
@@ -118,11 +122,18 @@ export const RouterOutlet = defineVaporComponent({
     const entryAt = () => router.currentRoute.value.render[depth];
     // A literal null when nothing matches: that is what renders a true empty
     // branch, with the fragment's own anchor as the only node left.
-    const matched = () =>
-      createDynamicComponent(() => {
-        const entry = entryAt();
-        return entry ? vaporComponentOf(entry) : null;
-      });
+    const component = () => {
+      const entry = entryAt();
+      return entry ? vaporComponentOf(entry) : null;
+    };
+    // A `view` slot gets the component as a prop, a getter as compiled slot
+    // props are, and `<Component />` in it follows the route. Read once: a
+    // conditional `view` slot that is off here is not followed. With no default
+    // slot it stays mounted with `Component` null when nothing matches.
+    // tests/vapor/vapor-outlet-view-slot.test.ts.
+    const matched = slots.view
+      ? () => createSlot('view', { Component: component })
+      : () => createDynamicComponent(component);
 
     // With a default slot, the no-match branch is the slot, and it is created
     // INSIDE a `createIf` branch: each time the branch is entered, in that

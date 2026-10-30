@@ -1,4 +1,9 @@
-/** One command envelope on every transport; its HTTP metadata as headers (log s35.138, 36.47). */
+/**
+ * The command envelope on single HTTP, batched HTTP and WebSocket, with its HTTP metadata (idempotency key, Accept, status) as headers.
+ * Why: a key sent in the body or `meta`, a missing Accept, or a result status that is ignored would make backends mis-read the same command differently per transport; a key no header can carry would be sent anyway.
+ * Shows: single HTTP sends the key only as the `Idempotency-Key` header, while a batch item and a WebSocket frame carry it in a `headers` member; `meta` holds correlation and causation; Accept is set once and an app's own wins, and a client read keeps X-Requested-With while a command sends none; a batched result or frame status stands in for a problem with none; an unencodable key fails as `transport:failed:send` with nothing sent.
+ * See: log s35.138, log s36.47, OData JSON Format 4.01 19.1 and 19.5
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, type BusError } from '../src/command-bus';
 import { createHttpClient } from '../src/http';
@@ -150,14 +155,3 @@ describe('a key no header can carry', () => {
     expect(socket().sent).toHaveLength(0);
   });
 });
-
-// The key travels once, as HTTP metadata (plan-transport-owned.md F2 as
-// corrected in revision 3): the `Idempotency-Key` header when the request is
-// the command, and the same name in a `headers` member when the command is
-// multiplexed (a batch item, a WebSocket frame; OData JSON 4.01 19.1). It
-// left `meta`, which keeps the command's own data (correlation, causation).
-// A batched result and a frame carry their own `status` (OData 19.5), which
-// stands for the response's when the problem has none. The client keeps
-// X-Requested-With on its reads: Laravel's StartSession stores a GET that is
-// not ajax as the session's previous URL (log 36.47). A key a header cannot
-// carry (a lone surrogate) fails on every wire alike, before anything is sent.

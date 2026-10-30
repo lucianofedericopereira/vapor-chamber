@@ -1,4 +1,9 @@
-// syncQuery builds its command before the depth's try: what the move keeps. The long note is at the end.
+/**
+ * syncQuery builds its command before the depth guard's try: naming throw, depth bound and answer shape.
+ * Why: a naming violation would leave the depth counter changed, or the depth bound would stop a query loop, or a bare or stepped query would answer in another shape.
+ * Shows: a naming throw reaches the caller and the bus answers query and dispatch after; a self-querying handler stops at the depth bound and the bus answers after; a bare and a stepped query return {ok, value, error} and the step sees a meta id.
+ * See: log s36.F50, log s35.204, docs/V8-RULES.md, scripts/ab/workloads/query-bare.mjs
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 
@@ -39,12 +44,3 @@ describe('sync query, its command built before the depth guard', () => {
     expect(typeof seen).toBe('string');
   });
 });
-
-// Why: phase 2 C7 moves the command literal and its stampMeta call out of the
-// depth's try/finally, the shape V8-RULES rule 2 measured on dispatch (log
-// s35.204): built inside the try, the call's exception edge sees the literal half
-// built and escape analysis keeps a meta nothing reads. The gain is the optimizer's
-// and no turn count shows it, so these pin what the move must keep: a naming throw
-// still reaches the caller with the depth counter untouched, the depth bound still
-// stops a query loop, and both query paths answer as before. The speed is the A/B's
-// (scripts/ab/workloads/query-bare.mjs).

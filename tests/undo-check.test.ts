@@ -1,4 +1,11 @@
-/** `register(action, h, { undo, canUndo })`: canUndo says whether undo can run, and undo runs only then. Rationale at the end. */
+/**
+ * register(action, handler, { undo, canUndo }): canUndo says whether undo can run, and history undoes only then.
+ * Why: history undoes newest first and asks canUndo before each undo; running an undo that no longer fits the
+ * state would corrupt it, while a rollback after a failure must always reverse the step that ran (a store's rebase relies on it).
+ * Shows: getState().canUndo and undo() follow the check (false after an unrecorded change, true again on top, dropped
+ * on unregister, async bus, useCommandHistory signal), and a transactional batch and an optimistic action roll back whatever canUndo says.
+ * See: docs/rc-alignment-log.md s35.113, s35.161
+ */
 import { afterEach, describe, expect } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -120,13 +127,3 @@ describe('a rollback does not read canUndo', () => {
     expect(undone).toEqual(['save']);
   });
 });
-
-/*
- * Owner, 2026-10-04: undo runs only when it can be undone. Log s35.113.
- *
- * canUndo is history's check: history undoes by turn, newest first, and asks
- * it before each undo. A rollback (an optimistic action's failure, a transactional batch) is
- * wired once to reverse the step that failed and never reads it. A store's
- * rebase depends on that: its canUndo is false for an older step. Owner,
- * 2026-10-05 (not built). Log s35.161.
- */

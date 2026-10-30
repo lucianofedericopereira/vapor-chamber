@@ -1,4 +1,9 @@
-// The bus / asyncBus fixtures on the entry's it / test. More at the end of the file.
+/**
+ * The `bus` and `asyncBus` fixtures that `vapor-chamber/vitest` (src/vitest.ts) adds to Vitest's `it` / `test`, imported as a consumer's test file does.
+ * Why: if the fixtures came from a second module instance, were shared across tests, or leaked into Vitest's own `it`, tests would see each other's handlers and records or lack the matchers.
+ * Shows: `it` and `test` are one extended API over an unchanged `expect`; `bus` and `asyncBus` are tapped, fresh per test, from this file's own library instance, and not the shared bus; `.extend` snippets can build on them; the entry registers no second hook pair.
+ * See: tests/vitest-consumer.test.ts
+ */
 import { TestRunner, describe, expect as vitestExpect, it as vitestIt, test as vitestTest } from 'vitest';
 import { getCommandBus } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
@@ -22,7 +27,6 @@ describe('the test API', () => {
   });
 
   it('importing the entry in a test file registers no second hook: the setup file\'s instance is reused', ({ task }) => {
-    // Measured control: importing '../src/vitest?second' instead makes 2 and 2.
     const hooks = TestRunner.getSuiteHooks(task.file);
     expect(hooks.beforeEach).toHaveLength(1);
     expect(hooks.afterEach).toHaveLength(1);
@@ -112,15 +116,3 @@ describe('a reusable snippet built with Vitest\'s own .extend', () => {
     expect(bus.hasHandler('cartAdd')).toBe(false);
   });
 });
-
-/**
- * The fixtures `vapor-chamber/vitest` adds to Vitest's own `it` / `test`
- * (v1.21.0): `bus`, a tapped `createCommandBus()`, and `asyncBus`, a
- * tapped `createAsyncCommandBus()`, built with Vitest 5's `test.extend`.
- *
- * This file imports `it`, `test` and `expect` from the entry the way a
- * consumer's test file does, while vitest.config.ts also loads the entry as a
- * setup file: the two must be one module instance. The packed-consumer half
- * (five configurations, and a second installed copy as the control) is
- * tests/vitest-consumer.test.ts.
- */

@@ -1,4 +1,9 @@
-/** P1: a plugin declares `actions`; the bus places its parts only on those (log s35.141). */
+/**
+ * A plugin's `actions` manifest: the bus places its parts only on matching actions.
+ * Why: a scoped plugin called on an action it did not declare would run rules and steps outside its scope.
+ * Shows: metrics() exposes its actions, undeclared actions are never seen while order is kept, a plugin used after a dispatch is placed on an action already seen, a part's throw names the part only inside scope, the async bus behaves the same, and the per-action caches restart past 512 actions and still place the right parts.
+ * See: log s35.141.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type PluginParts } from '../src/command-bus';
 import { metrics } from '../src/plugins-extra';

@@ -1,4 +1,9 @@
-// The HTTP client re-sends on the async bus's schedule (docs/retry.md). Notes at the end.
+/**
+ * The HTTP client re-sends on the async bus's schedule: full jitter, uniform under 200 ms x 2^n, capped at 20 s.
+ * Why: clients that failed together would come back together if their waits were not jittered; a declared Retry-After would be ignored, or slept beyond the client's 30 s ceiling.
+ * Shows: with random pinned, waits after a 503, after no reply and in postCommand are [100, 200, 400]-shaped and reach the 20 s cap; the client draws the same waits as the bus for the same random values; Retry-After sets the wait, 25 s is slept, 31 s ends the request with retryIn in context.
+ * See: docs/retry.md, log 36.16
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, createHttpClient, postCommand } from '../src/index';
 
@@ -26,6 +31,7 @@ async function settle<T>(p: Promise<T>): Promise<T> {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  // Pinned so a wait is exact; delays are whole milliseconds (delayOption truncates).
   vi.spyOn(Math, 'random').mockReturnValue(0.5);
 });
 afterEach(() => {
@@ -96,15 +102,3 @@ describe('control: a declared wait is unchanged', () => {
     expect(at).toHaveLength(1);
   });
 });
-
-/*
- * Log 36.16 item 1 (F3 of the complexity review). The client's own wait was
- * 1 s x 2^n, capped at 30 s, plus 0-200 ms: clients that failed together came
- * back within 200 ms of each other. The bus's schedule is the owner's decision
- * of 2026-09-28: full jitter, uniform under 200 ms x 2^n, capped at 20 s, so
- * they do not come back together. One function now gives both. A declared
- * wait still sets when, and the client's 30 s ceiling on a declared wait it
- * sleeps inside one request (MAX_RETRY_AFTER_MS) is a different rule: the
- * controls pin both. Math.random is stubbed so a wait is exact; delays are
- * whole milliseconds (delayOption truncates).
- */

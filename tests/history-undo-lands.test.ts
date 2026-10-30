@@ -1,16 +1,8 @@
 /**
- * useCommandHistory moves its stacks only after an undo or redo lands.
- *
- * Moving them first without looking at the outcome would, on an async bus,
- * leave an undo the server refused reading "undone": the command no longer
- * undoable, and a redo offered for a change that never happened. That is a correctness defect and an accessibility one (WCAG
- * 3.3.4 asks that a submission be reversible; a history that lies about what
- * was reversed defeats it, most of all for a screen-reader user, who cannot
- * see that nothing changed). (v1.25.0) and docs/accessibility.md.
- *
- * The API does not change: undo() and redo() still return the command at
- * once. An undo handler that returns a promise is awaited; one that returns
- * nothing (a local, synchronous undo) moves the stacks at once, as before.
+ * useCommandHistory and history(): the stacks end up where the outcome of an undo or redo puts them.
+ * Why: an undo the server refused would read "undone" (not undoable, a redo offered for a change that never happened), which misleads every user and defeats reversibility for a screen-reader user who cannot see that nothing changed.
+ * Shows: a refused or rejected undo or redo leaves past and future as they were, a landed undo moves the command to the redo stack, a synchronous undo moves at once, a second undo while one is pending is ignored, and a refusal after clear() brings nothing back.
+ * See: WCAG 3.3.4, docs/accessibility.md.
  */
 import { expect } from 'vitest';
 import { setCommandBus, useCommandHistory } from '../src/chamber';
@@ -105,16 +97,14 @@ it('a second press while an undo is pending does nothing', async ({ asyncBus: bu
   await bus.dispatch('rename', { id: 2 }, { to: 'C' });
 
   h.undo();
-  expect(h.undo()).toBeUndefined(); // ignored while the first is in flight
+  expect(h.undo()).toBeUndefined();
   release();
   await settle();
   expect(h.past.value).toHaveLength(1);
   expect(h.future.value).toHaveLength(1);
 });
 
-// The history() PLUGIN had its own undo/redo with the same defect: one concept,
-// two implementations. Both now share one ledger (src/ledger.ts), which moves
-// the stacks first and back if the call is refused (settled.ts, moveUnlessRefused).
+// history() and useCommandHistory share one ledger: it moves the stacks first and back on refusal (src/ledger.ts, src/settled.ts).
 it('history() plugin: an undo the server refuses leaves its state as it was', async ({ asyncBus: bus }) => {
   const h = history({ bus });
   bus.register('rename', async () => 'renamed', { undo: async () => refused });
@@ -165,8 +155,7 @@ it('a history cleared while an undo is in flight stays cleared when the undo is 
   h.clear();
   refuse(refused);
   await settle();
-  // The refusal moves the command back only if it is still where the undo
-  // put it; clear() emptied both stacks, so nothing comes back.
+  // A refusal moves the command back only if it is still where the undo put it; clear() emptied both stacks.
   expect(h.past.value).toHaveLength(0);
   expect(h.future.value).toHaveLength(0);
   expect(h.canUndo.value).toBe(false);

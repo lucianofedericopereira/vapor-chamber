@@ -1,5 +1,9 @@
-// The A/B child's timing loop (scripts/ab/loop.cjs): an async workload's window
-// closes when its promise settles, a sync one's when f returns (log s35.133).
+/**
+ * The A/B child's timing loop (scripts/ab/loop.cjs).
+ * Why: an async workload timed without awaiting it measures the promise, not the work.
+ * Shows: an async window closes when its promise settles, a sync one when f returns; both return the value.
+ * See: log s35.133.
+ */
 import { createRequire } from 'node:module';
 import { GCProfiler } from 'node:v8';
 import { describe, expect, it } from 'vitest';

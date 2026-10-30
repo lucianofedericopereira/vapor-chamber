@@ -1,17 +1,12 @@
 /**
- * Covers the `globalThis.__VAPOR_CHAMBER_VUE__` synchronous probe path in chamber.ts - the
- * MPA / script-tag scenario where Vue is a page global rather than an ESM import.
- * Exercises applyVueModule's full Vapor-surface detection (createVaporApp,
- * vaporInteropPlugin, defineVapor* ) which the real beta.14 ESM `vue` doesn't
- * expose as main exports, so it's otherwise unreachable in tests.
- *
- * Uses vi.resetModules() + a dynamic import so chamber's module-load probeVue()
- * re-runs with the global set. Assertions target the Vapor-API getters, whose
- * mock wiring persists even after the async ESM probe resolves (the real `vue`
- * lacks those functions, so applyVueModule never overwrites them).
+ * Vue detection in src/chamber.ts from a page global (`__VAPOR_CHAMBER_VUE__`) or `configureVue()`, with a mock Vue namespace.
+ * Why: on a script-tag or MPA page Vue is a page global, not an ESM import; if the library read Vue's own `__VUE__` key, or lost the owned slot, Vapor would go undetected.
+ * Shows: `__VUE__` (a namespace, a devtools-shaped object, or `true`) is never read for Vue; `__VAPOR_CHAMBER_VUE__` wires the full Vapor surface at module load, even beside `__VUE__ === true`; `configureVue()` wires it with no globals, ignores a falsy value and keeps prior detection; the failure hint names the unreachable case and `configureVue(`.
+ * See: tests/vue-detection-global-clobber.test.ts, tests/vue-detection-real-ordering.test.ts
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
+// A mock stands in for Vue: the `vue` Vitest resolves lacks the Vapor functions, so the async probe never overwrites the mock wiring.
 const mockVue = {
   ref: <T>(v: T) => ({ value: v }),
   shallowRef: <T>(v: T) => ({ value: v }),
@@ -55,19 +50,14 @@ describe('Vue-as-global (script-tag / MPA) sync probe', () => {
   });
 
   it('ignores a __VUE__ global that lacks ref() (devtools-hook shape)', async () => {
-    vi.stubGlobal('__VUE__', { someDevtoolsField: true }); // no .ref -> sync probe is a no-op
+    vi.stubGlobal('__VUE__', { someDevtoolsField: true });
     vi.resetModules();
     const chamber = await import('../src/chamber');
-    // Vapor getters stay null from the sync path (the real async ESM probe may
-    // still set ref-based things, but createVaporApp isn't a real main export).
     expect(chamber.getVaporAppFn()).toBeNull();
   });
 
   it('ignores __VUE__ === true - Vue\'s own marker, written when an app mounts', async () => {
-    // Not a hypothetical: Vue assigns `target.__VUE__ = true` from prepareApp()
-    // (Vapor) and baseCreateRenderer() (vDOM). Measured against the real build
-    // in tests/vue-detection-global-clobber.test.ts. Any page that has mounted
-    // presents this shape, which is why the sync channel needed a second slot.
+    // Vue writes `true` there when an app mounts (tests/vue-detection-global-clobber.test.ts).
     vi.stubGlobal('__VUE__', true);
     vi.resetModules();
     const chamber = await import('../src/chamber');
@@ -82,20 +72,8 @@ describe('the library-owned detection slot', () => {
     vi.resetModules();
   });
 
-  it('reads __VAPOR_CHAMBER_VUE__ at module load', async () => {
-    vi.stubGlobal('__VAPOR_CHAMBER_VUE__', mockVue);
-    vi.resetModules();
-    const chamber = await import('../src/chamber');
-
-    expect(chamber.isVaporAvailable()).toBe(true);
-    expect(chamber.getVaporAppFn()).toBe(mockVue.createVaporApp);
-  });
-
   it('survives the case that breaks __VUE__: Vue\'s marker already written', async () => {
-    // The ordering that loses detection through __VUE__ - an app has
-    // mounted (so __VUE__ is `true`), and the library is only imported after
-    // that (a code-split chunk, a late island, an MPA page). The owned slot
-    // still holds the namespace, so detection succeeds.
+    // An app has mounted (`__VUE__` is `true`) before the library is imported.
     vi.stubGlobal('__VUE__', true);
     vi.stubGlobal('__VAPOR_CHAMBER_VUE__', mockVue);
     vi.resetModules();
@@ -115,8 +93,7 @@ describe('configureVue', () => {
   it('wires the Vapor surface with no globals involved at all', async () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
-    // Nothing on either slot: this is the no-bundler page where the sync
-    // channel finds nothing and the async bare-specifier import cannot resolve.
+    // Nothing on either slot.
     expect(chamber.getVaporAppFn()).toBeNull();
 
     chamber.configureVue(mockVue);
@@ -142,8 +119,6 @@ describe('configureVue', () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
-    // Distinguishing "no Vue" from "Vue is here and I cannot see it" is the
-    // whole point - they have different one-line fixes.
     expect(chamber.vueDetectionHint()).toMatch(/unreachable/);
     expect(chamber.vueDetectionHint()).toMatch(/configureVue\(/);
   });

@@ -1,4 +1,9 @@
-// A failure on the wire is an RFC 9457 problem whose `type` names its condition, resolvable in docs/errors.md.
+/**
+ * A failure on the wire is an RFC 9457 problem whose `type` names its condition, resolvable in docs/errors.md.
+ * Why: an RFC client acts on `type` (retry, sign in, show a validation message) and ignores unknown extensions, so a bare `about:blank` would lose the failure's only identity.
+ * Shows: library, app and backend failures get the condition's type (a backend's own type is kept); the type survives a JSON round trip; errors.md has an anchor per condition and lists every registry code under its condition.
+ * See: log s35.80, RFC 9457, docs/errors.md
+ */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -63,17 +68,3 @@ describe('docs/errors.md, the page every type resolves to', () => {
     }
   });
 });
-
-/*
- * RFC 9457 3.1.1: "Consumers MUST use the 'type' URI ... as the problem type's
- * primary identifier"; 3.2: a client "MUST ignore" extensions it does not
- * know. With `type` left as about:blank (4.2.1: no semantics beyond the HTTP
- * status) an RFC client threw away our only identity, the `code` extension.
- * `type` now names the CONDITION (owner, 2026-10-02, log s35.80): resolvable
- * for every failure, the library's, an app's and a backend's alike, and the
- * part an RFC client acts on (retry, sign in, show a validation message). The
- * exact code stays the `code` extension. A backend's own `type` is its
- * identity and is kept. `title` is left out: RFC 9457 makes it optional, and
- * the summaries live in ERROR_CODE_REGISTRY (error-registry.ts), which the core does
- * not carry.
- */

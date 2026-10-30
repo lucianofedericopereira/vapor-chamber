@@ -1,4 +1,9 @@
-/** A batched result or a frame carries its own `headers`, and its `Retry-After` sets the wait as a response's does. Rationale at the end. */
+/**
+ * A batched result or a frame carries its own `headers`, and its `Retry-After` sets the wait as a response's does.
+ * Why: a batch answers 200 for every command, so a command's wait lives in its result's own headers; a wait is never read from the body.
+ * Shows: an idempotent action waits the declared seconds or HTTP-date, any case; others report the wait; a body `retryAfter` or an off-grammar value is no wait; WS frames alike.
+ * See: RFC 9110 10.2.3, docs/contract.md section 4, OData JSON Format 4.01 section 19.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, type BusError, type CommandResult } from '../src/command-bus';
 import { problemOf } from '../src/http-errors';
@@ -95,20 +100,3 @@ describe('a WebSocket frame with its own Retry-After', () => {
     ws.disconnect();
   });
 });
-
-/*
- * A single request declares its wait with a `Retry-After` header (RFC 9110
- * 10.2.3), and the contract reads it from the response, never from the body
- * (docs/contract.md 4). A batch answers 200 with one result
- * per command, so a command's failure has no response of its own. The standard
- * batch shape gives each result its own `headers`: OData's JSON batch response
- * (OData JSON Format 4.01, section 19), and Microsoft Graph's JSON batching,
- * which tells a client to read a throttled result's `retry-after` there. The
- * bridges read that object as a response's headers, by the same grammar
- * (delay-seconds or an HTTP-date) and case-insensitively (RFC 9110 5.1).
- * A `retryAfter` member on the problem was the proposal once recorded in 4.4.
- * No RFC defines it, and it would have read a wait from the body, so it stays
- * an ordinary problem member. The reference controller's `batch()` sends the
- * headers its command's own response would have had (`Retry-After: 1` on an
- * `in_progress`).
- */

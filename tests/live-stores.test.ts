@@ -1,4 +1,11 @@
-/** `liveStores(bus)`: the stores live on a bus, as a new array. The long note is at the end. */
+/**
+ * `liveStores(bus)`: the stores live on a bus, as a new array.
+ * Why: code that lists a bus's stores must not read an internal registry, and a loop that disposes
+ * or creates stores while iterating would otherwise skip stores or change what it holds.
+ * Shows: creation order per bus, none on a bus without stores, disposed stores and seeded-but-never-created
+ * ids left out, and the returned array is a copy.
+ * See: log s36.76
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { liveStores, seedStores } from '../src/ssr';
@@ -54,12 +61,3 @@ describe('liveStores(bus)', () => {
     a.$dispose();
   });
 });
-
-/*
- * Pinia 4.1.0 added `getStores(pinia)` (.probes/pinia-4.1-harvest.md), so code stops reading
- * its internal registry. Owner, 2026-10-20: add it as a standalone function next to
- * `storeStates`. It reads the registry each bus already keeps (a store enters it when created
- * and leaves on `$dispose`), on demand: no dispatch or store write pays for it, and an app
- * that does not import it does not carry it. A new array each call, so disposing or creating
- * stores while iterating is safe, as Pinia's tests ask.
- */

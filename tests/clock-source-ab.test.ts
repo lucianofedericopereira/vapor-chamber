@@ -1,30 +1,8 @@
 /**
- * EXPERIMENT: where does `meta.ts` come from, and what does that source cost?
- *
- * Test concludes "none of those are free, all are unavoidable for the bus pattern's semantics." That is right
- * about the meta ALLOCATION. It never asks a narrower question: `stampMeta` reads
- * the clock with `Date.now()` on every dispatch, and a clock read is not an
- * allocation. This measures whether that read is a material share of a dispatch.
- *
- * WHY IT IS SHAPED THIS WAY. An isolated loop over `Date.now()` versus a cached
- * variable is exactly the micro-bench docs/performance.md warns is worthless:
- * `Date.now()` has an observable side effect and survives, while a loop-invariant
- * variable read is hoisted or dead-code-eliminated, so the "saving" is inflated by
- * an unknown amount. (Measured that way first, it reported ~28ns recoverable -
- * treat that number as garbage.) The same doc explains the fix: measure through
- * the real bus, because "the command bus is opaque indirection" and defeats
- * folding. So both arms here run the REAL `bus.dispatch` / `bus.query` path, and
- * the only thing that changes between them is what `Date.now` resolves to.
- *
- * NO SOURCE CHANGE is required to run it: `stampMeta` calls the global
- * `Date.now`, so swapping the global swaps the clock source for the real code
- * path. That keeps this an experiment rather than a commitment - nothing ships
- * unless the number justifies it.
- *
- * Conventions follow tests/signal-shallow-ab.test.ts: interleaved A/B reps to
- * cancel thermal drift, medians (never a single run), the table PRINTED as the
- * evidence, and deliberately NO timing-threshold assertion - single-host ratios
- * are unstable under parallel load and asserting them only makes CI flaky.
+ * A/B on the real dispatch path: what stampMeta's `Date.now()` read costs, against a cached clock and the bare global.
+ * Why: a clock read is a fixed per-command cost only a real-path A/B can size; an isolated Date.now-vs-variable loop is inflated by hoisting.
+ * Shows: ns per command saved per path shape, emit as the control (no stampMeta, ~1.00x), the swappable default's cost; interleaved medians printed, no threshold.
+ * See: docs/performance.md, tests/signal-shallow-ab.test.ts.
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { _configureClock, createCommandBus } from '../src/command-bus';
@@ -46,13 +24,7 @@ function makeCachedClock(): () => number {
 
 type Mode = 'dispatch' | 'query' | 'loaded' | 'realistic' | 'listeners' | 'batch' | 'emit';
 
-/**
- * A deliberately ORDINARY app-level handler: build a small object, touch a few
- * fields, return it. Not a stress test and not a no-op - the point is to find
- * out whether a fixed ~16ns clock saving still shows up once the handler does
- * the kind of work a real `cartAdd` does. Claiming it "disappears into noise"
- * without measuring it is the same mistake as the isolated loop above.
- */
+/** An ordinary app handler, neither a stress test nor a no-op: does a fixed clock saving survive real handler work? */
 function realisticHandler(cmd: { target: any }): unknown {
   const t = cmd.target as { id: number };
   const line = { id: t.id, qty: 1, price: 19.99, total: 0, label: 'item-' + t.id };
@@ -69,12 +41,7 @@ function runOnce(mode: Mode, n: number): void {
   }
   bus.register('test', (cmd) => cmd.target);
 
-  // Consuming shapes. A fixed per-command cost is only interesting where it is
-  // still a visible share of the work - and only worth paying for if it does
-  // not COST anything on paths that read the clock rarely or not at all.
-  // `emit` is the control: it deliberately skips stampMeta entirely, so it must
-  // show ~1.00x. If it moves, the harness is measuring something other than the
-  // clock and every other row here is suspect.
+  // `emit` is the control: it skips stampMeta, so it must read ~1.00x; if it moves, the harness measures something else.
   if (mode === 'listeners') {
     for (let i = 0; i < 50; i++) bus.on('test', () => {});
     for (let i = 0; i < 5; i++) bus.on('te*', () => {});
@@ -92,9 +59,7 @@ function runOnce(mode: Mode, n: number): void {
     return;
   }
   if (mode === 'loaded') {
-    // The honest counterweight to the bare-bus row: a clock read is a FIXED
-    // cost, so its share shrinks as the rest of the dispatch grows. Same shape
-    // as perf.bench.ts's `dispatch.sync.parts3` row: three parts the bus places.
+    // A fixed cost's share shrinks as the dispatch grows; the shape of perf.bench.ts's `dispatch.sync.parts3`.
     bus.use({ started: () => {} });
     bus.use({ settled: () => {} });
     bus.use({ begin: () => undefined });
@@ -104,12 +69,7 @@ function runOnce(mode: Mode, n: number): void {
   else for (let i = 0; i < n; i++) bus.dispatch('test', i);
 }
 
-/**
- * ops/sec where one "op" = `n` commands through a fresh bare bus.
- *
- * Swaps the REAL injectable clock rather than patching the global, so both arms
- * exercise the shipped code path exactly as a consumer would.
- */
+/** ops/sec, one op = `n` commands on a fresh bus; swaps the real injectable clock, so both arms run the shipped path. */
 function opsPerSec(clock: (() => number) | undefined, mode: Mode, n: number, iters: number): number {
   _configureClock(clock);
   try {
@@ -143,13 +103,7 @@ describe('meta.ts clock source - real dispatch path A/B', () => {
 
     for (const c of cases) { opsPerSec(undefined, c.mode, N, 10); opsPerSec(cached, c.mode, N, 10); }
 
-    // THIRD ARM, and the one due diligence actually requires: what does making
-    // the clock swappable cost the DEFAULT path? `undefined` is the shipped
-    // default (a wrapper reading the global each call); REAL_NOW is the same
-    // clock without the wrapper. The gap between them is the price everyone
-    // pays for an option most consumers will never turn on - and if that price
-    // is not ~zero, the whole feature is a net loss no matter how good the
-    // cached arm looks.
+    // Third arm: what the swappable clock costs the default path (`undefined` wraps the global; REAL_NOW is it bare).
     const rows: Array<{ key: string; real: number; cached: number; ratio: number; nsSaved: number; wrapper: number }> = [];
     for (const c of cases) {
       const a: number[] = [];
@@ -196,8 +150,7 @@ describe('meta.ts clock source - real dispatch path A/B', () => {
       '         it is inflated by hoisting. These real-path numbers are the honest ones.\n',
     );
 
-    // Evidence is the printed table. No timing threshold asserted, per the
-    // house rule - only that the measurement genuinely ran.
+    // The printed table is the evidence; only that the measurement ran is asserted.
     for (const r of rows) {
       expect(Number.isFinite(r.ratio)).toBe(true);
       expect(r.real).toBeGreaterThan(0);

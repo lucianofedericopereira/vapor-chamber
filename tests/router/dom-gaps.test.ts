@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 /**
- * Supplemental coverage for src/router/dom.ts.
- *
- *  - links the click handler does not take: no href, an href that does
- *    not parse, no link at all (real clicks, through composedPath), and
- *    an SVG link left unstamped.
- *  - a hover cancel with nothing armed.
- *  - preheatIdle's early-return arms: no factories, Save-Data,
- *    and 2g connections.
+ * Edge arms of src/router/dom.ts: untaken links, hover cancel, preheatIdle early returns.
+ * Why: a click on a non-router link would be hijacked, preheat would spend data on Save-Data or 2g
+ * connections, and abort listeners would pile up on every bfcache re-arm. Also the only file reaching a link with
+ * no string href and preheatIdle's inert cancels, so the 100% floor needs it.
+ * Shows: a click on a link with no href, an unparsable href or no link is not taken and navigate
+ * is not called; an SVG link is not stamped; a hover cancel with nothing armed does not throw;
+ * preheatIdle skips its factories on Save-Data and slow-2g and cancel() removes the four abort listeners.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from '@router/dom';
@@ -36,10 +35,8 @@ function install(overrides: Partial<Parameters<typeof installDomIntegration>[0]>
 }
 
 /**
- * A real click dispatched on `target`, through the listener installed on the
- * document: true when the router took it. Read on the window, after the
- * document, which then cancels happy-dom's own link navigation: a navigation
- * left running moves `location` for the tests after it.
+ * A real click on `target` through the installed document listener: true when the router took it.
+ * Read on the window, which then cancels happy-dom's own navigation (it would move `location`).
  */
 function click(target: Element): boolean {
   let taken = false;
@@ -72,8 +69,7 @@ describe('links the click handler does not take', () => {
     const navigate = installLive();
     document.body.innerHTML = '<a id="bad">broken</a>';
     const anchor = document.getElementById('bad') as HTMLAnchorElement;
-    // `http://[` is an unparsable URL; a browser's `href` getter returns the
-    // raw attribute when it cannot parse it, which this shadow hands over.
+    // A browser's `href` getter returns the raw attribute when it cannot parse it; `http://[` does not parse.
     Object.defineProperty(anchor, 'href', { value: 'http://[', configurable: true });
 
     expect(click(anchor)).toBe(false);
@@ -88,8 +84,7 @@ describe('links the click handler does not take', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  // `a[href]` matches an SVG <a> too, whose `href` is an SVGAnimatedString in
-  // a browser (undefined in happy-dom): not a URL, so not the router's.
+  // `a[href]` matches an SVG <a>, whose `href` is not a URL (SVGAnimatedString in a browser).
   it('an SVG link is never stamped active', () => {
     document.body.innerHTML = '<a id="html" href="/shop">shop</a><svg><a id="svg" href="/shop"><text>shop</text></a></svg>';
     stampActiveLinks('', '/shop');
@@ -111,7 +106,6 @@ describe('hover preheat cancel', () => {
     const preheat = vi.fn();
     const { listeners } = install({ preheat });
 
-    // No mouseover happened - the timer slot is empty.
     expect(() => listeners.get('mouseout')!(new MouseEvent('mouseout'))).not.toThrow();
     expect(preheat).not.toHaveBeenCalled();
   });
@@ -148,10 +142,7 @@ describe('preheatIdle early returns', () => {
     }
   });
 
-  // The router RE-ARMS this on every bfcache restore (`armIdlePreheat` in
-  // src/router/index.ts), cancelling the previous run first, so a cancel that
-  // leaves its own listeners attached would grow them by one set per bfcache
-  // restore.
+  // The router re-arms on every bfcache restore after cancelling; a cancel that kept its listeners would grow them per restore.
   it('cancel() detaches the abort listeners it attached', () => {
     const added: string[] = [];
     const removed: string[] = [];
@@ -166,9 +157,7 @@ describe('preheatIdle early returns', () => {
 
     cancel();
 
-    // `{ once: true }` only removes the ONE listener that actually fires. A user
-    // who never scrolls or clicks leaves all four attached for the life of the
-    // page, once per arming.
+    // `{ once: true }` removes only the listener that fires, so cancel must remove all four.
     expect(removed.filter((t) => ABORT_EVENTS.includes(t)).sort()).toEqual([...ABORT_EVENTS].sort());
   });
 });

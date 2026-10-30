@@ -1,28 +1,14 @@
 /**
- * AbortController integration - async bus + HTTP bridge propagation.
- *
- * Locks v1.2.x behavior:
- *   • Pre-aborted signal -> resolves immediately with core:aborted:dispatch, handler not invoked.
- *   • Mid-flight abort -> handler observes `cmd.signal.aborted === true`.
- *   • HTTP bridge auto-propagates `cmd.signal` to fetch - no manual wiring required.
- *   • After-hooks fire even for aborted dispatches (observability stays intact).
- *
- * Out of scope (deferred to v1.3):
- *   - Sync bus signal propagation (sync dispatches are atomic; signal is ignored).
- *   - bus.request() / respond() integration.
- *   - bus.dispatchBatch() with per-command AbortSignal.any() composition.
- *   - Auto-derived child signals from parent dispatches.
+ * AbortSignal on dispatch, request, dispatchBatch and the HTTP/WS bridges.
+ * Why: a cancelled command must not run, or must stop waiting, and still report.
+ * Shows: pre-abort skips the handler, mid-flight abort settles core:aborted:dispatch, after-hooks fire, sync ignores it.
  */
 import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAsyncCommandBus, BusError, type Command } from '../src/command-bus';
 import { httpTransport, wsTransport } from '../src/transports';
 import { it } from '../src/vitest';
 
-/**
- * The ws bridge timeout the mid-flight abort test races against. Named so the
- * assertion below can be expressed as a fraction of it rather than as a
- * literal that drifts the moment this number changes.
- */
+/** The WS bridge timeout; the mid-flight assertion is a fraction of it. */
 const WS_TIMEOUT = 10_000;
 
 describe('AbortController - async dispatch', () => {
@@ -56,11 +42,7 @@ describe('AbortController - async dispatch', () => {
   it('handler can observe cmd.signal mid-flight and react to abort', async ({ asyncBus: bus }) => {
     let observedSignal: AbortSignal | undefined;
     let abortObserved = false;
-    // Resolved by the handler once it holds the signal. The test awaits THIS
-    // rather than sleeping: a sleep only guesses that the handler has started,
-    // and under coverage instrumentation the guess loses - a 5 ms sleep landed
-    // after the 200 ms safety net below, so the handler returned 'completed'
-    // and this test failed on a slow machine with nothing wrong with the code.
+    // Abort once the handler says it started; a sleep loses the race under coverage.
     let handlerStarted!: () => void;
     const started = new Promise<void>((r) => { handlerStarted = r; });
 
@@ -76,9 +58,7 @@ describe('AbortController - async dispatch', () => {
             resolve();
           }
         }, 1);
-        // Safety net - never hang the test if abort never fires. It can no
-        // longer pre-empt a slow abort: `await started` above means the abort
-        // is issued once the handler is provably running, not after a guess.
+        // Safety net: never hang the test if the abort never fires.
         setTimeout(() => { clearInterval(t); resolve(); }, 200);
       });
       return 'completed';
@@ -174,8 +154,6 @@ describe('AbortController - sync bus accepts but ignores signal', () => {
     const ac = new AbortController();
     ac.abort();
 
-    // Cast through `any` only because TS infers the strict generic - at runtime
-    // the BaseBus signature accepts the 4th arg; sync just discards the signal.
     const result = bus.dispatch('hot', null, undefined, { signal: ac.signal });
 
     expect(result.ok).toBe(true);
@@ -199,10 +177,7 @@ describe('AbortController - bus.request() with signal', () => {
   });
 
   it('mid-flight abort wins the race against responder + timeout', async ({ asyncBus: bus }) => {
-    // Abort once the responder is provably running, not after a 10 ms guess.
-    // The guess lost under full-suite load - the responder's 200 ms timer was
-    // serviced before the abort's 10 ms one, and the request returned
-    // 'too late'. Ordering that a test asserts has to be established, not timed.
+    // Abort once the responder is running; ordering a test asserts must be awaited, not timed.
     let responderStarted!: () => void;
     const started = new Promise<void>((r) => { responderStarted = r; });
 
@@ -254,10 +229,7 @@ describe('AbortController - bus.dispatchBatch() with signal', () => {
 
   it('mid-batch abort stops further dispatches; partial results preserved', async ({ asyncBus: bus }) => {
     let calls = 0;
-    // The assertions below need the abort to land AFTER the first command has
-    // completed and BEFORE the fourth starts. A 12 ms timer against four 5 ms
-    // commands encodes that as arithmetic; firing on the first completion
-    // states it directly, and holds however slowly the commands run.
+    // Abort after the first command completes and before the fourth starts.
     let firstDone!: () => void;
     const afterFirst = new Promise<void>((r) => { firstDone = r; });
 
@@ -351,13 +323,7 @@ describe('AbortController - WS bridge propagation', () => {
     const ac = new AbortController();
     const dispatchPromise = bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
 
-    // No server -> without abort, this would wait the full 10s timeout. Left
-    // as a timer, unlike the three handshakes elsewhere in this file: there is
-    // no event to await (nothing ever answers), and the only competitor is
-    // WS_TIMEOUT, so the margin is 5 ms against 10 s. Making it deterministic
-    // would mean aborting before the request is registered, which the bridge
-    // would then miss - and with no per-test ceiling that is a hang, not a
-    // failure. A 2000x margin is the safer trade here.
+    // A timer on purpose: nothing answers, so there is no event to await (5 ms vs 10 s).
     setTimeout(() => ac.abort(), 5);
 
     const start = Date.now();
@@ -365,9 +331,7 @@ describe('AbortController - WS bridge propagation', () => {
     const elapsed = Date.now() - start;
 
     expect(result).toFailWith('core:aborted:dispatch');
-    // Relative to the timeout under test, not a literal: the claim is "the
-    // abort short-circuited" and a quarter of the ceiling proves it on any
-    // machine. A fixed 500 ms proved it only on a fast one.
+    // A quarter of the timeout proves the short-circuit on any machine.
     expect(elapsed).toBeLessThan(WS_TIMEOUT / 4);
     ws.disconnect();
   });
@@ -377,9 +341,7 @@ describe('AbortController - child signal propagation pattern', () => {
   it('handler can pass cmd.signal to nested dispatches for explicit propagation', async ({ asyncBus: bus }) => {
     let childSawAbort = false;
 
-    // Abort once the child is provably running rather than hoping 5 ms beats
-    // its 30 ms wait - the same ordering-by-arithmetic that failed elsewhere
-    // in this file under load.
+    // Abort once the child is running, not after a timed guess.
     let childStarted!: () => void;
     const started = new Promise<void>((r) => { childStarted = r; });
 

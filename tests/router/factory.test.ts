@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/index.ts - createRouter install/start/dispose lifecycle
- * (DOM integration runs because happy-dom provides `window`) and the public
- * router methods node-env navigation tests don't reach.
+ * createRouter in src/router/index.ts: install, start and dispose, public methods, inline and remote route tables, hard-navigation loop guard.
+ * Why: an after-hook that throws or removes itself would un-commit or skip a neighbour; an inline payload base ignored
+ * would leave every in-base link unintercepted and turn each navigation into a page load; a hard navigation to the
+ * URL already shown would reload forever; a bad route table source must fail from start() with a coded error.
+ * Shows: app.use starts the router on home; a click on an in-base link is intercepted and navigates; a throwing
+ * afterEach returns null with the route committed and onError silent; self-removing hooks skip no neighbour; query-only
+ * changes run no after-hook or link walk; inline payload base is adopted and an explicit base wins; inline and remote
+ * table failures carry router:missing:inline and router:failed:routes; location.assign is not called for the current URL.
  */
-
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
 import { createRouter } from '@router/index';
@@ -34,17 +38,16 @@ describe('createRouter - install + lifecycle (happy-dom)', () => {
     const router = makeRouter();
     const app = createApp({ render: () => h('div') });
 
-    app.use(router); // install -> provide + component + start() -> DOM integration
+    app.use(router);
     await router.isReady();
     expect(router.currentRoute.value.location.name).toBe('home');
 
-    expect(() => router.dispose()).not.toThrow(); // teardowns + history.dispose
+    expect(() => router.dispose()).not.toThrow();
   });
 
   it('DOM integration: intercepts in-base clicks, preheats on hover, restores on bfcache', async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    // Poll rather than sleep a fixed amount - navigation is async and slower
-    // under coverage instrumentation, so a fixed tick would be flaky.
+    // Polls: navigation is async and slower under instrumentation, so a fixed tick would be flaky.
     const waitFor = async (predicate: () => boolean, timeout = 1000) => {
       const deadline = Date.now() + timeout;
       while (!predicate() && Date.now() < deadline) await sleep(10);
@@ -59,17 +62,14 @@ describe('createRouter - install + lifecycle (happy-dom)', () => {
     a.href = '/admin/list';
     document.body.appendChild(a);
 
-    // hover -> the router's preheat callback (preheatPath)
     a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     await sleep(120);
 
-    // click -> the router's navigate callback intercepts it
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     a.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
     expect(await waitFor(() => router.currentRoute.value.location.name === 'list')).toBe(true);
 
-    // bfcache restore -> the router's onRestore (re-stamp + re-arm preheat)
     const pageshow = new Event('pageshow');
     Object.defineProperty(pageshow, 'persisted', { value: true });
     expect(() => window.dispatchEvent(pageshow)).not.toThrow();
@@ -108,13 +108,11 @@ describe('createRouter - public methods', () => {
     expect(after).toHaveBeenCalled();
 
     offAfter();
-    await router.push('/nope'); // unmatched -> error dispatch
+    await router.push('/nope'); // unmatched
     expect(onErr).toHaveBeenCalled();
   });
 
-  // Items 15 + 30 - after-hooks are post-commit observers. They must not be
-  // able to un-commit a navigation, and removing one must not skip its
-  // neighbour.
+  // After-hooks are post-commit observers: they must not un-commit a navigation.
   it('a throwing afterEach hook does not un-commit the navigation', async () => {
     const onErr = vi.fn();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -129,10 +127,10 @@ describe('createRouter - public methods', () => {
     await router.isReady();
     const result = await router.push('/list');
 
-    expect(result).toBeNull(); // was a component_load_failed RouterError
-    expect(router.currentRoute.value.location.name).toBe('list'); // stayed committed
-    expect(onErr).not.toHaveBeenCalled(); // no phantom failure reported
-    expect(second).toHaveBeenCalled(); // containment is per hook
+    expect(result).toBeNull();
+    expect(router.currentRoute.value.location.name).toBe('list');
+    expect(onErr).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining('afterEach hook threw'), expect.anything());
   });
 
@@ -142,13 +140,13 @@ describe('createRouter - public methods', () => {
 
     const second = vi.fn();
     const off = router.afterEach(() => {
-      off(); // the one-shot pattern: "do this on the next navigation only"
+      off();
     });
     router.afterEach(second);
 
     await router.push('/list');
 
-    expect(second).toHaveBeenCalledTimes(1); // was 0 - the splice shifted it past
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it('a self-removing beforeEach guard does not skip the next guard', async () => {
@@ -164,17 +162,11 @@ describe('createRouter - public methods', () => {
 
     await router.push('/list');
 
-    expect(second).toHaveBeenCalledTimes(1); // was 0 - never called on this navigation
+    expect(second).toHaveBeenCalledTimes(1);
     expect(router.currentRoute.value.location.name).toBe('list');
   });
 
-  // Item 12 was filed on the premise that `afterEach` fires on query-only
-  // commits, making the full-document active-link walk a per-keystroke cost
-  // for a `setQuery`-driven search box. Measured: it does not. The engine's
-  // query fast path returns before the after-hook loop, so stamping runs on
-  // path changes only - which is also the correct behaviour, since the stamps
-  // derive from `location.path` alone. Pinned here so the premise can't
-  // silently become true.
+  // The query fast path returns before the after-hook loop; stamps derive from `location.path` alone, so a search box costs no link walk.
   it('after-hooks (and so active-link stamping) run on path changes only', async () => {
     document.body.innerHTML = '<a href="/admin/list">List</a><a href="/admin/">Home</a>';
     const router = fixtureRouter({
@@ -206,7 +198,7 @@ describe('createRouter - public methods', () => {
       await new Promise((r) => setTimeout(r, 20));
       await router.push('/list?q=shoe'); // query-only via push() takes the same fast path
 
-      expect(router.currentRoute.value.location.query.q).toBe('shoe'); // the commits happened
+      expect(router.currentRoute.value.location.query.q).toBe('shoe');
       expect(after).not.toHaveBeenCalled();
       expect(walks).toBe(0);
 
@@ -214,7 +206,6 @@ describe('createRouter - public methods', () => {
       expect(after).toHaveBeenCalledTimes(1);
       expect(walks).toBe(1);
 
-      // ...and the stamps are right, which is why skipping query commits is safe.
       const list = document.querySelector('a[href="/admin/list"]') as HTMLAnchorElement;
       expect(list.hasAttribute('data-active')).toBe(false);
     }
@@ -229,7 +220,7 @@ describe('createRouter - public methods', () => {
 
     expect(router.resolve({ name: 'list' })).toContain('/list');
     expect(router.resolve('/raw')).toBe('/admin/raw');
-    // unresolvable object target -> resolveLocation throws -> catch fallback (to.path ?? '/')
+    // An unresolvable object target falls back to the base root.
     expect(router.resolve({ name: 'does-not-exist' })).toBe('/admin/');
 
     router.setRoutes(ROWS);
@@ -261,13 +252,7 @@ describe('inline route payloads inform `base` synchronously', () => {
   }
 
   it('adopts the payload base before the history is built', async () => {
-    // Regression: `syncPayload` was only computed for array/{routes} sources,
-    // so `{ inline }` + a payload base silently ran on base ''. Every in-base
-    // link then failed `canHandle` (it was handed an unstripped path), no
-    // anchor was ever intercepted, and every navigation became a full page
-    // load - invisible to a suite that navigates through router.push().
-    // The document must sit inside the base, as the server's catch-all
-    // guarantees in production.
+    // The document must sit inside the base, as the server's catch-all guarantees in production.
     window.history.replaceState({}, '', '/admin/');
     inlineTable('vcr-base-sync');
     const stub = (name: string) => defineComponent({ name, setup: () => () => h('div', name) });
@@ -293,8 +278,7 @@ describe('inline route payloads inform `base` synchronously', () => {
   });
 
   it('does not throw at construction when the inline element is missing', () => {
-    // The constructor is documented as pure: a bad selector must surface as a
-    // coded error from start(), not as a throw from createRouter().
+    // The constructor is pure: a bad selector surfaces as a coded error from start(), not a throw.
     expect(() => createRouter({ routes: { inline: '#vcr-not-here' } })).not.toThrow();
   });
 
@@ -310,11 +294,7 @@ describe('inline route payloads inform `base` synchronously', () => {
 
 describe('hard-navigation loop guard', () => {
   it('refuses to hard-navigate to the URL it is already on', async () => {
-    // Regression: `router:missing:route` is a HARD_NAV code, so the router handed the URL
-    // back to the server. Behind the catch-all this router targets, the server
-    // returns the same shell, the router says `router:missing:route` again, and
-    // location.assign() fires again - an endless reload storm that survives
-    // refreshes, since the offending URL stays in the address bar.
+    // router:missing:route is a HARD_NAV code; behind the catch-all the server returns the same shell, so assigning the current URL would reload forever.
     window.history.replaceState({}, '', '/admin/does-not-exist');
     const assign = vi.fn();
     const original = window.location.assign;
@@ -326,7 +306,7 @@ describe('hard-navigation loop guard', () => {
       await router.isReady();
 
       expect(assign).not.toHaveBeenCalled();
-      expect(errors).toHaveBeenCalled(); // diagnosed loudly instead
+      expect(errors).toHaveBeenCalled();
       router.dispose();
     } finally {
       errors.mockRestore();
@@ -365,19 +345,6 @@ describe('route table delivery - error paths', () => {
     document.head.appendChild(empty);
     const router = createRouter({ routes: { inline: '#vcr-empty' } });
     await expect(router.isReady()).rejects.toMatchObject({ code: 'router:missing:inline' });
-  });
-
-  it('remote: warns when the payload declares a base the router cannot adopt', async () => {
-    // A fetched payload arrives after the history exists, so its `base` can
-    // never apply. Silence here is what made this class of bug invisible.
-    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const router = createRouter({
-      routes: { url: '/routes.json' },
-      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }), onInvalidateGroup: () => () => {} } as never,
-    });
-    await router.isReady();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('declares base "/admin"'));
-    router.dispose();
   });
 
   it('remote: stays quiet when an explicit base was given', async () => {

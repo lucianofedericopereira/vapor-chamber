@@ -76,4 +76,4 @@ pre-bundled copy.
 
 [^exports]: The export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`.
 
-Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

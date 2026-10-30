@@ -1,60 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * SIZE GUARD - what dropping `vaporInteropPlugin` is worth, re-measured every
- * run against a baseline derived by the same harness.
- *
- * THIS TEST IS SUPPOSED TO BE ABLE TO FAIL, and it has - twice, both times on
- * an improvement, and the second firing is why it now asserts two things
- * instead of one. The two limits are stated once, at `OWN_ARM_CEILING_KB` and
- * `SAVING_FLOOR_KB` below, with the history. A failure is still the intended
- * signal that the subpath's justification needs re-examining, and still a
- * decision rather than a number to nudge.
- *
- * What the firings taught, which the original framing did not anticipate:
- * the old guard measured interop MINUS vapor, and both arms carry the router,
- * so anything that makes the LIBRARY smaller made the DIFFERENCE smaller. A
- * change that cut ~10% from every consumer's bundle registered here as a
- * REGRESSION (v1.19), and so did Vue shrinking the interop arm (rc.8). A
- * difference answers "is this subpath worth existing" only if the other arm
- * holds still, and the other arm is Vue's to change. The two assertions below
- * each measure one thing that is ours to answer for.
- *
- * The two recovery levers measured and DECLINED at acceptance are still
- * declined, and are still the first place to look if it fires again: swapping
- * routerError for a plain Error recovers ~77 B but breaks the coded-error
- * taxonomy consumers switch on, and dropping the DEV gate recovers ~35 B but
- * ships both diagnostic strings to every production consumer - which this
- * library now goes out of its way to avoid (scripts/build.mjs, resolveDevFlag).
- * (Both measured under esbuild, the bundler this guard used then.)
- *
- * WHY VITE'S BUILD API AND NOT ESBUILD (rc.8 cycle). A consumer-facing number
- * has to come from the bundler consumers ship with, and that is Vite 8 /
- * rolldown. esbuild was an internal proxy, and at rc.8 the proxy and the real
- * thing disagreed in SIGN. rc.8 removed the hydration-boundary closure from
- * client render and moved slot hydration into top-level functions (Vue commits
- * 13 and 19); esbuild keeps those functions, because they are statically
- * referenced behind an `isHydrating` check, while rolldown shakes them. On
- * clean rc.7 and rc.8 trees (every @vue package that follows vue's version, eleven, pinned per tree; the
- * whitepaper's rc.8 row), the same four arms read:
- *
- *                              esbuild           Vite 8 / rolldown
- *     saving rc.7 -> rc.8      20.06 -> 19.40    18.85 -> 20.42  (KB brotli)
- *     hydration-named code     19 -> 28 fns      5 -> 3 identifiers (Vapor arm)
- *
- * So rc.8 made the outlet's case WORSE by esbuild's count and BETTER by 1.57 KB
- * in what a consumer actually ships, and the old 19.5 KB bar was an esbuild
- * number that rolldown had already undercut on rc.7. Every arm is 25-30%
- * smaller under rolldown. A size guard must name its bundler; this one is
- * Vite's, with the same production shape a consumer's `vite build` gets.
- *
- * The interop baseline is RE-DERIVED here rather than quoted from any
- * document, so the arms cannot differ by method: same bundler, same defines,
- * same `vue`, same route table, same leaf component. The only variable between
- * the two outlet arms is which outlet renders the route.
- *
- * Not comparable to `docs/BUNDLE-SIZES.md`. Those rows measure each export
- * with `vue` EXTERNAL, because the question there is what the package ships.
- * Here `vue` is BUNDLED, because the question is what lands in the app.
+ * Size guard: what the Vapor RouterOutlet costs a consumer's bundle, and what it saves against the vDOM outlet plus `vaporInteropPlugin`.
+ * Why: if the outlet's own machinery grows past its ceiling, or the saving over the interop arm falls below its floor, the `router/vapor` subpath no longer justifies itself.
+ * Shows: four Vite production builds (Vue bundled, same defines, route table and leaf) give brotli sizes where vapor minus router-only stays within OWN_ARM_CEILING_KB and interop minus vapor is at least SAVING_FLOOR_KB; the interop baseline is rebuilt here, not quoted.
+ * See: log s35.24, docs/BUNDLE-SIZES.md
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -71,19 +20,7 @@ requireDist(existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(vapor
 
 const esm = (p: string) => p.replace(/\\/g, '\\\\');
 
-/**
- * Production defines, as a real Vite production build of a Vue app sets them.
- *
- * `process.env.NODE_ENV` is stated even though `mode: 'production'` implies it,
- * because this runs INSIDE vitest, whose process has NODE_ENV=test, and Vite
- * derives the client-side replacement from the process environment when one is
- * set. Without it Vue's dev branches would stay in every arm.
- *
- * At acceptance, under esbuild, this set was also measured as the one LEAST
- * favourable to the Vapor arm (interop-vs-Vapor delta 20.1-34.4 KB brotli
- * across four method variants, this pairing the floor). That comparison has
- * not been re-run under rolldown.
- */
+// NODE_ENV is set explicitly: vitest's process has NODE_ENV=test, which Vite would otherwise use, leaving Vue's dev branches in every arm.
 const PROD_DEFINE = {
   'process.env.NODE_ENV': '"production"',
   __VUE_OPTIONS_API__: 'false',
@@ -96,12 +33,7 @@ const brotli = (buf: Buffer) =>
 const gzip = (buf: Buffer) => zlib.gzipSync(buf, { level: 9 }).length;
 const kb = (n: number) => n / 1024;
 
-/**
- * Merge one key into docs/metrics.json - the same channel and merge semantics
- * scripts/test-counts-reporter.mjs uses, so both vitest projects and this test
- * can publish into one file without clobbering each other. Never throws: a
- * measurement that cannot be published must not fail the guard it belongs to.
- */
+// Merges one key into docs/metrics.json, as scripts/test-counts-reporter.mjs does; never throws, so a failed publish cannot fail the guard.
 function writeMetrics(key: string, value: Record<string, string>): void {
   const OUT = 'docs/metrics.json';
   try {
@@ -122,17 +54,8 @@ function writeMetrics(key: string, value: Record<string, string>): void {
   }
 }
 
-/**
- * The entry chunk with each lazy chunk's content hash replaced by zeros, same
- * length. The entry imports a lazy chunk by its hashed file name
- * (`./blade-DYzLD6BH.js`), and that hash follows the ENTRY's file name, which
- * here is the arm's label. Eight characters that say nothing about the outlet
- * moved the own arm's brotli size by tens of bytes between namings; with them
- * fixed the three namings the log measured read the same
- * (log s35.24). Throws when a lazy chunk's name is not the hashed shape or is
- * not in the entry: a normalization that quietly did nothing would put the
- * noise back unseen.
- */
+// The entry chunk with each lazy chunk's hash zeroed, same length: the hash follows the entry's file name (the arm's label) and would shift the brotli size.
+// Throws when a lazy chunk name is not hashed or is absent from the entry, so a no-op normalization cannot pass unseen.
 function withFixedLazyNames(arm: string, entryCode: string, lazyChunks: Array<{ fileName: string }>): string {
   let code = entryCode;
   for (const chunk of lazyChunks) {
@@ -146,15 +69,7 @@ function withFixedLazyNames(arm: string, entryCode: string, lazyChunks: Array<{ 
   return code;
 }
 
-/**
- * One production build per arm, the way a consumer's `vite build` runs it.
- *
- * Each arm is a real entry FILE, not stdin, because Vite builds from files.
- * The temp directory sits under this repo's `node_modules/.cache` rather than
- * the OS temp dir so the entry's bare `vue` import resolves the way a
- * consumer's does - by walking up to a `node_modules` - with no alias or
- * resolver plugin standing in for Vite's own resolution.
- */
+// One production build per arm. Each arm is an entry file under node_modules/.cache, so bare `vue` resolves by walking up to node_modules, with no alias.
 async function measure(dir: string, name: string, contents: string) {
   const input = join(dir, `${name.replace(/[^a-z]+/gi, '-')}.js`);
   writeFileSync(input, contents);
@@ -176,15 +91,8 @@ async function measure(dir: string, name: string, contents: string) {
   const chunks = outputs.filter((o) => o.type === 'chunk') as Array<{
     code: string; fileName: string; isEntry: boolean; isDynamicEntry: boolean;
   }>;
-  // The ENTRY chunk is what the app loads at startup, which is the cost this
-  // guard is about. The router arms also emit one lazy chunk: the router
-  // imports `makeBladeComponent` on demand, the first time a blade row renders
-  // (manual chapter 6, "Pick an outlet"), and no row here is a blade row. esbuild without
-  // code splitting inlined that chunk into the one file, so the esbuild-era
-  // numbers carried it; the rolldown numbers the limits are set from do not.
-  // Anything else - a second entry, or a chunk split off the STATIC graph -
-  // would mean the entry no longer holds the whole startup cost, so it throws
-  // rather than under-count.
+  // The entry chunk is the startup cost. The router arms also emit one lazy chunk (makeBladeComponent, loaded on the first blade row; none here).
+  // Any other chunk means the entry no longer holds the whole startup cost, so it throws rather than under-count.
   const entry = chunks.filter((c) => c.isEntry);
   const stray = chunks.filter((c) => !c.isEntry && !c.isDynamicEntry);
   if (entry.length !== 1 || stray.length !== 0) {
@@ -211,9 +119,7 @@ const CONTROL = `${APP_PRELUDE}
   createVaporApp(Root).mount(document.getElementById('app'));
 `;
 
-/** The router is in the graph but no outlet component renders it. The floor
- *  both outlet arms are measured against, and the only row that says how much
- *  of each arm is outlet machinery rather than router. */
+// The router is in the graph but no outlet renders it: the floor both outlet arms are measured against.
 const ROUTER_NO_OUTLET = `${APP_PRELUDE}
   import { createMemoryHistory, createRouter } from '${esm(routerEntry)}';
   const Root = defineVaporComponent({
@@ -251,38 +157,9 @@ const INTEROP_ARM = `${APP_PRELUDE}
   app.mount(document.getElementById('app'));
 `;
 
-/**
- * THE TWO LIMITS, each stated once and published so no document retypes them
- * (`vc:outletOwnArmCeiling`, `vc:outletFloor`, with the measured values as
- * `vc:outletOwnArm` and `vc:outletSaving`).
- *
- * OWN_ARM_CEILING_KB - the Vapor outlet's own machinery: the Vapor arm over
- * the router-without-outlet floor. Both sides of that subtraction hold the
- * same router and the same Vue app, so it moves when OUR outlet grows, or when
- * the Vapor helpers it calls (`createDynamicComponent`, `createSlot`) grow. It
- * cannot fire because interop got cheaper, which is the failure the old metric
- * had. 4.21 KB on rc.8 under rolldown; 5.0 leaves ~0.8 KB, the same order of
- * headroom the old bar kept (0.41 KB on a 19.5 KB number), so ordinary growth
- * does not fire it and losing most of a KB does.
- *
- * SAVING_FLOOR_KB - interop minus vapor, the old question, asked at the
- * resolution it can answer: a coarse floor rather than a bar within half a KB
- * of the measurement. 20.42 KB on rc.8. Below 15 the subpath's reason to exist
- * has genuinely eroded, whichever arm moved.
- *
- * History of the single bar this replaces (all esbuild):
- *
- *   20.13   acceptance spike (2026-08-28), against a 20 bar: 0.13 headroom
- *   20.04   after the router fixes of that cycle
- *   19.98   after the numeric-option sweep added ~150 B of SHARED code
- *   19.91   after DEV stopped shipping diagnostic strings to production;
- *           bar re-baselined 20 -> 19.5, because folding DEV shed 97 B from
- *           the interop arm against 23 B from the Vapor one, and a 10% win
- *           for every consumer read as a 0.07 KB regression
- *   19.43   rc.8 (mixed tree; 19.40 clean) - FAILED the 19.5 bar, on an rc.8
- *           that rolldown measures as a 1.57 KB IMPROVEMENT. Second firing on
- *           an improvement; the metric was retired rather than re-baselined.
- */
+// OWN_ARM_CEILING_KB: the Vapor arm over the router-only floor. Both sides share the router and Vue app, so it moves only when our outlet or the Vapor helpers it calls grow, never because interop got cheaper.
+// SAVING_FLOOR_KB: interop minus vapor, a coarse floor; below it the subpath's reason to exist has eroded whichever arm moved.
+// Both are published to docs/metrics.json (vc:outletOwnArmCeiling, vc:outletFloor, vc:outletOwnArm, vc:outletSaving) so documents do not retype them.
 const OWN_ARM_CEILING_KB = 5.0;
 const SAVING_FLOOR_KB = 15;
 
@@ -323,13 +200,7 @@ describe('Vapor outlet - size', () => {
         ` (ceiling ${OWN_ARM_CEILING_KB} KB), interop: ${(interop.br - routerOnly.br).toFixed(1)} KB brotli\n`,
     );
 
-    // Publish the measurement so the DOCS can stamp it instead of quoting it.
-    // The saving appears in the ROADMAP, router.md, manual chapter 6 and the whitepaper,
-    // and it moves whenever anything on either side of the A/B changes - which
-    // is how five copies of "20.03" came to be wrong at once. Same channel and
-    // merge semantics as scripts/test-counts-reporter.mjs: docs/metrics.json is
-    // gitignored, so a fresh checkout simply leaves the committed values alone
-    // rather than stamping a placeholder over them.
+    // Published so the docs stamp the figures instead of quoting them; docs/metrics.json is gitignored, so a fresh checkout leaves committed values alone.
     writeMetrics('outlet', {
       savedBr: saved.toFixed(2),
       savedRaw: (interop.raw - vapor.raw).toFixed(1),
@@ -340,8 +211,7 @@ describe('Vapor outlet - size', () => {
       machineryInterop: (interop.br - routerOnly.br).toFixed(1),
     });
 
-    // Raw comparisons, no rounding and no slack. Why each limit is where it
-    // is: OWN_ARM_CEILING_KB and SAVING_FLOOR_KB above.
+    // Raw comparisons, no rounding and no slack.
     expect(ownArm).toBeLessThanOrEqual(OWN_ARM_CEILING_KB);
     expect(saved).toBeGreaterThanOrEqual(SAVING_FLOOR_KB);
   });

@@ -1,11 +1,7 @@
 /**
- * Two defects with one shape: a shared thing whose lifetime or namespace was
- * owned by whoever got there first.
- *
- * Neither throws. A store keeps returning `ok: false` forever; two forms write
- * into each other's state. Both were measured through the public API before
- * being fixed, and both are the NORMAL usage of the feature - a store exists to
- * be shared, and `bus` is a documented form option.
+ * Shared stores across component scopes, and several forms on one injected bus.
+ * Why: the first holder unmounting would dispose a store a second holder still uses, and two forms on one bus would write into each other's state, neither throwing.
+ * Shows: a shared store survives its first holder and disposes with the last; an unscoped store is left to its owner; a second form with the same id on a bus throws, distinct ids stay isolated, a lone form keeps the formSet/formTouch/formReset names, and dispose() frees the id.
  */
 import { describe, expect, vi } from 'vitest';
 import { effectScope } from 'vue';
@@ -22,9 +18,6 @@ describe('a store shared by two component scopes', () => {
     });
 
   it('survives the FIRST holder unmounting while a second still holds it', () => {
-    // Measured before the fix: A's unmount ran $dispose(), unregistering the
-    // handlers out from under B. B kept a live object whose every action
-    // returned ok:false and whose state never changed again.
     const useCart = makeStore();
     const bus = createCommandBus();
 
@@ -36,7 +29,7 @@ describe('a store shared by two component scopes', () => {
     let b!: ReturnType<typeof useCart>;
     scopeB.run(() => { b = useCart(bus); });
 
-    expect(a).toBe(b); // shared by construction - that is what a store is
+    expect(a).toBe(b);
     a.add(1);
     scopeA.stop();
 
@@ -59,7 +52,6 @@ describe('a store shared by two component scopes', () => {
     scopeB.stop();
     expect((b.add(1) as { ok: boolean })).toFailWith('core:missing:handler');
 
-    // A fresh scope gets a fresh store, not the disposed one.
     const scopeC = effectScope();
     let c!: ReturnType<typeof useCart>;
     scopeC.run(() => { c = useCart(bus); });
@@ -80,9 +72,6 @@ describe('a store shared by two component scopes', () => {
 
 describe('two forms on one injected bus', () => {
   it('refuses the second form rather than hijacking the first', () => {
-    // Measured before the fix: login.set('email', 'a@b.c') left login.values
-    // EMPTY and put the email in signup.values, because the second form
-    // re-registered `formSet` over the first one's handler.
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
     createFormBus({ fields: { email: '' }, bus });
@@ -102,8 +91,7 @@ describe('two forms on one injected bus', () => {
   });
 
   it('keeps the historical action names for a single form', ({ bus }) => {
-    // The default id is 'form', so a lone form dispatches exactly what it
-    // always did - devtools, metrics and logger see no rename.
+    // The default id is 'form', so a lone form's action names carry no id.
     const seen: string[] = [];
     bus.onAfter((cmd) => { seen.push(cmd.action); });
     const form = createFormBus({ fields: { email: '' }, bus });

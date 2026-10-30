@@ -26,6 +26,7 @@
  * form.reset();          // restores initial field values
  */
 
+import { dict } from './dict';
 import { signal } from './signal';
 import type { Signal, CreateSignal } from './signal';
 import { createCommandBus } from './command-bus';
@@ -234,7 +235,7 @@ function fieldOf(pointer: string, fields: object): string | undefined {
 
 /** The first error per field, for the fields the form has. */
 function normalizeErrors(input: FormErrorsInput, fields: object): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out = dict<string>();
   for (const e of input) {
     const field = fieldOf(e.pointer, fields);
     if (field !== undefined && !Object.hasOwn(out, field)) out[field] = e.detail;
@@ -249,7 +250,14 @@ function fieldErrorsOf(error: unknown): FormErrorsInput | undefined {
 }
 
 function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
-  return Object.keys(b).some((k) => a[k] !== b[k]);
+  for (const k in b) if (a[k] !== b[k]) return true;
+  return false;
+}
+
+/** No own key, with no array of them. A spread stays what copies keys: an assignment would hit `__proto__`'s setter (see ../dict). */
+function noKeys(o: object): boolean {
+  for (const k in o) if (Object.hasOwn(o, k)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,8 +344,9 @@ export function createFormBus<T extends Record<string, any>>(
       outside = { ...outside };
       delete outside[field];
     }
-    const errs = { ...runRulesSync(rules, next), ...outside };
-    write(cmd, { values: next, errors: errs, touched: s.touched, outside, isDirty: hasDiff(initial, next), isValid: Object.keys(errs).length === 0 });
+    const ruled = runRulesSync(rules, next);
+    const errs = noKeys(outside) ? ruled : { ...ruled, ...outside };
+    write(cmd, { values: next, errors: errs, touched: s.touched, outside, isDirty: hasDiff(initial, next), isValid: noKeys(errs) });
     return next;
   }));
 

@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// FIXTURE - a vDOM app with vaporInteropPlugin and a Vapor child, built for production with and without Transition and KeepAlive, mounts and toggles the same. The note is at the end.
+/**
+ * Fixture: a vDOM app with vaporInteropPlugin and a Vapor child, bundled for production with and without Transition and KeepAlive.
+ * Why: Vue gates its vapor interop code behind flags the plugin and those components set so a bundler can drop it; a flag left false where the code is needed would keep the Vapor child from mounting or leaving.
+ * Shows: both bundle shapes mount the Vapor child, remove it and mount it again in happy-dom, and the bundle without Transition and KeepAlive is smaller by brotli size.
+ * See: vuejs/core#15990, vuejs/core#15994, log 36.F43.
+ */
 
 import { build } from 'esbuild';
 import { brotliCompressSync } from 'node:zlib';
@@ -85,18 +90,3 @@ it('the bundle without Transition and KeepAlive is the smaller one', async () =>
   const [full, plain] = [await bundle(true), await bundle(false)];
   expect(plain.brotli).toBeLessThan(full.brotli);
 });
-
-/*
- * WHY THIS FILE EXISTS. Vue 3.6.0-rc.13 (#15990 and #15994) puts the vapor
- * interop code of the renderer, and of Transition, KeepAlive and Suspense,
- * behind flags that the plugin and those components set (isVaporInteropEnabled,
- * and one per component). A bundler drops the branches of what an app does not
- * import. The risk for an app is a flag that stays false where the code is
- * needed: the Vapor child would not mount, or would not leave. So the file
- * builds a production bundle with esbuild (minified, NODE_ENV production, the
- * bundler build of Vue that the examples resolve) in both shapes and runs
- * each in happy-dom.
- *
- * It passes on rc.12 and rc.13: it guards the behaviour, and the byte gain is
- * in docs/rc-alignment-log.md, section 36.F43 (.probes/rc13/bundle-probe.mjs).
- */

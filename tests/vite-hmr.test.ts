@@ -1,5 +1,8 @@
 /**
- * Tests for src/vite-hmr.ts - Vite HMR plugin
+ * `vaporChamberHMR` (src/vite-hmr.ts), called directly: its hooks, its generated shim, and the shim executed against a fake `import.meta.hot`.
+ * Why: dev HMR would lose the command bus across reloads, or the shim would ship in a production bundle or into files that only mention the package.
+ * Shows: plugin name and hooks, the virtual shim and Vue-priming modules (order, key, no-op without vue), the files transform injects into or skips, a first-line injection with no sourcemap, and the dispose and accept callbacks persisting the bus once per cycle.
+ * See: tests/vite-hmr-pipeline.test.ts, tests/vue-detection-global-clobber.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { vaporChamberHMR } from '../src/vite-hmr';
@@ -44,11 +47,7 @@ describe('vaporChamberHMR', () => {
     expect(code).toContain("import * as __VC_VUE__ from 'vue'");
     expect(code).toContain('globalThis.__VAPOR_CHAMBER_VUE__ = __VC_VUE__');
 
-    // It must NOT write `__VUE__`: that key belongs to Vue, which assigns the
-    // boolean `true` to it when the first app is created, so a namespace left
-    // there is replaced on mount (tests/vue-detection-global-clobber.test.ts).
-    // This also keeps the key duplicated in vite-hmr.ts in sync with
-    // chamber.ts §VUE_GLOBAL_KEY - the plugin cannot import it.
+    // `__VUE__` belongs to Vue, which assigns `true` to it when the first app is created. The slot key is duplicated from chamber.ts VUE_GLOBAL_KEY, which the plugin cannot import.
     expect(code).not.toContain('globalThis.__VUE__ =');
   });
 
@@ -121,22 +120,13 @@ describe('vaporChamberHMR', () => {
       expect(result).toBeUndefined();
     });
 
-    // Item 22: three loose guards, one file.
     it("declares apply: 'serve' - the guard NODE_ENV cannot fool", () => {
-      // `--mode staging` or a programmatic build may never set NODE_ENV, and
-      // if that check misses, the shim + virtual module + globalThis
-      // bus-persistence keys ship in the production bundle. Vite's own
-      // mechanism cannot be fooled: the plugin does not run on build at all.
+      // `--mode staging` or a programmatic build may never set NODE_ENV; apply: 'serve' keeps the plugin out of build entirely.
       expect(plugin.apply).toBe('serve');
     });
 
     it('injects on the first line, so no line moves and no map is needed', () => {
-      // The predecessor of this test asserted a hand-built one-line-shift map
-      // (mappings ';AAAA;AACA;AACA'). That map was correct about lines and
-      // silently wrong about columns: it can only say "output line N came from
-      // source line N-1, COLUMN 0", and Vite chains maps, so it flattened every
-      // downstream map onto column 0. Injecting on the same line moves nothing,
-      // which makes Vite's identity default exactly right.
+      // A line-shift map would flatten every chained downstream map onto column 0; injecting on the same line moves nothing, so Vite's identity default is right.
       const code = "import { createCommandBus } from 'vapor-chamber';\nconst bus = createCommandBus();\nbus.dispatch('x', {});";
       const result = plugin.transform(code, '/src/app.ts');
 
@@ -150,9 +140,6 @@ describe('vaporChamberHMR', () => {
     });
 
     it('matches an import, not a passing mention of the package name', () => {
-      // The predicate was `code.includes('vapor-chamber')`, which hits
-      // comments and string literals - while the comment above it claimed
-      // "only the app entry".
       expect(
         plugin.transform("// TODO: migrate this to vapor-chamber\nexport const x = 1;", '/src/notes.ts'),
       ).toBeUndefined();
@@ -160,7 +147,7 @@ describe('vaporChamberHMR', () => {
         plugin.transform("const docsUrl = 'https://example.test/vapor-chamber';", '/src/links.ts'),
       ).toBeUndefined();
 
-      // ...and still matches the real shapes.
+      // The real import shapes still match.
       expect(plugin.transform("import 'vapor-chamber';", '/src/a.ts')?.code).toContain('virtual:');
       expect(
         plugin.transform("import { createCommandBus } from 'vapor-chamber';", '/src/b.ts')?.code,
@@ -190,18 +177,7 @@ describe('vaporChamberHMR', () => {
       expect(result).toBeUndefined();
     });
 
-    /**
-     * SFCs are skipped, and the reason is not taste.
-     *
-     * A bare script FRAGMENT under a `.vapor.vue` id would come back with the
-     * shim import and prove nothing: `enforce: 'pre'` means this plugin runs
-     * before @vitejs/plugin-vue and sees the RAW SFC, where a prepended import
-     * lands outside every block and compiler-sfc drops it without a word.
-     *
-     * So this test parses a real SFC instead of trusting the transform's word:
-     * whatever the plugin does to SFC text, the compiler is the one that
-     * decides, and it decides to discard it.
-     */
+    // `enforce: 'pre'` means the plugin sees raw SFC text, where a prepended import lands outside every block and compiler-sfc drops it; a real SFC is parsed, not a script fragment.
     it('skips SFCs, because compiler-sfc discards anything outside a block', async () => {
       const { parse } = await import('@vue/compiler-sfc');
       const sfc = [
@@ -212,34 +188,21 @@ describe('vaporChamberHMR', () => {
         '<template><button @click="dispatch()">buy</button></template>',
       ].join('\n');
 
-      // The plugin declines both SFC shapes now.
       expect(plugin.transform(sfc, '/src/ProductCard.vue')).toBeUndefined();
       expect(plugin.transform(sfc, '/src/ProductCard.vapor.vue')).toBeUndefined();
 
-      // And this is why: had it prepended, the import would be in no block, so
-      // none of the compiled output would carry it.
+      // A prepended import would sit in no block, so no compiled output would carry it.
       const injected = `import 'virtual:vapor-chamber-hmr';\n${sfc}`;
       const { descriptor } = parse(injected, { filename: '/src/ProductCard.vue' });
       const blocks = [descriptor.script, descriptor.scriptSetup, descriptor.template];
       for (const block of blocks) {
         expect(block?.content ?? '').not.toContain('virtual:vapor-chamber-hmr');
       }
-      // compiler-sfc does not even report it as a custom block - it is gone.
       expect(descriptor.customBlocks).toHaveLength(0);
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // beta.14 HMR dedup guard (dedupe HMR parent reloads + restore hmr context on
-  // errors). This is the only new shim *logic* the beta.14 alignment introduced,
-  // so it gets executable coverage - not just substring checks. The generated
-  // shim is reconstructed into a runnable function with injected dependencies so
-  // the real dispose/accept callbacks run against a fake import.meta.hot.
-  // ---------------------------------------------------------------------------
   describe('beta.14 dispose dedup guard', () => {
-    // Structural assertions - lock in that the generation still emits the guard,
-    // the accept-side reset, and the try/catch. These would have caught a silent
-    // removal of any of the three pieces (the old tests did not).
     it('generates the per-cycle dedup guard, the accept-side reset, and a try/catch', async () => {
       const code: string = await plugin.load('\0virtual:vapor-chamber-hmr');
       // dispose takes the hot `data` bag and guards on a per-cycle flag
@@ -252,12 +215,8 @@ describe('vaporChamberHMR', () => {
       expect(code).toMatch(/try\s*\{[\s\S]*getCommandBus\(\)[\s\S]*\}\s*catch/);
     });
 
-    /**
-     * Reconstruct the generated ESM shim into an executable function. Strips the
-     * static `import`/`export` lines (deps are injected as params) and rewrites
-     * `import.meta` to a plain identifier so it can live inside a Function body.
-     * Returns the captured accept/dispose callbacks and a stub globalThis.
-     */
+    // Reconstructs the generated ESM shim as a function: static import/export lines are stripped (deps are injected as params) and `import.meta` becomes an identifier.
+    // Returns the captured accept/dispose callbacks and a stub globalThis.
     async function runShim(deps: {
       getCommandBus: () => any;
       setCommandBus?: (b: any) => void;

@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** router.dispose() while start() is still running leaves nothing behind. The long note is at the end. */
+/**
+ * router.dispose() while start() is still awaiting its table load or first navigation leaves nothing behind.
+ * Why: if start() carried on after dispose(), it would register history, click and hover listeners, commit the first navigation, or arm the idle preheat on a router nobody holds, with listeners no teardown removes.
+ * Shows: disposing during a remote table load leaves no matched route and no history or document click interception; disposing during the first navigation adds no pointerdown listener (the control shows the same start does add one when not disposed).
+ * See: log 35.92, tests/router/dispose-cancels-navigation.test.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -93,20 +98,3 @@ describe('router.dispose() during start()', () => {
     router.dispose();
   });
 });
-
-/*
- * Router re-review, 1.26 (log 35.92). `dispose()` runs the teardowns start()
- * has registered so far and destroys the history. start() is async: with a
- * `{ url }` table it awaits the load, and it always awaits the first
- * navigation. A dispose() inside either wait left start() to carry on
- * afterwards. After the table load it registered a history listener, installed
- * the document click / hover listeners and the route announcer, and committed
- * the first navigation, all on a router nobody held: a link click navigated
- * it. After the first navigation (which dispose() does cancel, see
- * tests/router/dispose-cancels-navigation.test.ts) it armed the idle preheat,
- * whose window listeners no teardown would ever remove.
- *
- * start() now checks a `disposed` flag at both points. The control shows the
- * preheat probe does see the listeners when nothing is disposed, so the
- * second test's "none" is evidence.
- */

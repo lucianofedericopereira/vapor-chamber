@@ -904,8 +904,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         ? (cmd: { target: any; payload?: any }) =>
             (pend as (cmd: any, f: StoreReducer<S>) => S)(cmd, reducer)
         : (cmd: { target: any; payload?: any }) => {
-            state.value = reducer(state.value, cmd.target, cmd.payload);
-            return state.value;
+            return (state.value = reducer(state.value, cmd.target, cmd.payload));
           };
       offs.push(bus.register(names[i] as string, shared ? crossing(names[i] as string, h) : h, registered));
     }

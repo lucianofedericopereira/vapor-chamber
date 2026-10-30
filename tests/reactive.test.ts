@@ -1,10 +1,8 @@
 /**
- * Tests for vapor-chamber/reactive - the opt-in DEEP reactivity companion.
- *
- * Proves the "best of both worlds" contract:
- *   - the core stays shallow + fast (covered in chamber.test.ts);
- *   - this companion adds deep reactivity where direct nested mutation triggers;
- *   - a store with deep nested fields takes `deep: true` (tests/store-deep.test.ts).
+ * vapor-chamber/reactive: deepSignal(), the opt-in deep reactivity companion.
+ * Why: a nested field mutated in place must trigger watchers; a shallow ref would miss it.
+ * Shows: once Vue is detected deepSignal returns a non-shallow ref whose nested value is reactive, and a watchEffect sees a direct nested mutation.
+ * See: tests/store-deep.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { isShallow, isReactive, effectScope, watchEffect } from 'vue';
@@ -25,7 +23,6 @@ describe('vapor-chamber/reactive', () => {
       await waitForVueDetection();
       const s = deepSignal({ nested: { n: 1 } });
       expect(isShallow(s)).toBe(false);
-      // deep => nested value is a reactive proxy
       expect(isReactive(s.value.nested)).toBe(true);
     });
 

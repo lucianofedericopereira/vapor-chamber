@@ -1,4 +1,9 @@
-// Pacing is the sender's: `pace()` debounces or throttles a dispatch before it reaches the bus; rationale at the end.
+/**
+ * `pace()` debounces or throttles a dispatch at the sender, before it reaches the bus, and the composables that take its options.
+ * Why: if every keystroke reached the bus a stale search answer could land after a newer one, and a superseded or refused call would still show in the bus's listeners and errors; a paced call must always return a promise so one shape serves both bus modes.
+ * Shows: debounce keys by action and target, so three keystrokes on one key run once with the last value and the others settle `pace:aborted:dispatch` without reaching the bus; throttle runs the first call per key and refuses repeats with `pace:limited:dispatch`, retryIn and wait; a newer run aborts the one in flight; dispose and a ended scope settle waiting calls; the bus exports no debounce or throttle plugin and no activeTimers.
+ * See: log s36.90
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { pace } from '../src/pace';
@@ -11,6 +16,7 @@ const products = ['wireless mouse', 'wired keyboard', 'usb hub'];
 const search = (cmd: Command) => products.filter((p) => p.includes(cmd.payload as string));
 const code = (r: CommandResult): string | undefined => (r.error as BusError | undefined)?.code;
 
+// Fake timers: debounce and throttle windows are advanced by hand.
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -292,18 +298,3 @@ describe('the bus does not pace', () => {
     }).toEqual({ debounce: false, throttle: false, activeTimers: false });
   });
 });
-
-// Plan 1.32 section 3 gives pacing to the sender, and revision 22 of the record moves
-// `debounce` and `throttle` off the bus. A paced call always returns a promise, on either
-// bus: a debounced call settles later, and one shape serves both modes.
-//
-// Debounce keys by `commandKey(action, target)`, as the plugins did. Search as you type
-// passes the typed text as the PAYLOAD, so three keystrokes share one key and run once with
-// the last value. The second test shows the other choice: the text as the target makes a
-// key per keystroke, and nothing coalesces. A superseded call answers
-// `pace:aborted:dispatch` (the record's section C) and never reaches the bus, so the bus's
-// listeners and `errors` see only the run that happened.
-//
-// Throttle admits the first call per key in each wait and refuses the rest with
-// `pace:limited:dispatch`, `context.retryIn` and `wait`, as the bus's gate did. The refusal
-// is a result at the sender: no handler, no listener, no retry.

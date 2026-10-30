@@ -1,4 +1,9 @@
-/** `<id>$reset` keeps its ownership on a takeover, stays per bus, and answers a dispatch by name. Rationale at the end. */
+/**
+ * `<id>$reset` keeps its ownership on a takeover, stays per bus, and answers a dispatch by name.
+ * Why: register()'s cleanup removes by identity, so if stores of one bus shared one `$reset` handler, a store taken over and disposed later would remove the newer store's `$reset`; a bus must reset only its own store of an id.
+ * Shows: after a takeover and the old store's dispose, `cart$reset` stays registered, resets the newer store and is removed with it; two buses reset only their own store; `cart$reset` dispatched by name resets before any `$reset()` call.
+ * See: log s36.62.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createCommandBus, inspectBus, type CommandResult } from '../src/command-bus';
 import { defineChamberStore } from '../src/store/core';
@@ -44,15 +49,3 @@ describe('$reset', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Pinned while the store's creation cost was recovered (plan 1.32 4e, log
- * 36.62). One candidate registered `<id>$reset` as one handler per bus that
- * found its store by id; every store of a bus then registered the same
- * function, and register()'s cleanup removes by identity, so a store taken
- * over and disposed later removed the newer store's `$reset` (the first case,
- * red when the ownership guard was left out). The candidate read slower on
- * the reset path (+25 ns) and was dropped; the three behaviours hold for any
- * shape: a takeover keeps the newer `$reset`, a bus resets only its own store
- * of an id, and `cart$reset` dispatched by name resets before any `$reset()`.
- */

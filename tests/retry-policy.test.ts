@@ -1,8 +1,8 @@
 /**
- * The async bus's retry policy (docs/retry.md): the runner re-sends the
- * call that produced the outcome - a handler's execute, or the bus's
- * transport - by the class rule, bounded, jittered and budgeted per
- * bus, and the plugins outside see one dispatch.
+ * The async bus's retry policy: the runner re-sends the call that produced the outcome (a handler's execute or the bus's transport) by the class rule, bounded, jittered and budgeted per bus.
+ * Why: re-sending a final failure, a library bug or an uncertain failure of a non-idempotent action would double-apply or loop; unbounded or unbudgeted retries would storm a struggling server; the plugins outside the runner must see one dispatch.
+ * Shows: which failures are re-sent and which never are; idempotency-key stamping; the backoff and jitter arithmetic; a declared retryIn is honoured and one over the cap is returned; unusable bounds; the per-bus budget; transports, replays, queries and the sync bus; per-action and schema declarations; dispose() and a dispatch's own signal ending a wait.
+ * See: docs/retry.md
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -34,7 +34,7 @@ function scripted(outcomes: Array<'ok' | 'limited' | 'throw' | 'invalid' | 'lost
 
 beforeEach(() => {
   vi.useFakeTimers();
-  // The top of each jittered wait, so a test reads the ceiling.
+  // Pins jitter to the top of each wait, so a test reads the ceiling.
   vi.spyOn(Math, 'random').mockReturnValue(1);
 });
 afterEach(() => {
@@ -152,8 +152,7 @@ describe('the waits', () => {
     const answers = [limited(1_500), limited(60_000), { ok: true, value: 1 } as CommandResult];
     const at: number[] = [];
     const bus = createAsyncCommandBus({ retry: { maxDelay: 5_000 }, transport: defineTransport(() => { at.push(Date.now()); return answers.shift()!; }) });
-    // 60 s declared against a 5 s cap: returned, not re-sent at 5 s
-    // (Retry-After is a minimum). tests/retry-after-long.test.ts.
+    // 60 s declared against a 5 s cap is returned, not re-sent at 5 s (Retry-After is a minimum).
     expect((await settle(bus.dispatch('save', {}))).ok).toBe(false);
     expect(at.map((t) => t - at[0])).toEqual([0, 1_500]);
   });

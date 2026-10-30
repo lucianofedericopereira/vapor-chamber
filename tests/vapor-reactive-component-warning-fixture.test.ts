@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// FIXTURE - a Vapor component held in a deep ref warns once in development, and shallowRef or markRaw do not. The note is at the end.
+/**
+ * A Vapor component held in a deep `ref` and rendered through `<component :is>`.
+ * Why: Vue warns when a Vapor component reaches `createComponent` as a reactive proxy, so an app that writes `ref(Comp)` would see a changed message or count. The library holds no component in a ref, so nothing of its own triggers it.
+ * Shows: a deep ref logs one "made a reactive object" warning and still renders the component; `shallowRef` and `markRaw` inside a ref log none.
+ * See: log s36.F43
+ */
 
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { type VaporApi, compileVapor } from './compile-vapor';
@@ -40,15 +45,3 @@ it('shallowRef is the control: no warning', async () => {
 it('markRaw inside a ref is the control: no warning', async () => {
   expect(await warningsFor((c) => v.ref(v.markRaw(c as object)))).toEqual({ hits: 0, text: 'c' });
 });
-
-/*
- * WHY THIS FILE EXISTS. Vue 3.6.0-rc.13 (0c2ad8952) warns, in development,
- * when a Vapor component reaches createComponent as a reactive proxy, and
- * unwraps it with toRaw. rc.12 said nothing. The library holds no component
- * in a ref (grep of src and examples: the store's `view` reactive wraps
- * state, never a component), so nothing of ours triggers it. The case is
- * the one an app writes with `ref(Comp)` beside a `<component :is>`, which
- * the fixture pins so a change of the message or the count is seen here.
- * The first test fails on rc.12 (hits 0) and passes on rc.13
- * (docs/rc-alignment-log.md, section 36.F43). The two controls pass on both.
- */

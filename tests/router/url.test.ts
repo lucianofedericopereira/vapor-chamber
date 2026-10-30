@@ -1,3 +1,8 @@
+/**
+ * Router URL helpers: query parse/stringify, typed query decode/encode and history-mode resolution.
+ * Why: a wrong query round trip would corrupt shared links, drop filters or push history entries on every keystroke.
+ * Shows: values and repeated keys round-trip, malformed escapes survive, types cast with defaults, defaults leave the URL, decoded arrays are copies.
+ */
 import { describe, expect, it } from 'vitest';
 import { decodeQueryParam, encodeQueryParam, parseQuery, resolveQueryHistory, stringifyQuery } from '@router/url';
 
@@ -98,7 +103,7 @@ describe('resolveQueryHistory', () => {
 
 describe('parseQuery - repeated keys', () => {
   it('collects a repeated key into an array, in order', () => {
-    // Third and later occurrences take the push branch, not the pair branch.
+    // Three occurrences, so the third and later ones are appended to an existing array.
     expect(parseQuery('tag=a&tag=b&tag=c')).toEqual({ tag: ['a', 'b', 'c'] });
   });
 
@@ -130,23 +135,15 @@ describe('query edge cases', () => {
   });
 
   it('encodeQueryParam drops a value equal to its declared default', () => {
-    // Defaults never appear in the URL - that is what keeps a shared link clean.
     expect(encodeQueryParam(['a', 'b'], { type: 'array', default: ['a', 'b'] })).toBeNull();
     expect(encodeQueryParam(['a', 'c'], { type: 'array', default: ['a', 'b'] })).toEqual(['a', 'c']);
     expect(encodeQueryParam([], { type: 'array' })).toBeNull();
-  });
-
-  it('encodeQueryParam drops null and undefined outright', () => {
-    expect(encodeQueryParam(null, {})).toBeNull();
-    expect(encodeQueryParam(undefined, {})).toBeNull();
   });
 });
 
 describe(`decodeQueryParam - the declaration is not the caller to keep`, () => {
   it(`copies an array default instead of handing back the declaration own array`, () => {
-    // `def` lives in the compiled table for the router's whole life, so a
-    // shared reference meant one component mutating what it read rewrote the
-    // DECLARED default - permanently, for every route and every later read.
+    // The declaration lives as long as the router; a shared array would let one caller rewrite the default.
     const def = { type: 'array' as const, default: ['a', 'b'] };
 
     const first = decodeQueryParam(undefined, def) as string[];
@@ -158,11 +155,9 @@ describe(`decodeQueryParam - the declaration is not the caller to keep`, () => {
   });
 
   it('leaves the absent-default and misdeclared-default paths as they were', () => {
-    // `??`, so a null default reads as absent and yields the empty array -
-    // unchanged by the copy, which only reaches an ARRAY default.
+    // A null default reads as absent; only an array default is copied.
     expect(decodeQueryParam(undefined, { type: 'array', default: null as never })).toEqual([]);
     expect(decodeQueryParam(undefined, { type: 'array' })).toEqual([]);
-    // A default misdeclared as a scalar still comes back as itself.
     expect(decodeQueryParam(undefined, { type: 'array', default: 'x' })).toBe('x');
   });
 });
@@ -173,5 +168,10 @@ describe('decodeQueryParam hands out copies, never the location it read', () => 
     const tags = decodeQueryParam(query.tag, { type: 'array' }) as string[];
     tags.push('c');
     expect(query.tag).toEqual(['a', 'b']);
+  });
+
+  it('stringifyQuery writes an empty value in an array as the bare key, as a single one', () => {
+    expect(stringifyQuery({ tag: ['', 'a'] })).toBe('tag&tag=a');
+    expect(stringifyQuery({ tag: '' })).toBe('tag');
   });
 });

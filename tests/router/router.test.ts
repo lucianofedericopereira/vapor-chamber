@@ -1,3 +1,8 @@
+/**
+ * The router core over a memory history: startup, navigation, resolve(), loader mechanics, locale params, setRouteData, popstate and error delivery.
+ * Why: if the core mis-navigates, commits a failed or superseded navigation, refetches on the wrong query change, or drops a failure's code or cause, every page built on it breaks.
+ * Shows: construction is pure until isReady(); push by path or name commits; unknown routes, guard refusals, loader failures and missing components return coded errors and commit nothing; query-only changes skip guards and refetch only for declared keys; a newer navigation aborts an in-flight load; setRouteData patches without a loader run; back and forward restore data and roll refused pops back; onError subscribers fire before the terminal handler.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { createMemoryHistory } from '@router/history';
@@ -28,10 +33,7 @@ const ROWS: RouteRecord[] = [
   { name: 'secret', path: '/secret', component: 'Secret', meta: { permission: 'admin' } },
 ];
 
-/** Test preset: a prefix handler echoing what it saw (counts invocations) +
- *  a url handler backed by an injectable async fn. Core tests exercise the
- *  loader MECHANICS; dialect behavior (paginator shapes, envelopes) is the
- *  presets' own test suites. */
+/** A prefix handler echoing what it saw and counting calls, plus a url handler backed by an injectable async fn. */
 function makeLoaders(urlFn?: (template: string, signal?: AbortSignal) => Promise<unknown>) {
   const rowsCalls: string[] = [];
   const handlers: LoaderHandlers = {

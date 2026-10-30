@@ -1,4 +1,9 @@
-/** `register(action, handler, { undo, optimistic: true })`: the dispatch answers at once and a failure of the work runs the undo. The long note is at the end. */
+/**
+ * `register(action, handler, { undo, optimistic: true })`: the async dispatch answers an `Accepted` at once and a failure of the work runs the undo.
+ * Why: the screen already shows the local change, so a failure must take it back; but a command refused before the work ran has nothing to take back, so no undo may run for it.
+ * Shows: `Accepted` first and `done` settling with the result or failure; listeners and history hear the final result; a rule or rateLimit refusal, or a throwing exclusive key, runs no undo; a retry shows the change once; the sync and test buses undo on a throw; optimistic without an undo is refused with `core:invalid:option`.
+ * See: log s36.78
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { BusError, type Command, type CommandResult, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -138,7 +143,7 @@ describe('optimistic: edges', () => {
     const bus = createAsyncCommandBus({ retry: false, transport: defineTransport(async (cmd: { action: string }) => { sent.push(cmd.action); return { ok: false, value: undefined, error: new Error('refused') }; }) });
     bus.register('save', async () => 1, { undo: () => { undone++; }, optimistic: true });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    bus.register('save', null)(); // null removes the handler, its cleanup leaves the rest: the declaration and undo stay
+    bus.register('save', null)(); // null removes the handler; the declaration and undo stay
     expect((await doneOf(bus.dispatch('save', 1))).ok).toBe(false);
     expect(sent).toEqual(['save']);
     expect(undone).toBe(1);
@@ -206,13 +211,3 @@ describe('control: an action without it', () => {
     expect(undone).toBe(0);
   });
 });
-
-/*
- * Plan 1.32 step 4k, owner 2026-10-20 ("Go: register options optimistic and exclusive"). The
- * `optimistic` and `optimisticUndo` plugins go; the action declares it, beside its `undo`.
- * The async dispatch answers an `Accepted` at once, as a held outbox command does, and the
- * listeners, the after-hooks and history hear the final result when it lands. A failure runs
- * the undo (`<action>$undo`) only when the work ran: a plugin that refuses first leaves
- * nothing to take back, where optimisticUndo undid a handler that never ran
- * (plan-architecture row 99). `predict` is gone: the screen already shows the local change.
- */

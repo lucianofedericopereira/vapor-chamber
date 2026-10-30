@@ -1,4 +1,9 @@
-/** A server's push writes its declared store states and is emitted as a fact, never dispatched (step 3f). Rationale at the end. */
+/**
+ * A server push over SSE, Echo or WebSocket: its `stores` member writes the declared store states and the event is then emitted on the bus.
+ * Why: a push is a fact the server declared, not a command; dispatching it would run every plugin and send it back to the server when a transport covers the action, and a store that keeps steps would replay it as a reducer.
+ * Shows: pushed state is written before the event is emitted and nothing is sent back, `stores` naming no store or a non-object value writes nothing, a late or nameless WebSocket frame reaches no bus, a rollback and persist keep the pushed state, and a receiver that throws is logged while the fact is still emitted.
+ * See: log 36.F41, docs/contract.md, docs/store.md, tests/echo-bridge.test.ts.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { EventSource } from 'undici';
@@ -41,7 +46,7 @@ async function eventStream(bytes: string): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/events`;
 }
 
-/** Laravel's bytes for one StreamedEvent (Routing/ResponseFactory.php 166-168). */
+/** Laravel's bytes for one StreamedEvent. */
 const sse = (event: string, data: string): string => `event: ${event}\ndata: ${data}\n\n`;
 
 /** An Echo with laravel-echo's channel API, one channel; `fire` delivers a broadcast. */
@@ -303,30 +308,3 @@ describe('a pushed state in a store that keeps steps', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Why these cases. A push is a fact the server declared (capacity-examples.md C9,
- * plan-1.32.md 4.3). Dispatching it, as the 1.31 examples did, ran every plugin and,
- * on a bus whose transport covers the action, sent it back to the server. So a push
- * is applied where a reply's `stores` is, through the store receivers, and then
- * emitted on the bus for its listeners. `sent` stays empty to pin "never dispatched".
- *
- * Real things: the SSE cases use a real node:http server writing Laravel 13.35's
- * eventStream bytes (`event: update` by default, ended by `data: </stream>`) and
- * undici's EventSource, the one Node ships. The WebSocket case uses a real `ws`
- * server and Node's own WebSocket. Echo is the app's own object, so the cases pass
- * one with laravel-echo's channel API, as tests/echo-bridge.test.ts does.
- *
- * The rollback case pins the `$push` name of a push's step: a store that keeps steps
- * replays later steps' reducers on a rollback, and a push named like a store action
- * would otherwise be replayed with its data as the reducer's target.
- *
- * The persist case pins docs/store.md: a push is no command, and the store's own
- * persist saves after any write, so a pushed state is saved at the push.
- *
- * The two `ShopsListed` cases close B3 (c), log 36.F41: Echo's default writes a
- * broadcast's `stores` as SSE and WebSocket do, the rule of docs/contract.md 4. A
- * `stores` the app meant as its own data writes a store only where it names a
- * store's id with an object, the state the server declared. An array or other
- * ids write nothing, and a value that is no state warns in development.
- */

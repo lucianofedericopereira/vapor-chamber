@@ -1,4 +1,9 @@
-/** A store loads saved state through a declared action: from storage or from the server (log s35.103). Rationale at the end. */
+/**
+ * A store loads saved state through a declared action, from the server or from storage.
+ * Why: store state has no setter, and replaying commands on the client would diverge whenever a reducer is not deterministic, so the serialized state must enter through one declared action that listeners can tell from a user action.
+ * Shows: a server snapshot passed to the declared load action equals the server state and is saved by the client's persist; `__origin: 'replay'` in the payload reaches meta.origin.
+ * See: log s35.103, docs/store.md.
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -63,17 +68,3 @@ describe('the origin of a load', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Log s35.103 (D6, hydration as a command). A store's state has no setter,
- * so the only way saved state can enter it is a dispatch of an action the
- * store declares; docs/store.md, "Loading state from the server", states that one
- * pattern for the server. Storage: the store's own `persist` reads it
- * at creation (tests/store-persist.test.ts). The server: the
- * state itself, serialized into the page, passed to the same action - a FACT,
- * which converges where replaying the commands re-runs every reducer on the
- * client and diverges whenever one is not deterministic (the createChannel
- * finding, whitepaper appendix B, rc.9). `__origin` in the payload is the
- * documented way to mark where a dispatch came from (stampMeta), here
- * 'replay', so a listener can tell a load from what the user did.
- */

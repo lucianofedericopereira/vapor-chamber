@@ -1,4 +1,9 @@
-// A Vapor app from `vapor-chamber/vapor` is typed, and its directive() takes the Vapor directives; rationale at the end.
+/**
+ * A Vapor app from `vapor-chamber/vapor` is typed as Vue's App<ParentNode> plus a directive() overload that takes Vapor directives, and the root does not export it.
+ * Why: Vue's App.directive takes Directive only, so the documented app-wide registration of a Vapor directive would fail tsc; an augmentation of Vue's App would reach classic apps, where a Vapor directive throws, so the type lives on the subpath.
+ * Shows: the runtime test asserts only that appTypes and createVaporChamberApp are functions and that the root has no createVaporChamberApp; the type assertions in appTypes (never called) are checked by tsc -p tsconfig.tests.json.
+ * See: log s36.F42
+ */
 import { describe, expect, expectTypeOf } from 'vitest';
 import { createVaporApp, type App, type Plugin, type VaporDirective } from 'vue';
 import * as root from '../src/index';
@@ -30,7 +35,7 @@ function appTypes(): void {
   const v: VaporDirective = vcCommandVapor;
   void v;
 
-  // Control: Vue's own createVaporApp still takes no Vapor directive (Vue's type, rc.12).
+  // Control: Vue's own createVaporApp takes no Vapor directive.
   // @ts-expect-error App.directive takes Directive only
   createVaporApp(Root).directive('vc-command', vcCommandVapor);
 }
@@ -42,16 +47,3 @@ describe('createVaporChamberApp', () => {
     expect('createVaporChamberApp' in root).toBe(false);
   });
 });
-
-/*
- * The documented app-wide registration, `createVaporApp(App).directive(
- * 'vc-command', vcCommandVapor)`, failed tsc with TS2345: Vue's App.directive
- * takes `Directive` only, and a Vapor directive's second parameter is a getter,
- * not a binding (B4 b, log 36.F42). An augmentation of Vue's App would reach a
- * classic app too, where Vue calls a function as `(el, binding)` and the
- * directive throws. So the Vapor app type lives where Vue's types may be named,
- * `vapor-chamber/vapor`: Vue's App<ParentNode> with one more directive()
- * overload. It extends the interface, so `this` stays the Vapor app after
- * use(). The root cannot name a Vue type, so there it could only be `any`, and
- * it no longer exports createVaporChamberApp.
- */

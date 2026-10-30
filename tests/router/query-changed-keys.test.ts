@@ -1,23 +1,8 @@
 /**
  * A repeated query key and a comma in one value are different queries.
- *
- * The engine decides which loaders to refetch on a query-only change by
- * diffing the old and new query. That diff compared `String(a[key])` against
- * `String(b[key])`, and `String(['a','b'])` is `'a,b'` - identical to the
- * scalar `'a,b'`. So `?tag=a&tag=b` -> `?tag=a,b` (and back) read as NO
- * change, the affected loader never refetched, and the page kept showing rows
- * for the previous filter while the URL claimed otherwise.
- *
- * Counted through a real router and a real loader rather than asserted against
- * the diff helper, since the helper is private and the observable symptom is
- * the missing fetch.
- *
- * The equalities that were always true are pinned here too: a one-element
- * array is still the same value as the scalar, and absent / '' / [] still
- * collapse together. Widening the diff would refetch where consumers
- * currently do not.
+ * Why: the query diff that picks loaders to refetch would read `?tag=a&tag=b` and `?tag=a,b` as equal, leaving a page showing rows for the previous filter while the URL claims another; widening it too far would refetch where consumers do not expect it.
+ * Shows: through a real router and loader, a repeated key becoming a comma-joined value (and back) refetches; a one-element array meets its scalar, and absent, '' and [] collapse together, without a refetch.
  */
-
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import type { RouteRecord } from '@router/types';
@@ -69,7 +54,6 @@ describe('query diff - array versus comma-joined scalar', () => {
     await router.push('/products?tag=a,b');
     await settle();
 
-    // Pre-fix: both stringified to 'a,b', so this refetch never happened.
     expect(calls.length).toBe(before + 1);
     expect(calls[calls.length - 1]).toBe('a,b');
   });
@@ -123,15 +107,12 @@ describe('query diff - equalities that must NOT widen', () => {
     await settle();
     const before = calls.length;
 
-    // `{ query: { tag: [] } }` is the object form that reaches cleanQueryPatch
-    // with a genuinely empty array - it serialises to no query at all, so this
-    // is a real change away from `tag=a` and must refetch...
+    // The object form reaches cleanQueryPatch with a genuinely empty array; it serialises to no query, a real change away from `tag=a`.
     await router.push({ path: '/products', query: { tag: [] } } as never);
     await settle();
     expect(calls.length).toBe(before + 1);
 
-    // ...and having landed, `[]` must compare equal to absent, so repeating it
-    // is not a second change. Both arms of the empty-array case in one test.
+    // Once landed, `[]` compares equal to absent, so repeating it is not a second change.
     const after = calls.length;
     await router.push({ path: '/products', query: { tag: [] } } as never);
     await settle();

@@ -1,5 +1,8 @@
 /**
- * Tests for src/chamber-vapor.ts - Vue 3.6+ Vapor API
+ * src/chamber-vapor.ts without the Vapor build: the Vapor API's fallbacks, defineVaporCommand, useCommand and useVaporAsyncCommand.
+ * Why: an app on a Vue without Vapor gets a named error or null, never a crash; the wrappers forward to Vue unchanged, so its typing and emits reach it.
+ * Shows: createVaporChamberApp names the cause; null fallbacks; defineVaporCommand registers, dispatches, disposes; both composables track pending and return failures as results.
+ * See: tests/chamber-vapor-available.test.ts, vuejs/core#14770.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, defineVaporCustomElement, defineVaporComponent, defineVaporAsyncComponent, useVaporAsyncCommand } from '../src/chamber-vapor';
@@ -22,18 +25,13 @@ describe('createVaporChamberApp', () => {
   });
 
   it('error message diagnoses WHY detection failed, not just that it did', () => {
-    // The old assertion sat inside a bare try/catch with no `expect.assertions`,
-    // so it also passed when nothing threw at all. Assert on the thrown value
-    // directly instead - the failure mode this test exists to catch is the
-    // message going vague, and it cannot catch that if it can pass vacuously.
+    // The throw is asserted first, so this cannot pass when nothing throws.
     expect(() => createVaporChamberApp({})).toThrow(/Vue 3\.6\+ with Vapor mode required/);
 
     let message = '';
     try { createVaporChamberApp({}); } catch (e) { message = (e as Error).message; }
 
-    // Three different problems, one message each: Vue absent, Vue present
-    // without the Vapor build, and Vue present but unreachable through either
-    // detection channel. The hint names which one applies.
+    // One hint each: Vue absent, Vue without the Vapor build, Vue unreachable by either detection channel.
     expect(message).toMatch(/configureVue\(/);
     expect(message).toContain('createApp()');
     // No version literal in the message: one goes stale with every release.
@@ -111,10 +109,6 @@ describe('defineVaporCommand', () => {
     dispose();
   });
 });
-
-// ---------------------------------------------------------------------------
-// useCommand - full composable (register / on / emit / dispose)
-// ---------------------------------------------------------------------------
 
 describe('useCommand - register/on/emit/dispose', () => {
   it('dispatches commands, and pending tracks the key', () => {
@@ -232,10 +226,6 @@ describe('useCommand - register/on/emit/dispose', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Vue 3.6.0-beta.10+ APIs
-// ---------------------------------------------------------------------------
-
 describe('defineVaporCustomElement', () => {
   it('returns null when Vue 3.6.0-beta.10 is not available', () => {
     expect(defineVaporCustomElement({})).toBeNull();
@@ -247,9 +237,7 @@ describe('defineVaporComponent', () => {
     expect(defineVaporComponent({})).toBeNull();
   });
 
-  // Vue 3.6.0-beta.11 alignment (#14770 + emit/$attrs split):
-  // wrapper must forward options unchanged so generic inference and the
-  // emits-vs-attrs separation flow through to Vue without modification.
+  // Options pass through unchanged, so generic inference and Vue's emits/$attrs split reach Vue.
   it('passes options through unchanged so beta.11 attrs/emits + generics flow through', async () => {
     const chamber = await import('../src/chamber');
     const fakeDefine = vi.fn((options: any) => ({ __defined: true, options }));
@@ -262,8 +250,7 @@ describe('defineVaporComponent', () => {
     const result = defineVaporComponent(options);
     expect(spy).toHaveBeenCalled();
     expect(fakeDefine).toHaveBeenCalledTimes(1);
-    // Critical: the wrapper must NOT mutate or strip emits - beta.11 relies on
-    // the declared emits list to keep onXxx listeners out of $attrs.
+    // Not mutated or stripped: Vue reads the declared emits to keep onXxx listeners out of $attrs.
     expect(fakeDefine.mock.calls[0]![0]).toBe(options);
     expect(fakeDefine.mock.calls[0]![0].emits).toEqual(['select']);
     expect((result as any).__defined).toBe(true);
@@ -271,9 +258,6 @@ describe('defineVaporComponent', () => {
 });
 
 describe('defineVaporAsyncComponent', () => {
-  // Vue 3.6.0-beta.14: defineVaporAsyncComponent is now exported from the main
-  // Vue package (vapor: expose async component alias for SSR runtime). The
-  // wrapper calls through to it when available, and returns null otherwise.
   it('returns null when the fn is not available (mocked)', async () => {
     const chamber = await import('../src/chamber');
     using _spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(null);
@@ -291,10 +275,6 @@ describe('defineVaporAsyncComponent', () => {
     expect(result).toBe(fakeResult);
   });
 });
-
-// ---------------------------------------------------------------------------
-// useVaporAsyncCommand
-// ---------------------------------------------------------------------------
 
 describe('useVaporAsyncCommand', () => {
   beforeEach(() => resetCommandBus());

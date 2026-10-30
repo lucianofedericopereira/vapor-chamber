@@ -1,4 +1,9 @@
-// Every bus-plugin factory declares its id, the owner of its failures (shape rule 3); the list is fixed here.
+/**
+ * The id every bus-plugin factory declares, against one fixed list.
+ * Why: the id is the owner part of every failure code the plugin mints (`<id>:condition:subject`), so a changed id changes a code on the wire.
+ * Shows: each factory declares its listed id, ids are one camelCase word, a throwing plugin or transport is reported under its owner, the error registry answers for any plugin throw, and every exported plugin factory in src is on the list.
+ * See: log s35.77.
+ */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -68,8 +73,7 @@ describe('plugin ids', () => {
   it('a transport that throws is reported as transport, like its other failures', async () => {
     const httpClient = { post: async () => ({ ok: true, status: 200, headers: {}, data: { state: 1 } }) } as never;
     const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc', httpClient }) });
-    // A lone surrogate as the idempotency key makes encodeURIComponent throw
-    // inside the transport (transports.ts, the Idempotency-Key header).
+    // A lone surrogate as the idempotency key makes encodeURIComponent throw inside the transport.
     bus.use({ started: (cmd) => { cmd.meta!.idempotencyKey = '\uD800'; } });
     const r = await bus.dispatch('t', 1);
     expect((r.error as BusError).code).toBe('transport:failed:send');
@@ -108,18 +112,3 @@ describe('plugin ids', () => {
     expect([...found].sort()).toEqual(Object.keys(IDS).sort());
   });
 });
-
-/*
- * Shape rule 3 (owner 2026-10-02, log s35.77): one producer, one
- * owner name, used for the plugin's id, the owner part of every failure code it
- * mints (`<id>:condition:subject`, command-bus.ts failsFor) and, with P1, the
- * pipeline's inspection. The id is the factory's name without `create`; where a
- * module already mints its failures under a shared owner, its plugins take that
- * owner, so one transport never carries two owner names (`transport:lost:reply`
- * beside `httpTransport:failed:send`): every transport is `transport`, both
- * schema validators `validateSchemas`. Decision 8 asked the ids to land with P1
- * from one fixed list; they land now from this list, so each code changes once,
- * and P1's manifest must read these same strings. The coverage test reads
- * source text: a new factory returning a Plugin fails it until it has an
- * entry here (a reject-all-except-the-list guard).
- */

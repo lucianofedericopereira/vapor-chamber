@@ -1,4 +1,9 @@
-// examples/feature-vite-hmr.ts, imported for real: its handler runs, and a hot re-run keeps the cart.
+/**
+ * examples/feature-vite-hmr.ts imported for real, through the package self-link to dist/: its handler runs, and a hot re-run keeps the cart.
+ * Why: the store registers one handler per action, so one the example also registered by hand would be taken by whichever came last; a hot update must keep state.
+ * Shows: its own handler runs with no overwrite warning; a re-run inside a marked update takes the cart with its items; outside one it starts empty; the bus is kept either way.
+ * See: audit FVH-4.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // The mark vaporChamberHMR's shim sets from `vite:beforeUpdate` to `vite:afterUpdate`.
@@ -46,17 +51,3 @@ describe('examples/feature-vite-hmr.ts', () => {
     expect(unmarked.bus).toBe(first.bus);
   });
 });
-
-/*
- * Why the real module: the store registers one bus handler per action
- * (`cartAdd`, `cartRemove`), so an action the example also registered by
- * hand would be taken by whichever registers last. Only importing the example shows
- * which one a reader's copy would run. The example's imports resolve
- * through the package self-link to dist/, as an app's would. Row FVH-4 of
- * the 2026-10-12 release audit.
- *
- * The re-run is the hot update's own effect: Vite runs the module again, the
- * bus is still the shared one, and the shim's mark is what lets the store the
- * module builds take the old one's state. The run in a real dev server, with
- * the plugin and without it, is in .probes/step-9-pickup.md (Batch 2).
- */

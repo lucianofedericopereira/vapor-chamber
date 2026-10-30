@@ -338,7 +338,6 @@ export class StreamParser {
   private handleAfterValue(cp: number): void {
     if (cp === COMMA) {
       if (this.parents[this.parents.length - 1] === PARENT_OBJECT) {
-        this.isKey = true;
         this.state = S_KEY;
       } else {
         // Array continuation: advance the index HERE, at the element
@@ -360,12 +359,12 @@ export class StreamParser {
 
   private handleKey(cp: number): void {
     if (cp === QUOTE) { this.state = S_STRING; this.isKey = true; return; }
-    if (cp === CLOSE_BRACE) { this.closeObject(true); return; }
+    if (cp === CLOSE_BRACE) { this.closeObject(); return; }
     if (!isWhitespace(cp)) this.err(`Expected " or } got ${String.fromCodePoint(cp)}`);
   }
 
   private handleAfterKey(cp: number): void {
-    if (cp === COLON) { this.isKey = false; this.state = S_VALUE; return; }
+    if (cp === COLON) { this.state = S_VALUE; return; }
     if (!isWhitespace(cp)) this.err(`Expected : got ${String.fromCodePoint(cp)}`);
   }
 
@@ -483,7 +482,6 @@ export class StreamParser {
   private openObject(): void {
     if (this.parents.length >= this.maxDepth) { this.err('Max depth exceeded'); return; }
     this.parents.push(PARENT_OBJECT);
-    this.isKey = true;
     this.state = S_KEY;
     this.path.push('');
     this.callbacks.onObjectStart?.(this.path);
@@ -499,10 +497,9 @@ export class StreamParser {
     this.callbacks.onArrayStart?.(this.path);
   }
 
-  private closeObject(empty = false): void {
+  private closeObject(): void {
     const popped = this.parents.pop();
     if (popped !== PARENT_OBJECT) { this.err('Unexpected }'); return; }
-    if (empty) this.isKey = false;
     this.path.pop();
     this.callbacks.onObjectEnd?.(this.path);
     this.afterValue();

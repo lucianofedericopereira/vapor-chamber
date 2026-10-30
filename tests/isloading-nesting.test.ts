@@ -1,4 +1,9 @@
-/** pending's start/settle pairing on every nesting path of a sync bus, and out-of-order settles on the async one. The long note is at the end. */
+/**
+ * pending()'s pairing of each start with its settle on every nesting path of a sync bus, and out-of-order settles on the async bus.
+ * Why: a settle with no start (a query, an emit, a command already running when tracking was armed) must take nothing from the pairing, and a start whose settle never arrives must not stop the commands below it from settling; otherwise a flag stays lit or lights wrongly, and entries leak.
+ * Shows: through handlers, started parts, after-hooks, listeners, a refusing rule and the depth limit each key is lit while its level runs and dark after, and released() confirms no entry is held once every start settled; async settles in any order darken only their own key.
+ * See: log s35.61, log s35.66.
+ */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus, type BaseBus } from '../src/command-bus';
@@ -41,12 +46,11 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
   it('started parts dispatching, added before and after the state: the outer key is lit (its start comes first)', () => {
     const bus = createCommandBus();
     let during: boolean[] = [];
-    // Added before the state: `b` still runs with `a` started.
+    // Part order: this one is added before the state, the next after it; both see `a` started.
     bus.use({ started: (cmd) => { if (cmd.action === 'a') bus.dispatch('b', undefined); } });
     const s = useSharedCommandState({ bus });
     const keys: Array<[string, unknown?]> = [['a'], ['b'], ['c']];
     lit(s, keys);
-    // Added after it: the same.
     bus.use({ started: (cmd) => { if (cmd.action === 'a') bus.dispatch('c', undefined); } });
     const at: Record<string, boolean[]> = {};
     bus.register('a', () => { during = lit(s, keys); });
@@ -174,8 +178,7 @@ describe('sync bus: every start settles its own key, on every nesting path', () 
 
   it('listeners removed and added mid-dispatch: every start still settles', () => {
     const bus = createCommandBus();
-    // The shape that used to make fanOutListeners skip our listener: one
-    // listener removes an EARLIER one and adds one in the same call.
+    // One listener removes an earlier one and adds one in the same call; the tracking listener must still run.
     const offEarly = bus.on('*', () => {});
     let armed = true;
     bus.on('*', (cmd) => {
@@ -247,18 +250,3 @@ describe('async bus: settles in any order', () => {
     expect(released(bus, s, 'a')).toBe(true);
   });
 });
-
-/*
- * WHY THIS FILE. A tracked dispatch pairs a start (the bus's `started` fact,
- * before every before-hook) with a settle (its `settled` fact, before every
- * listener) by the Command object. On the sync bus the settles arrive in LIFO
- * order on every path that nests (handler, before-hook, after-hook, listener,
- * a throwing before-hook, the depth limit), so the pairing can be a
- * stack instead of a Map (option c, log s35.61). It must still be correct by
- * construction rather than by that invariant: a settle with no start (a query,
- * an emit, a command already running when tracking was armed) must take nothing from the stack, and a start whose
- * settle never arrives must not stop the commands below it from settling.
- * Every case here passes under the Map; each one is a nesting path the stack
- * has to get right. `released()` is the leak check: every start settled means
- * `pending` is back at 0 and the entry goes with its last holder.
- */

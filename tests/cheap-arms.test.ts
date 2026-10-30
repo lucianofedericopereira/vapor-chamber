@@ -1,21 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * One-line fallback arms across http / transports / form that no existing test
- * happens to take. Each is a normal production condition, not an exotic one:
- *
- *  - http: a page with NO CSRF token - the common case
- *    for a read-only app; an empty JSON body; an unparsable
- *    content-disposition; a Retry-After beyond the in-request bound;
- *    interceptors registered with onRejected only; eject() of an
- *    already-ejected id.
- *  - transports: backend failure bodies carrying `error` but no `message`, or
- *    neither; an error with no `status`; a batch
- *    containing a noRetry action.
- *  - form: a rules object with a falsy entry.
- *
- * NOT here: http 327/585 (`if (fresh)` after a CSRF refresh). refreshCsrfOnce
- * throws when the refresh finds no token, so the re-read immediately after it
- * can never be empty - unreachable by construction, not untested.
+ * Fallback arms of http and form that ordinary conditions take: no CSRF token, an empty body, no filename, onRejected-only interceptors, a falsy rule.
+ * Why: coverage: without this file form.ts's falsy-rule skips and four http.ts branches go uncovered; each is a normal production condition, not an exotic one.
+ * Shows: no CSRF header without a token; an empty body is null data; a nameless download is 'download'; a long Retry-After ends the request; such interceptors and a re-eject are skipped.
+ * See: tests/retry-after-long.test.ts.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { postCommand, createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -51,10 +39,6 @@ afterEach(() => {
   document.head.innerHTML = '';
 });
 
-// ---------------------------------------------------------------------------
-// http - no CSRF token on the page
-// ---------------------------------------------------------------------------
-
 describe('http without a CSRF token', () => {
   it('postCommand omits the header when no token exists', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: true }));
@@ -78,10 +62,6 @@ describe('http without a CSRF token', () => {
 
 });
 
-// ---------------------------------------------------------------------------
-// http - response-shape fallbacks
-// ---------------------------------------------------------------------------
-
 describe('http response fallbacks', () => {
   it('treats an empty JSON body as null data', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(204, null, { 'content-type': 'application/json' }));
@@ -104,8 +84,7 @@ describe('http response fallbacks', () => {
 
   it('ends the request on a Retry-After beyond the in-request bound, never retrying sooner', async () => {
     const fetchMock = globalThis.fetch as any;
-    // 7 days in seconds: not slept inside a request, and not cut short to a
-    // backoff either (Retry-After is a minimum). tests/retry-after-long.test.ts.
+    // 7 days: not slept inside a request, nor cut short to a backoff (Retry-After is a minimum).
     fetchMock
       .mockResolvedValueOnce(mockResponse(429, { e: 1 }, { 'content-type': 'application/json', 'retry-after': '604800' }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
@@ -116,10 +95,6 @@ describe('http response fallbacks', () => {
     expect(Date.now() - started).toBeLessThan(5000);
   });
 });
-
-// ---------------------------------------------------------------------------
-// http - interceptor registry arms
-// ---------------------------------------------------------------------------
 
 describe('http interceptor registry', () => {
   it('skips a request interceptor registered with onRejected only', async () => {
@@ -155,10 +130,6 @@ describe('http interceptor registry', () => {
     expect(onFulfilled).not.toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// form - falsy rule entries
-// ---------------------------------------------------------------------------
 
 describe('form rules with a falsy entry', () => {
   it('skips a falsy rule during live per-field validation', () => {

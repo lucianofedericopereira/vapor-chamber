@@ -1,26 +1,8 @@
 /**
- * Real-path A/B for the scoped origin slot in stampMeta, in the house
- * three-arm shape (tests/plugin-throw-ab.test.ts): a baseline DERIVED from
- * the shipped src/command-bus.ts with the change reverted, a byte-identical
- * second copy of that baseline as the self-control, and the shipped source -
- * every timed arm a derived copy, loaded the same way.
- *
- * WHAT IS REVERTED for the baseline: the one line of stampMeta that reads
- * `_originScope` between the one-shot slot and the payload key. The
- * `_withOriginScope` function stays in the module and, on the baseline, has
- * no effect - which is the intended difference asserted below.
- *
- * WHAT IS MEASURED: stampMeta runs in the synchronous prologue of every
- * dispatch, so this is a hot-path read - one module slot and one nullish
- * test more per command. The rows are bare dispatches on both buses and a
- * sync dispatch with a listener; read them against the self-control row.
- *
- * NO TIMING THRESHOLD IS ASSERTED; the printed table is the evidence.
- * Numbers quoted anywhere come from three runs of:
- *
- *   NODE_ENV=production NODE_OPTIONS=--expose-gc npx vitest run tests/origin-scope-ab.test.ts --silent=false
- *
- * Ratios are TIME ratios: above 1.00 is slower than the denominator arm.
+ * A/B of the scoped origin read in stampMeta: a baseline derived from src/command-bus.ts with that read reverted, a second copy as self-control, and the shipped source.
+ * Why: stampMeta runs on every dispatch, so a scope that leaked outside its callback would misattribute commands, and the extra read must not slow the hot path.
+ * Shows: outside a scope shipped and baseline give the same origins (none, payload key, one-shot slot); inside `_withOriginScope` only shipped marks every dispatch, and the scope ends with its callback; the timing rows only assert a finite ratio, and run on `npm run test:timing`.
+ * See: src/command-bus.ts, tests/under-coverage.ts
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -33,6 +15,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
 const REF_DIR = resolve(HERE, '__ref', 'origin-scope');
 
+// Baseline = the stampMeta line that reads `_originScope` removed; `_withOriginScope` then has no effect.
 const REVERTS: Array<[string, string, number]> = [
   [
     '  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? _originScope ?? payload?.__origin, idempotencyKey: undefined, response: undefined, request: undefined };\n',
@@ -101,7 +84,6 @@ describe('scoped origin in stampMeta - real path A/B', () => {
     await load('self', true);
     await load('shipped', false);
 
-    // --- equivalence: no scope, the payload key, the one-shot slot ------------
     const origins = (m: Mod) => {
       const bus = m.createCommandBus();
       const seen: unknown[] = [];
@@ -114,7 +96,6 @@ describe('scoped origin in stampMeta - real path A/B', () => {
     expect(origins(arms.shipped)).toEqual(origins(arms.pre));
     expect(origins(arms.shipped)).toEqual([undefined, 'remote', 'agent']);
 
-    // --- intended difference: every dispatch inside a scope carries it ------
     for (const [m, expected] of [[arms.pre, [undefined, undefined]], [arms.shipped, ['undo', 'undo']]] as const) {
       const bus = m.createCommandBus();
       const seen: unknown[] = [];
@@ -128,7 +109,6 @@ describe('scoped origin in stampMeta - real path A/B', () => {
     // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
     if (!runTiming) return;
 
-    // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);
     const lines: string[] = [];
     for (const [label, row] of ROWS) {
@@ -139,6 +119,7 @@ describe('scoped origin in stampMeta - real path A/B', () => {
         const rot = order.slice(r % order.length).concat(order.slice(0, r % order.length));
         for (const k of rot) { gc?.(); ns[k].push(await row(arms[k])); }
       }
+      // Time ratios: above 1 is slower than the baseline arm.
       lines.push(`   ${label}  (pre ${median(ns.pre).toFixed(1)} ns/op)`);
       for (const [pl, num] of [['self-control', 'self'], ['shipped', 'shipped']] as const) {
         const ratios = ns[num].map((v, i) => v / ns.pre[i]);

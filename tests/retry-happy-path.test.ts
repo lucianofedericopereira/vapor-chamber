@@ -1,12 +1,8 @@
 /**
- * The bus's retry on a SUCCESS builds nothing that exists for failures.
- *
- * An Error built up front for "no attempts made" would capture a stack on every
- * dispatch, success included, for a result that can never be returned
- * (`countOption(..., 3, 1)` guarantees at least one attempt). Measured: retry
- * alone 48,857 ns per successful dispatch against 5,635 bare, 6,031 without
- * it. The rule: the happy path builds no failure machinery (the fuse,
- * ROADMAP.md, the fuse).
+ * The bus's retry on a success builds nothing that exists for failures.
+ * Why: an Error built up front for "no attempts made" would capture a stack on every dispatch, success included, for a result that can never be returned (at least one attempt is guaranteed). The happy path builds no failure machinery.
+ * Shows: a successful dispatch under the default retry constructs no Error; it settles in the same microtask turns as a bus with retry off (dispatch, an async handler, query); the turn counter does see one extra await; a failure is still reported after its 2 attempts.
+ * See: ROADMAP.md (the fuse)
  */
 import { expect } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';

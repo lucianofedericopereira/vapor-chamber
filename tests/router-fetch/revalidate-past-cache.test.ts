@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** revalidateRoutes re-reads a cached fetchLoaders URL. The long note is at the end. */
+/**
+ * revalidateRoutes re-reads a cached fetchLoaders URL, and LoaderContext.refresh tells a loader why it runs.
+ * Why: if a refresh read the HttpClient cache, it would find the entry the navigation stored and put pre-mutation data back on the page without a request.
+ * Shows: with no cache, a cache, and a cache under a baseURL, a mapped command costs exactly one more GET and the page shows the new value; a navigation back still reads the cache (one GET); ctx.refresh is false for a plain runLoaders call and true when asked to refresh.
+ * See: log s35.41
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../../src/command-bus';
 import { createHttpClient } from '../../src/http';
@@ -78,20 +83,3 @@ describe('revalidateRoutes past the fetchLoaders cache', () => {
     expect(seen).toEqual([false, true]);
   });
 });
-
-/*
- * External item 12 of the 1.26 evaluation (log s35.41). `revalidateRoutes`
- * re-runs the current page's loaders after a mapped command succeeds; with
- * `fetchLoaders({ cache })` that re-run read the client's cache, found the
- * entry the navigation had stored, and put the pre-mutation data back on the
- * page without a request. The control (no cache) shows the refresh itself
- * worked.
- *
- * The loader context now says why a loader runs: `refresh` is true when
- * `runLoaders` is called to refresh (revalidateRoutes is the caller) and false
- * on a navigation or a query refetch, always present, one shape. On a refresh,
- * `fetchLoaders` invalidates its own URL before the cached read, so the read
- * fetches and stores the new value. The match is anchored at the end of the
- * client's key, which is the URL after the client's `baseURL`, hence the
- * third case. A plain navigation back to the page still reads the cache.
- */

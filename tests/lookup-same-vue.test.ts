@@ -1,4 +1,15 @@
-// The runtime lookup wires only the Vue the app already has; rationale at the end.
+/**
+ * The runtime lookup wires only the Vue the app already has.
+ * Why: the root reaches Vue through a bare `import("vue")`. A server build that inlines Vue
+ * (`ssr.noExternal`) loads a second copy from node_modules in Node, and if the lookup handed that copy to
+ * the registry over the one vapor-chamber/vue wired, the app's effects would stop seeing composable state
+ * and cleanup would not be armed. One Vue is one `ref` function, so the lookup applies a namespace only
+ * to an empty registry or the same Vue, and wires a tracking pair only from the registry's Vue.
+ * Shows: a second Vue leaves the wired one in place, an empty registry still takes the lookup's Vue, the
+ * same Vue merges in what hand wiring left out, a foreign @vue/reactivity is not wired for tracking, and an
+ * inlined-Vue SSR build still tracks and cleans up once the lookup settles.
+ * See: log s35.231, log s35.229
+ */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -51,7 +62,7 @@ describe('the lookup and a Vue already wired', () => {
     const vue = await import('vue');
     chamber.configureVue({ ref: vue.ref, shallowRef: vue.shallowRef });
     await chamber.waitForVueDetection();
-    // getCurrentScope came from the lookup: cleanup is armed in a scope.
+    // getCurrentScope comes from the lookup, so cleanup is armed in a scope.
     let ran = false;
     const scope = vue.effectScope();
     scope.run(() => chamber.tryAutoCleanup(() => { ran = true; }));
@@ -117,21 +128,3 @@ describe('a Vite SSR build that inlines Vue, run in Node', () => {
     expect(await app.run()).toEqual({ runs: 2, own: 2, heardAfterStop: 0 });
   });
 });
-
-/*
- * Why this file exists. The root reaches Vue at runtime through a lookup: a
- * bare `import("vue")` and an assembled `import("@vue/reactivity")`. Vite
- * leaves the first one bare. A server build that inlines Vue
- * (`ssr.noExternal`) then loads a second Vue from node_modules when it runs
- * in Node, and the lookup handed that copy to the registry over what
- * vapor-chamber/vue had wired at build time. The app's effects stopped seeing
- * composable state and cleanup was not armed (log s35.231, ssr-vite-inline).
- * The 1.29.0 fix covered the tracking pair only (s35.229).
- *
- * One Vue is one `ref` function: `vue` re-exports @vue/reactivity's own, in
- * Node and in a bundle, and two copies have two (s35.231). So the lookup
- * applies a namespace only to an empty registry or the same Vue, and wires a
- * tracking pair only from the registry's Vue. An empty registry still takes
- * whatever the lookup finds, and a hand wiring with the same Vue still gets
- * the rest merged in.
- */

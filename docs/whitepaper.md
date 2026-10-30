@@ -3,7 +3,7 @@
 *Luciano Federico Pereira - ORCID 0009-0002-4591-6568 - luciano-pereira.pages.dev*
 
 This paper describes the library as it stands, aligned with Vue
-<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
+<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
 carry the reasons, the evidence and the history. The appendix, Notes and
 history, keeps the original header and abstract, the per-release Vue alignment
 log, this paper's corrections to itself and the performance findings.
@@ -101,7 +101,7 @@ plugin.
   TypeScript project can still use the core.
 
 Vue is an optional peer. The composables need `>=3.5.0`. The full Vapor
-surface needs <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
+surface needs <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
 in `package.json`). The core bus runs with no Vue at all.
 
 ### 2.2 Against Vue's own router and store
@@ -979,7 +979,7 @@ App-wide, register them with
 `createVaporChamberApp(App).directive('vc-command', vcCommandVapor)` from
 `vapor-chamber/vapor`.[^vapor-app-types]
 
-[^vapor-app-types]: Vue's own `createVaporApp` types `directive()` for the vDOM shape only (rc.12 and rc.13), so the same line on it fails the type check (`tests/vapor-app-types.test.ts`).
+[^vapor-app-types]: Vue's own `createVaporApp` types `directive()` for the vDOM shape only (rc.12 to rc.14), so the same line on it fails the type check (`tests/vapor-app-types.test.ts`).
 
 The two renderers want different shapes under one name:
 
@@ -1054,7 +1054,7 @@ module. **The bus owns writes (commands), and the router owns reads
 
 A pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, with no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->17.97<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->18.16<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop.[^outlet] There, a non-Vapor route component throws
 `router:invalid:component`, and blade rows still need the vDOM outlet. The full
 guide is [docs/router.md](./router.md).
@@ -1222,9 +1222,9 @@ shape**:
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.6<!-- /vc:sizeIifeCore --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.7<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->29.7<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->29.8<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1716,8 +1716,9 @@ a consumer ships it and runs K processes per comparison (rule 16).[^one-draw]
 
 CI runs the same tool, base against head, on every push to main and every pull
 request against it (`perf-ab`, `npm run ab:ci`). A counted "slower" fails the
-build, and so does a run with no passing control or a workload that measured
-nothing. With no base to build, the job skips and says why.[^no-base]
+job, which is advisory, and so does a run with no passing control or a workload that measured
+nothing. With no base to build, or no source change since it, the job skips and
+says why.[^no-base]
 
 [^no-base]: `scripts/ab/base-ok.sh`: the push that creates the branch, a base a force-push dropped, a base on another release. Across a release the pair measures the work the fixes do, and the new release becomes the baseline (log s35.203). A missing base is not a regression.
 
@@ -1886,7 +1887,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->466<!-- /vc:testFiles --> files, <!-- vc:tests -->4866<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->472<!-- /vc:testFiles --> files, <!-- vc:tests -->4867<!-- /vc:tests --> tests)
 ```
 
 | current numbers | where |
@@ -1996,7 +1997,7 @@ the bus, normalized entity storage. The wall held every time.
 That wall still holds with `vapor-chamber/store` shipped: the store owns state,
 the bus does not, and a store's actions reach it only as dispatches.
 
-### B. The Vue 3.6 alignment log, beta.8 to rc.13 (was section 9.2)
+### B. The Vue 3.6 alignment log, beta.8 to rc.14 (was section 9.2)
 
 
 Every Vue 3.6 release gets an alignment cycle. Read each commit at source and
@@ -2043,6 +2044,7 @@ assumptions is what surfaced them.
 | rc.11 (Oct 10) | 65 commits, 65 in full | no code change, three tests rc.11 makes pass, two defects of ours found | 3662 + 38 | 14.8 / 10.3 / 10.7 |
 | rc.12 (Oct 16) | 62 commits, 62 in full | no code change, one test rc.12 makes pass | 4164 + 40 | 16.0 / 11.4 / 11.8 |
 | rc.13 (Oct 23) | 43 commits, 43 in full | no code change, four tests rc.13 makes pass | 4827 + 43 | 29.5 / 21.5 / 22.2 |
+| rc.14 (Oct 30) | 30 commits, 30 in full | no code change needed, eight tests rc.14 makes pass, a module-by-module reading found two defects of ours | 4850 + 45 | 29.8 / 21.7 / 22.4 |
 
 Coverage has been 100% on all four axes since rc.6. The two test numbers are the
 two vitest projects. "Pass-through" means Vue's change lands below this
@@ -2965,10 +2967,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->17.97<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->18.16<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.14<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.03<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -4145,6 +4147,110 @@ its 4.0% floor, shallowRef writes 0.999x. Sizes, brotli:
   upstream (#13687, the VaporSuspense box).
 
 The cycle record is docs/rc-alignment-log.md, section 36.F43.
+
+#### rc.14 (Oct 30): nothing needed, a label that did not match its action, and two defects of ours
+
+**Expected.** From the changelog only: slot props against the Vapor outlet
+and `VcTransition`, hydration against `v-vc-command`, Vapor devtools hooks,
+and compiler output against hand-written fixtures. Slot props reached neither
+in `src`: both call the slot with no props. The hand-written fixture named in
+the brief turned out to match the compiler exactly. The fixture nobody named
+is the one rc.14 moved.
+
+**Landed.** 30 commits in `v3.6.0-rc.13..v3.6.0-rc.14`, all on one line, all
+read in full at source. Half are compiler-vapor performance and refactors. The
+compiled examples differ only in how a node is reached and in one new flag,
+`FALSE_ELSE_IF`. The rest are hydration recovery, slot props and devtools
+hooks. The reactivity dist is byte-identical once the version string is
+masked. The peer range narrows to `>=3.5.0 || >=3.6.0-rc.14`. Both Vapor
+examples repinned and rebuilt, and `vapor-sfc`, `vapor-island-cart` and
+`exo-astro` ran in a browser, built, with two tabs where the story has them.
+
+**Decided: rc.14 needs no code change, eight tests.** Probes ran on rc.13 and rc.14. Eight
+new tests fail on rc.13 and pass on rc.14:
+
+- A `v-if` chain whose branches look alike, where the client takes another
+  branch than the server (#16067): one test for the server's `<!--[1-->`
+  marker, one for the two-branch chain, one for a chain of three. On rc.13 the
+  button read "one", dispatched "two" and warned nothing.
+- A first root that differs is replaced, and the block behind it is the
+  client's (#16044, #16049).
+- A component named by a slot prop follows the prop, and its
+  `useCommand().on()` listener follows the component (8809141). On rc.13 the
+  old component stayed on screen and kept answering.
+- `component:added` and `component:removed` reach the devtools hook for a
+  Vapor component (#16027).
+- Slot props on a Vapor `<slot>` arrive normalized and carry `key`, alone and
+  as the content of `VcTransition` (#16045, #16059), two tests.
+
+Two more pass on both: the same branch adopted with no warning, and a server
+range replaced as one unit once the component claims it.
+
+**Three fixtures, none of them a defect of ours.**
+
+- `transition-bind-merge-fixture` built its tree by hand. The hand tree was
+  exact on rc.13 and rc.14. It now compiles both attribute orders.
+- `vapor-hydration-fixture` hydrated a multi-root template through a component
+  with no `__multiRoot`, the marker `compileScript` stamps on an SFC. rc.13
+  stepped over `<!--[-->` anyway. rc.14 does not (#16052), so the fixture's
+  button was recreated while a real SFC's is adopted.
+- Three tests read the bundler entry's exports by importing it under vitest.
+  There its nested `@vue/*` imports take the `node` condition to CJS builds,
+  and rc.14 calls `createInternalObject`, which only the ESM builds export, at
+  module load. No consumer's build does this. The names now come from an
+  esbuild metafile.
+
+**A second question, of every module.** The owner asked what this release lets
+each module improve, not only whether it breaks. Five readings of `src` against
+each commit gave about 40 candidates, each with a verdict in the cycle record.
+Most are analogies to Vue's own trims, since these modules take nothing from
+Vue's runtime. Taken, with a test or no behaviour change:
+
+- `indexedDbStorage()` kept a failed open, contrary to its comment. Not rc.14's.
+- `v-vc-command` on Vapor read its action at mount and threw the value away, so
+  an expression not readable yet stopped the mount.
+- `useMenu()` rebuilt its array on every query commit.
+- `schemaValidator`, `StreamParser`, `dispatchFrom`, `usePagination` and the HTTP
+  cache lost branches, dead writes or a throwaway computed.
+
+**Alternatives rejected.**
+
+- A scoped slot on the Vapor outlet, which rc.14's slot prop fix makes possible,
+  and hydration in `defineWidget`: new capability under the freeze, and the second
+  cannot work for a no-build `setup()` that returns `createElement` nodes.
+- Hydrating the Vapor outlet: its `createIf` has a false branch, so on rc.14 it
+  counts as a chain and reads a route's `<!--[1-->` as its own.
+- Every performance candidate was measured, 46 rows on a shared machine. Five
+  counted, all faster. Three changes went in, on shapes the examples use: a thunk
+  kept out of the sync and the async dispatch (0.986x on an example-shaped session,
+  7 ns of 525), and `stringifyQuery` (0.56x). `form.set` counted too (0.977x, 6 ns of 279). No example
+  uses a form bus, so it is a lead the owner took, after a recheck found the first
+  arm unsafe and half its gain with it. The rest read no result, or no difference,
+  and none is claimed. Log 36.F57 has every row.
+
+**Measured.** The reactivity dist did not move, so `ab:vue` had nothing to
+measure and was not run. Performance decides over size, so the changes above carry
+their bytes: core ESM +79 brotli, the Blade consumer +52, `./router` +20. Sizes,
+brotli:
+
+- the Vapor outlet's own machinery 4.14 -> 4.09 KB against its 5.0 ceiling
+- its saving over the vDOM outlet 17.97 -> 18.09 KB, raw 57.0 -> 57.2
+- the hand-wired `createVaporApp` minimum 16.3 -> 16.3, min 47.6 -> 47.9
+- `+ vaporInteropPlugin` 23.1 -> 23.1
+
+**Still watching.**
+
+- A hand-written multi-root Vapor component that hydrates recreates its first
+  root unless it carries `__multiRoot`, an internal marker. An SFC carries it.
+- Importing `vue/dist/vue.runtime.esm-bundler.js` where nested `@vue/*` imports
+  resolve to CJS (a test runner's `vue` alias to that file) throws at load.
+  `vue.runtime-with-vapor.esm-browser.js` is self-contained and does not.
+- vuejs/core#15727 is not fixed in rc.14, and PR #11824 is still open.
+- The `vue35` test copy is at 3.5.43.
+- Native `<Suspense>` inside a Vapor component is still unimplemented upstream
+  (#13687, the VaporSuspense box).
+
+The cycle record is docs/rc-alignment-log.md, section 36.F57.
 
 ---
 

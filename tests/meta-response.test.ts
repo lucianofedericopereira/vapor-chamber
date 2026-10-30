@@ -1,4 +1,9 @@
-/** `meta.response`: the Fetch response that answered a bridged command (log s35.136). */
+/**
+ * `meta.response`: the Fetch response that answered a bridged command.
+ * Why: a plugin that reads status or headers of the answering response would see nothing, or another command's response.
+ * Shows: a bridged reply fills status, lowercase headers, url and redirected; a local handler leaves it undefined; a batch shares one response; an answered failure keeps its answer in the error; a client without headers gives empty headers; a transport called outside a bus still answers.
+ * See: log s35.136.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { httpTransport } from '../src/transports';

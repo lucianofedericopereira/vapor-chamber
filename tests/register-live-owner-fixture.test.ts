@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** Two pages own one action in a real Vapor app: the page on screen answers, whichever leaves or is cached. Rationale at the end. */
+/**
+ * Two pages own one action in a real Vapor app: the page on screen answers, whichever leaves or is cached.
+ * Why: the bus runs the newest registration still live and a registration lives until its own cleanup, so when the newer page unmounts the older page on screen must answer again, not `core:missing:handler`; a cached page releases its registration and takes it back on return.
+ * Shows: for `defineVaporCommand` and `useCommand().register`, B answers while mounted, A answers after B unmounts or after KeepAlive switches back to A, and the handler is gone after unmount.
+ * See: log s36.F42, tests/register-ownership.test.ts
+ */
 import { expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';
 import { defineVaporCommand } from '../src/chamber-vapor';
@@ -65,14 +70,3 @@ for (const [label, own] of owners) {
     expect(t.bus.hasHandler('pageSave')).toBe(false);
   });
 }
-
-/*
- * The bus runs one handler per action, the newest registration still live. A
- * registration lives from register() until its own cleanup, so when the newer
- * page unmounts the older page on screen answers again. Before, its dispatch
- * answered `core:missing:handler`, with nothing in production (B4 f, log
- * 36.F42). The useCommand rows show the loss was the bus's, not one
- * composable's. defineVaporCommand follows KeepAlive as useCommand does since
- * v1.25.0: a cached page releases its registration and takes it back on
- * return. The bus-level cases are in tests/register-ownership.test.ts.
- */

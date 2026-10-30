@@ -1,8 +1,8 @@
 /**
- * FIXTURE - a synchronous subscriber that THROWS on one of
- * `useCommandHistory`'s signals during an undo or a redo must leave the four
- * signals agreeing with each other and with the application. Real Vue
- * `effect`s. The long note is at the end.
+ * useCommandHistory: a synchronous subscriber that throws on one of its signals during an undo or redo (real Vue effects).
+ * Why: the history would read "undone" over an application that was not, and a redo would apply the command twice, if the stacks stayed moved and the four signals were left half written.
+ * Shows: a throw on the move is an undo or redo that did not land: nothing escapes, the handler does not run, the error is logged, all four signals match the application, and the history works once the subscriber is stopped; with no throwing subscriber the order of subscriber and handler runs is pinned.
+ * See: log s35.18, log s35.23 e, src/settled.ts.
  */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -86,12 +86,10 @@ describe('useCommandHistory: a throwing sync subscriber during undo and redo', (
     expect(escaped).toBeUndefined();
     expect(returned?.action).toBe('inc');
     expect(app.undone).toBe(0);
-    // Not undone, and every signal says so.
     expect(state()).toEqual({ value: 1, past: 1, future: 0, canUndo: true, canRedo: false });
     // The subscriber's error is reported the way a throwing undo handler's is.
     expect(logged.mock.calls).toEqual([[expect.stringMatching(/^\[vapor-chamber\] \[ FAIL \] history:failed:move: Undo handler threw for "inc"/), boom]]);
 
-    // The history still works once the subscriber is gone.
     runner.effect.stop();
     h.undo();
     expect(state()).toEqual({ value: 0, past: 0, future: 1, canUndo: false, canRedo: true });
@@ -148,28 +146,3 @@ describe('useCommandHistory: a throwing sync subscriber during undo and redo', (
     for (const r of runners) r.effect.stop();
   });
 });
-
-/*
- * Why this file exists. Found by reading `ledger.ts` against Vue `ef5ff106`
- * (log s35.18) and fixed in s35.23: the shape `runDispatch` had, one level
- * down.
- *
- * An undo moves the stacks FIRST, so observers inside the call see the result,
- * and moves them back if the call does not land (`moveUnlessRefused`,
- * settled.ts). `useCommandHistory` mirrors every move into four signals. The
- * move stood before the `try` that guards the call. A Vue effect runs inside
- * the write that triggers it, so a subscriber that threw on the first mirrored
- * write threw out of the move: `undo()` threw, the undo handler never ran, the
- * ledger had already moved the command to the redo stack, and the signals were
- * left half written (past 0, future 0, canUndo true, canRedo false). The
- * history then read "undone" over an application that was not, and a redo
- * would have applied the command a second time.
- *
- * The move is now inside that `try`. A throw during it is an undo that did
- * not land: the stacks move back, which rewrites all four signals, and the
- * error is logged under the same label a throwing undo handler gets.
- *
- * The last test is the control: the order of the four subscribers' runs
- * against the handler and the undo handler over a dispatch, an undo and a
- * redo. The lists are the ones this test produced before the move.
- */

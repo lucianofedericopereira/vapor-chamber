@@ -1,4 +1,9 @@
-/** A plugin's `started` and `settled` parts share the bus's facts slot with the command state. The long note is at the end. */
+/**
+ * A plugin's `started` and `settled` parts, which share the bus's facts slot with the command state.
+ * Why: a part must hear every outcome wherever the plugin is installed, a rule's refusal and a query included, while the command state still counts no query as pending and a throwing part never stops the command.
+ * Shows: on the sync, async and test buses a recorder hears dispatch, query and refusal in order, stays inside its scope, hears nothing after its remover runs, and a throwing part is logged under its plugin id while the command succeeds; the command state sees only the dispatch pending; the facts slot returns to the state's own observer once the plugin is removed and to null once the state is disposed.
+ * See: log s36.105.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BaseBus, type Command, type PluginParts, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { commandState } from '../src/command-state';
@@ -109,16 +114,3 @@ describe('a plugin started part', () => {
     expect(s.facts).toBe(null);
   });
 });
-
-/*
- * Plan 1.32 step 8b (log 36.105). A plugin's `started(cmd)` and
- * `settled(cmd, result)` parts are the bus's facts, not hooks: the bus calls
- * them where it tells the command state a command started and settled, so a
- * part hears every outcome wherever the plugin is installed, a rule's refusal
- * included. A query starts too (`Facts.queried`), which the command state does
- * not count, so a read never shows pending while a part still times it. The
- * slot is one field: null while nothing observes, the command state's own
- * observer while it observes alone (the tracked rows run the code they ran),
- * and one composed observer otherwise (`_composeFacts`). Each part runs inside
- * its plugin's scope and its own try: a throw is logged with the plugin's id.
- */

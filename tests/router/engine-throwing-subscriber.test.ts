@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - a synchronous subscriber that THROWS on one of the router's three
- * signals must not turn a committed navigation into a failed one, or leave
- * `isLoading` / `isRevalidating` stuck on true. Real Vue `effect`s on a real
- * router. The long note is at the end.
+ * A synchronous subscriber that throws on currentRoute, isLoading or isRevalidating (real Vue effects on a real router).
+ * Why: a Vue effect runs inside the write that triggers it, so a throwing subscriber would turn a committed navigation
+ * into a failed one (onError fired, afterEach skipped) or leave isLoading and isRevalidating stuck true with the refetch
+ * or refresh never landing.
+ * Shows: on currentRoute the push resolves null, afterEach runs once, onError is not called and the throw is logged once;
+ * on isLoading and isRevalidating the loaders and refresh still land, the flag ends false and the caller still gets the
+ * subscriber's error; with no throwing subscriber the order of subscriber runs, loader calls and afterEach is fixed.
+ * See: log s35.18, s35.23
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { effect, isRef } from 'vue';
@@ -87,7 +91,7 @@ describe('router engine: a throwing sync subscriber', () => {
     await flush();
 
     expect(threw).toBe(1);
-    // Unchanged: the caller of the query-only push still gets the subscriber's error.
+    // The caller of the query-only push still gets the subscriber's error.
     expect(escaped).toBe(boom);
     expect(router.currentRoute.value.location.query.page).toBe('2');
     expect({ isLoading: router.isLoading.value, calls, data: router.currentRoute.value.data.get('list') }).toEqual({
@@ -119,7 +123,7 @@ describe('router engine: a throwing sync subscriber', () => {
     await flush();
 
     expect(threw).toBe(1);
-    // Unchanged: whoever reports the refresh still gets the subscriber's error.
+    // Whoever reports the refresh still gets the subscriber's error.
     expect(escaped).toBe(boom);
     expect({ isRevalidating: router.isRevalidating.value, data: router.currentRoute.value.data.get('list') }).toEqual({
       isRevalidating: false,
@@ -167,31 +171,3 @@ describe('router engine: a throwing sync subscriber', () => {
     router.dispose();
   });
 });
-
-/*
- * Why this file exists. Found by reading `router/engine.ts` against Vue
- * `ef5ff106` (log s35.18), run and fixed in s35.23: the shape `runDispatch`
- * had. A Vue effect runs inside the write that triggers it, so a subscriber
- * that throws there throws out of the write and skips what follows it.
- *
- * The commit. `snapshot.value = next` stood one line above `committed = true`.
- * The subscriber's throw was therefore caught as a PRE-commit failure: the
- * push resolved `component_load_failed`, `onError` fired, `afterEach` did not
- * run, and yet the URL had moved and the snapshot was the new page. The flag
- * is now set before the write, and the write sits in a `try` whose `finally`
- * runs `onCommit` and the after-hooks; the error then reaches the engine's
- * own post-commit branch, which logs it and resolves null.
- *
- * The two background lanes. `refetchAffected` and `trackRevalidation` each
- * raised their flag and wrote the signal BEFORE starting the promise chain
- * whose `finally` lowers it. A throw on that write meant the chain was never
- * built: the flag stayed true for the life of the router, the refetch never
- * ran, the fresh value never landed. Each write is now in a `try` whose
- * `finally` builds the chain. The caller still gets the subscriber's error,
- * as before; the second and third tests pin that too.
- *
- * The last test is the control for all three moves: the order of subscriber
- * runs, loader calls and `afterEach` over a path navigation, a query-only
- * change and a reported refresh. The lists are the ones this test produced
- * before the move.
- */

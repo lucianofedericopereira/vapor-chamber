@@ -1,20 +1,8 @@
 /**
- * One rule for dispatches made inside an undo handler or a redo: they are
- * rollback steps, carry meta.origin 'undo' or 'redo', and history does not
- * record them - on both buses, in the plugin and in the composable.
- *
- * Before: the history() plugin held a `_replaying` flag around the undo
- * handler and the redo dispatch. The flag held only while the recorder ran
- * INSIDE the dispatch - the sync bus; on the async bus the recorder runs when
- * the dispatch settles, after the flag was cleared, so a compensating
- * dispatch made by an undo handler was recorded and wiped the redo stack.
- * useCommandHistory suppressed the redo dispatch itself (origin 'redo', a
- * one-shot slot) and nothing an undo handler dispatched, on either bus. Now
- * `_withOriginScope` stamps every dispatch made synchronously inside the
- * window - stampMeta runs in the synchronous prologue of every dispatch, so
- * the scope holds on the async bus too - and both recorders skip 'undo' and
- * 'redo'. The limit is the flag's old limit: a dispatch an ASYNC undo handler
- * makes after an await is outside the window.
+ * Dispatches made inside an undo handler or a redo carry meta.origin 'undo' or 'redo' and are not recorded by history, on both buses.
+ * Why: a compensating dispatch recorded by history would wipe the redo stack, so a user could not redo after an undo that compensates.
+ * Shows: the history() plugin and useCommandHistory keep past and future unchanged by the handler's dispatches; listeners see the origin; _withOriginScope stamps nested sync dispatches and restores the outer scope, also on a throw.
+ * See: log s33.5, s35.114
  */
 import { describe, expect, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, _withOriginScope, type Command, type CommandBus } from '../src/command-bus';
@@ -65,7 +53,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
       bus.register('act', () => { if (nested) bus.dispatch('child', 1); return 'a'; }, { undo: () => {} });
       await bus.dispatch('act', 1);
       h.undo();
-      await tick(); // an undo is a command: async on the async bus (s35.114)
+      await tick(); // an undo is a command, so it settles later on the async bus
       nested = true;
       h.redo();
       await tick();

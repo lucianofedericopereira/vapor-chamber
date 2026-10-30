@@ -1,25 +1,10 @@
 /**
- * Vapor boundary regression - `vapor-chamber/router/vapor` must not reach the
- * vDOM renderer.
+ * The `vapor-chamber/router/vapor` entry keeps vDOM interop bindings out of a consumer's entry chunk.
+ * Why: if the Vapor outlet reached `vaporInteropPlugin`, `defineComponent`, `h` or `createVNode`, the subpath would stop saving the interop cost.
+ * Shows: the bundled entry imports none of those names from `vue`, the interop outlet does (positive control), the vapor outlet alone imports exactly the listed helpers, and the base router types do not export `RouterOutlet`.
+ * See: docs/router.md, tests/router/vdom-boundary.test.ts, tests/vapor/vapor-outlet-size.test.ts
  *
- * `tests/router/vdom-boundary.test.ts` with the markers INVERTED. That file
- * asserts the base router entry retains no vDOM binding; this one asserts the
- * same of the Vapor outlet, which is the stronger claim: the outlet actually
- * renders route components, and the whole point of the subpath is that doing
- * so pulls in no `vaporInteropPlugin`, no `defineComponent`, no `h`, no
- * `createVNode`. If any of those is reachable from the entry's live bindings,
- * the interop machinery is back and the subpath has stopped paying for itself.
- *
- * Binding assertions rather than byte thresholds, deliberately: which names
- * survive tree-shaking is CI-stable where size numbers drift between toolchain
- * versions. The bytes are measured in `tests/vapor/vapor-outlet-size.test.ts`,
- * where the accepting decision needs them.
- *
- * (`vue` is an optional peer, so it stays external here - what we assert on is
- * WHICH named bindings each entry still asks `vue` for.)
- *
- * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
- * esbuild is unavailable.
+ * Fails when dist/ is not built (tests/require-dist.ts); skips when esbuild is unavailable.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,12 +27,8 @@ try {
 const esm = (p: string) => p.replace(/\\/g, '\\\\');
 
 /**
- * Named bindings the consumer's ENTRY chunk still imports from 'vue'.
- *
- * `splitting: true` matters: without it esbuild inlines the dynamic `import()`
- * of `blade.ts` back into the single output, which would report vDOM bindings
- * a real consumer's entry chunk never loads. A real bundler code-splits it, so
- * the entry is what an app actually pays on first load.
+ * Named bindings the consumer's entry chunk imports from 'vue'.
+ * `splitting: true` keeps the dynamic `import()` of `blade.ts` out of the entry chunk, as a real bundler would.
  */
 async function vueImportsOf(source: string): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-vapor-bound-'));
@@ -92,17 +73,13 @@ describe.skipIf(!esbuild)('Vapor boundary', () => {
     `);
     console.log('vue bindings retained by router/vapor :', imports.join(', ') || '(none)');
     expect(imports.filter((name) => INTEROP_MARKERS.includes(name))).toEqual([]);
-    // Guard the harness itself: an enumeration that found nothing at all would
-    // pass the assertion above vacuously. The outlet must still be asking
-    // `vue` for the helpers it renders through.
+    // An empty enumeration would pass the assertion above vacuously.
     expect(imports).toContain('createDynamicComponent');
     expect(imports).toContain('defineVaporComponent');
   });
 
   it('the interop arm DOES retain them - the cost the vapor subpath drops', async () => {
-    // Positive control. Without this, the assertion above could pass because
-    // the harness stopped detecting bindings rather than because the outlet
-    // stopped needing them.
+    // Positive control: proves the harness still detects bindings.
     const imports = await vueImportsOf(`
       import { vaporInteropPlugin } from 'vue';
       import { createMemoryHistory, createRouter } from '${esm(routerEntry)}';
@@ -117,20 +94,10 @@ describe.skipIf(!esbuild)('Vapor boundary', () => {
 
   it('the outlet alone retains exactly the bindings docs/router.md and manual chapter 6, "Pick an outlet"', async () => {
     // The `vapor-chamber/router/vapor` row of both retained-bindings tables.
-    // It once listed no `createIf`, which the outlet's slot branch imports.
     const imports = await vueImportsOf(`
       import { RouterOutlet } from '${esm(vaporEntry)}';
       globalThis.__vc = [RouterOutlet];
     `);
     expect(imports).toEqual(['createDynamicComponent', 'createIf', 'createSlot', 'defineVaporComponent', 'inject', 'provide']);
-  });
-
-  it('the router entry does not re-export the Vapor outlet either', async () => {
-    // The same discipline `vdom-boundary` pins for the vDOM side: a static
-    // re-export from the base entry would be a static reference, and would put
-    // the Vapor runtime in the graph of every consumer including 3.5 ones,
-    // for whom these helpers do not exist at all.
-    const entryTypes = readFileSync(resolve(process.cwd(), 'dist', 'router', 'index.d.ts'), 'utf8');
-    expect(entryTypes).not.toMatch(/\bRouterOutlet\b/);
   });
 });

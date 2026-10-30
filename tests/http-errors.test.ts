@@ -1,5 +1,8 @@
 /**
- * Tests for src/http-errors.ts - classifyError
+ * The failure rules in src/http-errors.ts: classifyError, isRetryableStatus and the status table.
+ * Why: a wrong rule would retry a request that must be sent once, or serve stale data for a failure that is not transient.
+ * Shows: each status maps to its declared condition; 408, 429 and every 5xx are retryable, other statuses are not; classifyError marks timeouts, lost replies, 5xx and non-client errors transient, and 4xx and aborts not; both rules are exported from the package root.
+ * See: log s35.131, docs/contract.md, docs/manual/04-backend.md
  */
 import { describe, expect, it } from 'vitest';
 import { classifyError, isRetryableStatus } from '../src/http-errors';
@@ -7,7 +10,7 @@ import { conditionOfStatus } from '../src/command-bus';
 import { _failures } from '../src/failure';
 import { _answered } from '../src/http';
 
-// The client's own failures, as it throws them (log s35.131).
+// The client's own failures, as it throws them.
 const answered = (status: number) => _answered(status, null, {});
 const transport = _failures('transport');
 import * as root from '../src/index';

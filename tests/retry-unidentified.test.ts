@@ -1,4 +1,9 @@
-/** An unidentified request that got no reply is not re-sent, and is reported; a declared wait decides when, never whether (log s35.162). Rationale at the end. */
+/**
+ * An unidentified request that got no reply is not re-sent and is reported; a declared wait decides when to re-send, never whether.
+ * Why: a timeout, a lost connection or a gateway 502/504 say nothing about whether the server applied the request, so re-sending a command with no idempotency key, no declared idempotent action and no idempotent method could double-apply it. Only an identified command is sent again; the rest fails with its code, marked `outcome: 'unknown'`, with one development warning per action (bus) or per method and URL (client). Retry-After is the wait only, and it takes precedence over RateLimit.
+ * Shows: on the bridged bus and the HTTP client, a timeout, 504 and 502 are sent once and marked, with one warning; a declared idempotent action, a keyed command, a GET, and 429/503/408 are re-sent; a 500 or non-JSON 2xx is sent once and not marked; retry: false and production warn nothing; an optimistic dispatch rolls back and its done carries the outcome; a 409 with Retry-After keeps retryIn and is re-sent only when keyed; RateLimit r=0 waits t seconds, r>0 declares no wait, and Retry-After wins.
+ * See: log s35.162, RFC 9110 9.2.2, RFC 9110 10.2.3
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type BusError, createAsyncCommandBus, type AsyncCommandBusOptions, type CommandResult } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
@@ -113,7 +118,7 @@ describe('the bus: no reply on an unidentified command', () => {
     // The handler is the change shown; the bridge's failure must take it back.
     bus.register('cartAdd', async () => { count++; }, { undo: () => { count--; }, optimistic: true });
     const r = await bus.dispatch('cartAdd', { id: 1 });
-    expect(r.ok).toBe(true); // answered at once
+    expect(r.ok).toBe(true); // an optimistic dispatch answers before the bridge settles
     const end = await (r.value as { done: Promise<{ ok: boolean; error?: unknown }> }).done;
     expect((end.error as BusError).context?.outcome).toBe('unknown');
     expect(count).toBe(0);
@@ -249,23 +254,3 @@ describe('production', () => {
     vi.resetModules();
   });
 });
-
-/*
- * RFC 9110 9.2.2: a client "SHOULD NOT automatically retry a request with a
- * non-idempotent method unless it has some means to know that the request
- * semantics are actually idempotent ... or some means to detect that the
- * original request was never applied." No reply in time (our transport's
- * timeout, a lost connection) and a gateway's 502 or 504 say nothing about
- * whether the request was applied, so only an identified command (an
- * idempotency key, a declared idempotent action, an idempotent method) is
- * sent again. The rest fails with its code, marked `outcome: 'unknown'`,
- * and development warns once per action (the bus) or per method and URL
- * (the client).
- *
- * RFC 9110 10.2.3: Retry-After is "how long the user agent ought to wait
- * before making a follow-up request". urllib3, gRPC A6 and ky read it as the
- * wait only. So a declared wait sets when, and identity decides whether.
- * The RateLimit field (draft-ietf-httpapi-ratelimit-headers-11) declares a
- * wait of `t` seconds when a policy's `r` is 0, and Retry-After "MUST take
- * precedence". Log s35.162.
- */

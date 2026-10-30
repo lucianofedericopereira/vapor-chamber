@@ -1,4 +1,14 @@
-/** createMcpHandler's one selection is `actionFilter`, an allowlist (log s35.180). Rationale at the end. */
+/**
+ * createMcpHandler's one selection is `actionFilter`, an allowlist.
+ * Why: an agent must only see and call the actions the app chose to expose, and an empty filter set
+ * selects every action (as in CloudEvents), so exposing all must be a deliberate `createActionFilter([])`.
+ * An omitted filter exposes everything with a one-time warning that says "allowlist"; an `actions`
+ * option selects nothing. Exposing nothing has no filter form: an app that exposes nothing does not
+ * mount the handler.
+ * Shows: tools/list for omitted, exact, prefix and empty filters (with and without the warning), and a
+ * tools/call outside the filter is -32602 and never dispatched.
+ * See: log s35.180, log s35.152
+ */
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { createActionFilter } from '../src/action-filter';
 import { createMcpHandler } from '../src/mcp';
@@ -53,16 +63,3 @@ describe('controls', () => {
     expect(ran).not.toHaveBeenCalled();
   });
 });
-
-/*
- * `actions` meant three things in the public API (audit N1): a plugin's
- * filter, where `[]` is every action; this handler's allowlist, where `[]` was
- * none; and the retry map (renamed `actionPolicies`, s35.179). Owner decision
- * D2 (2026-10-05): the handler loses `actions`, and `actionFilter`
- * (CloudEvents Subscriptions API 3.2.4, s35.152) is its one selection. An
- * empty CloudEvents set selects every action, so `createActionFilter([])` is
- * the deliberate "expose all" that `['*']` was. Exposing nothing has no
- * filter form (an empty `any` is rejected by the spec): an app that exposes
- * nothing does not mount the handler. The word "whitelist" goes too (audit
- * N7, W3C TAG design principles: "use allowlist and blocklist").
- */

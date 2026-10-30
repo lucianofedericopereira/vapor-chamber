@@ -1,4 +1,9 @@
-/** A Retry-After over 30 s is read as declared and never waited out short. Rationale at the end. */
+/**
+ * A Retry-After over 30 s is read as declared and never waited out short, by the parser, the HTTP client, the async bus and the outbox.
+ * Why: RFC 9110 10.2.3 makes Retry-After the minimum wait, with no ceiling. If the parser dropped a long wait, the HTTP client would retry sooner than asked, the outbox would see no retryIn and reject a 409 as a verdict, and the bus would re-send at its maxDelay instead of the declared wait. Each caller applies its own policy: the client does not wait over 30 s inside one request (it throws), the bus returns a declared wait over its maxDelay, the outbox waits it out.
+ * Shows: delay-seconds and an HTTP-date past 30 s are read, and only a wait over 2^31 - 1 ms (what a timer can hold) is ignored; a 503 with Retry-After 120 is fetched once and thrown; a short Retry-After is retried; a retryIn of 25 s over maxDelay is returned, one of 1 s is re-sent; an outbox keeps a 409 with Retry-After 120 and flushes again 120 s later.
+ * See: log s35.89, RFC 9110 10.2.3, src/bounds.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _failures, createAsyncCommandBus } from '../src/command-bus';
 import { postCommand, _parseRetryAfter } from '../src/http';
@@ -107,22 +112,3 @@ describe('the outbox gets the long wait', () => {
     outbox.dispose();
   });
 });
-
-/*
- * Log s35.89. `_parseRetryAfter` returned undefined for any wait over 30 s
- * (`MAX_RETRY_AFTER_MS`), a policy of the HTTP client's in-request retry
- * living in the parser every caller shares. RFC 9110 10.2.3 makes Retry-After
- * the minimum time to wait, and its grammar has no ceiling (decision 13: the
- * exact grammar). Three consequences, each red before:
- * - the HTTP client read a 120 s header as "no header" and retried at once on
- *   its backoff, sooner than the server asked;
- * - the outbox saw no `retryIn`, so a 409 sent with `Retry-After: 120` was
- *   rejected as a verdict (a4f84fe's rule: a declared Retry-After is not one);
- * - the async bus slept `min(retryIn, maxDelay)`: a declared 25 s was re-sent
- *   at 20 s, also sooner than asked.
- * Now the parser reads what was declared, ignoring only what no timer can hold
- * (setTimeout fires at once past 2^31 - 1 ms, bounds.ts MAX_TIMEOUT_MS); each
- * caller applies its own policy: the client does not wait over 30 s inside one
- * request (it throws, with the header on the response for the bridge), the
- * bus returns a declared wait over its `maxDelay`, the outbox waits it out.
- */

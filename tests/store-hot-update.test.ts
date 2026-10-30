@@ -1,4 +1,9 @@
-/** A store replaced inside a hot update the Vite plugin marks starts from the state of the one it replaces. Rationale at the end. */
+/**
+ * A store replaced inside a hot update the Vite plugin marks starts from the state of the one it replaces.
+ * Why: an edited store module re-runs and builds its store from state(), so every edit would lose the live state unless the update carries it by key, at every nesting level of plain objects.
+ * Shows: the state carries across a scope-disposed store and a module-load takeover; keys match top-level and nested (added keys get their declared value, dropped keys go, app-added keys stay); non-keyed states carry as they are; another bus's store, an unmarked takeover and production carry nothing.
+ * See: log s36.77, tests/vapor/store-hmr.test.ts.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus } from '../src/command-bus';
@@ -204,26 +209,3 @@ describe('a hot update matches nested keys too', () => {
     bus.dispose();
   });
 });
-
-/*
- * Nested keys (log 36.77, Pinia 4.1.0's hot update, owner 2026-10-20: "a hot update should
- * give a new nested key its declared value, as it does for a top-level key"). The carry
- * matched the top level only, so an edit adding `profile.age` left it undefined until a
- * reload. It now matches every level of plain objects. A key both have keeps the app's value,
- * a key the edit adds gets its declared one, a key the edit removes goes, and a key the app
- * added at runtime stays: telling the last two apart needs the old `state()`, which the store
- * keeps. Without that last rule a dictionary declared `{}` lost every entry on an edit.
- */
-
-/*
- * A store module edited under Vite re-runs, and the store it defines replaces
- * the old one: by takeover when the old one was created at module load, or
- * after its component disposed it when a component held it. Both built from
- * `state()`, so every edit lost the state. vaporChamberHMR()'s shim marks the
- * update, from `vite:beforeUpdate` to `vite:afterUpdate` (Vite 8's client runs
- * dispose, the re-run and the accept callbacks between them), and a store
- * built inside the mark starts from the state of the one it replaces, matched
- * by key as Pinia's hotUpdate does. The mark exists only under the dev server,
- * and the store reads it in DEV only, so a build folds it away. The component
- * case under the real Vue HMR runtime is in tests/vapor/store-hmr.test.ts.
- */

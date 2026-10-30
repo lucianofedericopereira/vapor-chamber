@@ -6,8 +6,8 @@ source of truth for that distinction.
 
 - **RC dates:** rc.1 2026-07-18, rc.2 2026-07-22, rc.3 2026-08-11, rc.4 2026-08-14, rc.5
   2026-08-21, rc.6 2026-08-28, rc.7 2026-09-04, rc.8 2026-09-11, rc.9 2026-09-18, rc.10
-  2026-09-30, rc.11 2026-10-10, rc.12 2026-10-16, rc.13 2026-10-23.
-- **Aligned to Vue <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->:** the `vue` devDependency pin, stamped rather than
+  2026-09-30, rc.11 2026-10-10, rc.12 2026-10-16, rc.13 2026-10-23, rc.14 2026-10-30.
+- **Aligned to Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->:** the `vue` devDependency pin, stamped rather than
   typed, so it cannot fall behind the package.
 - **Where each cycle is recorded:** the alignment table in the whitepaper's appendix B says what
   each cycle reviewed, with commit counts and what it found. `docs/rc-alignment.md` says how a
@@ -44,8 +44,9 @@ A piece may therefore land experimental in a 1.x minor once it clears the v1.17.
 measured cost, what it buys, fixtures to the house standard. "Improves the architecture" clears
 that bar, and "change for its own sake" does not.
 
-- Six pieces have landed under it: `revalidateRoutes`, `vapor-chamber/router/vapor`,
-  `vapor-chamber/store`, `vcCommandVapor`, `vcPayloadVapor` and `vcOptimisticVapor`. Each
+- Seven pieces have landed under it: `revalidateRoutes`, `vapor-chamber/router/vapor`,
+  `vapor-chamber/store`, `vcCommandVapor`, `vcPayloadVapor`, `vcOptimisticVapor` and the Vapor
+  outlet's `view` slot. Each
   shipped on its own, each with a dated row in `docs/decisions.md`.
 - That log is the test this rule states, so it alone decides whether a later piece belongs in
   this count.
@@ -58,7 +59,7 @@ Changes that touched the freeze without breaking it are recorded in appendix A: 
 
 ## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->"`. The library supports Vue 3.5
+- **Peer dependency:** `vue: ">=3.5.0 || >=<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->"`. The library supports Vue 3.5
   (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent` and
   `defineVaporAsyncComponent` are stable in shape, but their behaviour keeps shifting.[^vapor-apis]
@@ -254,7 +255,7 @@ no-build page, Vapor ships only in a separate dist file, and there the clear thr
 `createVaporChamberApp` names which of "Vue absent", "Vue without Vapor" and "Vue unreachable"
 happened, and `createVaporApp` names none of them.
 
-**Status: not due.** Vue is at <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->, so the stable trigger has not fired.
+**Status: not due.** Vue is at <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->, so the stable trigger has not fired.
 At v2.0 it is either kept or removed cleanly, with every consumer moved to
 `import { createVaporApp } from 'vue'`. It gets no `@deprecated` tag on the way (owner,
 2026-10-05: no deprecations). Nothing changes before v2.0.
@@ -419,7 +420,7 @@ are in appendix C. The one still ahead:
 **Version policy before 3.6 stable.** Breaking changes ship as **minors**, not majors.
 
 - The policy rests on two things. The pre-stable peer dependency is still a moving target
-  (<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> today). And the surfaces that have taken breaking changes are the ones
+  (<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> today). And the surfaces that have taken breaking changes are the ones
   documented experimental.[^policy-basis]
 - A breaking change to a surface documented as stable needs a major, in the RC phase or not.
 - **2.0.0 remains reserved for the post-stable identity decision** (Vapor-first or bus-first),
@@ -443,14 +444,14 @@ from Vue, so nothing blocked it. See [docs/integrations/laravel.md](./docs/integ
 ## Vue version-support matrix
 
 Which Vue versions each released line supports. The peer dependency is permissive
-(`>=3.5.0 || >=<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->`, matching `package.json`). This table is the *tested* support
+(`>=3.5.0 || >=<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->`, matching `package.json`). This table is the *tested* support
 statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
 |---------------|----------------------------|---------|-------|
 | v1.2.x - v1.5.x | yes | beta.11 -> beta.14 | the beta-aligned lines, v1.5.x feature-locked |
 | v1.6.x - v1.7.0 | yes | beta.15 -> beta.17 | tracking-only bumps + the first post-lock delivery |
-| **v1.8.0 ->** | yes | **rc.1 -> current** | tested against <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned --> |
+| **v1.8.0 ->** | yes | **rc.1 -> current** | tested against <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> |
 | v2.0.0 | yes (composables) | **3.6 stable** | peer range gains stable, wiring unchanged: probe by default, `configureVue()` for determinism |
 
 On Vue 3.5 you get the framework-agnostic surface: bus, plugins, transports, and composables with
@@ -573,7 +574,7 @@ If you are a consumer choosing between APIs in this library:
 
 If you are contributing: no large change is pending. The build-flag wrapper elimination is
 **withdrawn**, not deferred, and `configureVue()` replaced it (see "Thin Vapor wrappers will become
-opt-in through a build flag" above). The library aligns on <!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->.
+opt-in through a build flag" above). The library aligns on <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->.
 
 For performance characteristics, optimization philosophy and tuning options, see
 [docs/performance.md](./docs/performance.md).
@@ -742,7 +743,7 @@ The released rows of "Version targets", v1.13.0 to v1.20.0.
 | v1.13.0 | rc.3 alignment | Tracking bump + docs: `configureVue()` promoted from no-bundler escape hatch to the recommended deterministic Vapor wiring for all consumers. No API change. |
 | v1.16.0 | rc.5 alignment | Tracking bump, plus one real contract change: the transition bridge's `phase` / `dispose` became **non-enumerable**, so `{ ...bridge }` no longer carries them. Direct access and destructuring are unaffected. The change exists because `v-bind="t"`, the documented binding, was spreading both into the DOM as attributes. |
 | v1.17.0 | rc.6 alignment | Two measured perf wins (wildcard fan-out 1.14-1.32x, router active-link stamping 1.77-1.86x), both 0 B. **New subpath `vapor-chamber/vapor`** (no new capability: a build-time wiring channel replacing the probe, wired set measured, custom-element/interop opt-in). Plus one real fix: `vapor-chamber/vue` never passed `hasInjectionContext`. So in a **production bundle** (probe dead) the rc.4 KeepAlive guard fell back to `getCurrentInstance()` and went inert, and `useCommandHistory`/`useCommandError` recorded commands dispatched into a deactivated view. Also: wildcard listeners match on a prefix computed at `on()` time (1.14-1.32x on wildcard fan-out, 0 B brotli, `'*'` unaffected). `configureVue()` documented as MERGING, so a Vapor app adds one name rather than re-enumerating eight. And one roadmap fact corrected: all four wrapped Vapor APIs are statically importable from `vue`, and were at rc.5. |
-| v1.18.0 | rc.6 window | **New subpath `vapor-chamber/router/vapor`**: a Vapor-native `RouterOutlet`, experimental. A genuinely new render surface, so it overrides the "new capability parks until after 3.6 stable" posture deliberately and on evidence, per the maturation posture under "Posture" above. The RC window is the runway, and an outlet built over N alignment cycles arrives at stable already hardened. Gated on a measured number before any of it was built: **<!-- vc:outletSaving -->17.97<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.0<!-- /vc:outletSavingRaw --> KB raw** saved versus the same app rendering through the vDOM outlet plus interop, re-derived per run from a Vite production build by `tests/vapor/vapor-outlet-size.test.ts`. The guard holds two limits: the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor outlet's own machinery over a router-without-outlet floor stays <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (**measured <!-- vc:outletOwnArm -->4.14<!-- /vc:outletOwnArm --> KB**). It is written to fail loudly if a later RC erodes either, and that failure is a decision trigger, not a threshold to raise. (Until the rc.8 cycle it was one esbuild-measured 19.5 KB bar on the difference, retired after firing twice on improvements: see the whitepaper's rc.8 row.) Contract changes: one additive `RouterErrorCode` (`mode_mismatch`), and route components on this outlet must be `defineVaporComponent` output. Blade rows still need the vDOM outlet. **Plus one BREAKING change to `vapor-chamber/router`**: it no longer builds an http client. So a `{ url }` route table now needs `http` and blade rows need `fetchBlade`, and `routerHttp()` and `bladeFetcher()` ship as the new `vapor-chamber/router/remote` subpath. Two lines for the affected setups, nothing for a generated table with no blade rows. That is the primary setup, and it was paying 3.4 KB brotli for features it never called. Taken in the RC window on the same maturation logic as the outlet above: near-zero adoption now, and the cost of the break only rises. `./router` drops 12.4 -> 9.6 KB brotli. Three more additive codes: `redirect_loop`, `no_router`, `http_unconfigured`. **Plus a new subpath `vapor-chamber/store`**: `defineChamberStore`, experimental, <!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli, importing `vue` and nothing else. Store actions are commands, so `persist`, `history`, `sync`, `optimistic`, `idempotent`, `serialize` and the devtools timeline apply to store state with no store-specific code. URL-worthy fields delegate to the router rather than mirroring it. Lands with a deliberate reversal of whitepaper section 6 recorded in that section, for PACKAGE scope only: the bus still stores no state. No contract change for anyone not importing it. |
+| v1.18.0 | rc.6 window | **New subpath `vapor-chamber/router/vapor`**: a Vapor-native `RouterOutlet`, experimental. A genuinely new render surface, so it overrides the "new capability parks until after 3.6 stable" posture deliberately and on evidence, per the maturation posture under "Posture" above. The RC window is the runway, and an outlet built over N alignment cycles arrives at stable already hardened. Gated on a measured number before any of it was built: **<!-- vc:outletSaving -->18.16<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.2<!-- /vc:outletSavingRaw --> KB raw** saved versus the same app rendering through the vDOM outlet plus interop, re-derived per run from a Vite production build by `tests/vapor/vapor-outlet-size.test.ts`. The guard holds two limits: the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor outlet's own machinery over a router-without-outlet floor stays <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (**measured <!-- vc:outletOwnArm -->4.03<!-- /vc:outletOwnArm --> KB**). It is written to fail loudly if a later RC erodes either, and that failure is a decision trigger, not a threshold to raise. (Until the rc.8 cycle it was one esbuild-measured 19.5 KB bar on the difference, retired after firing twice on improvements: see the whitepaper's rc.8 row.) Contract changes: one additive `RouterErrorCode` (`mode_mismatch`), and route components on this outlet must be `defineVaporComponent` output. Blade rows still need the vDOM outlet. **Plus one BREAKING change to `vapor-chamber/router`**: it no longer builds an http client. So a `{ url }` route table now needs `http` and blade rows need `fetchBlade`, and `routerHttp()` and `bladeFetcher()` ship as the new `vapor-chamber/router/remote` subpath. Two lines for the affected setups, nothing for a generated table with no blade rows. That is the primary setup, and it was paying 3.4 KB brotli for features it never called. Taken in the RC window on the same maturation logic as the outlet above: near-zero adoption now, and the cost of the break only rises. `./router` drops 12.4 -> 9.6 KB brotli. Three more additive codes: `redirect_loop`, `no_router`, `http_unconfigured`. **Plus a new subpath `vapor-chamber/store`**: `defineChamberStore`, experimental, <!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli, importing `vue` and nothing else. Store actions are commands, so `persist`, `history`, `sync`, `optimistic`, `idempotent`, `serialize` and the devtools timeline apply to store state with no store-specific code. URL-worthy fields delegate to the router rather than mirroring it. Lands with a deliberate reversal of whitepaper section 6 recorded in that section, for PACKAGE scope only: the bus still stores no state. No contract change for anyone not importing it. |
 | v1.19.0 | rc.7 alignment | Tracking bump (peer `>=3.6.0-rc.7`). All 50 rc.7 commits read at source, every one pass-through. The cycle carried code anyway, because it also read every module in `src`: twenty-three defects, each reproduced before it was fixed. The largest class: five shipped plugins (`logger`, `history`, `circuitBreaker`, `metrics`, `persist`) read `next()`'s result as a `CommandResult`. On the async bus that is a Promise, so each took the wrong branch in silence. Now one shared rule, `src/settled.ts`. Numeric options that failed open on a bad value (NaN) now fall back to their documented default. Contract changes, all small: a second form on one bus now throws instead of taking the first one over (forms take an `id` prefix, default `'form'`, so a single form dispatches the names it always did). One additive `RouterErrorCode`, `cyclic_parent`. `configureVue` added to the `full` and `elements` IIFE namespaces. And the ESM build's DEV flag now folds in a consumer's production build, so dev-only diagnostic strings stop shipping: 14,037 -> 12,764 B raw and 4,453 -> 3,999 B brotli on a real Vite app build, about 10%. That held for one-chunk apps. In a code-split app, a chunk that imported DEV kept its strings until v1.20.0 derived DEV per module. |
 | v1.20.0 | rc.8 alignment | Tracking bump (peer `>=3.6.0-rc.8`), plus one contract NARROWING, taken as a minor under the pre-stable policy in "Version targets". `retry()`'s default no longer retries an error carrying an HTTP status unless it is 408, 429 or 5xx. So `retry()` stacked in front of the HTTP bridge stops re-sending a 422. A handler that throws a 4xx-status error and relied on `retry()` re-running it passes its own `isRetryable`. Additive: `classifyError` and `isRetryableStatus` exported from the root. `vaporChamberWire()` from `vapor-chamber/vite`, a build-only Vite plugin that wires Vue into an app importing the root, with no import changed. `vcCommandVapor` from `vapor-chamber/directives`, `v-vc:command` for Vapor components (the plugin's install-time Vapor warning is gone). Also in this release: `useSharedCommandState().isLoading(action, target?)`. A plugin's throw is a `plugin:failed:plugin` result, and a sealed bus refuses `clear()`. `dispose()` settles waiting `request()`s, and the sync `request()` honours its signal. A before-hook's throw is a `core:refused:hook` result, and `history()` records an async redo once. The ESM build's DEV is derived per module. Sizes measured as they ship (Vite production builds, about 10% lower). `alien-signals` is an optional peer. `dispose()` runs each plugin's `dispose()`, and `retry()` has one. What an undo handler or a redo dispatches carries origin `undo` / `redo` and is never recorded. The TestBus's `request()`/`respond()` are real. |
 

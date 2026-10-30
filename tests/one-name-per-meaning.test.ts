@@ -1,4 +1,9 @@
-/** One name for a cap on retained entries, `maxSize`, and one for teardown, `dispose` (log s35.188, s35.189). Rationale at the end. */
+/**
+ * One name for a cap on retained entries, `maxSize`, and one for teardown, `dispose`.
+ * Why: a cap or a teardown spelled differently per module (`maxKeys`, `maxQueue`, `teardown`, `close`) would make an option silently ignored or a resource leaked when a caller guesses the wrong name; `dispose` is the ECMA-262 method name.
+ * Shows: `maxSize` caps idempotent, metrics, the outbox, both error composables and the buffer, with no-option controls and a cache control; `dispose` closes the SSE EventSource, leaves the Echo channels, and stops createChannel; the WebSocket transport keeps `connect` and `disconnect` as functions.
+ * See: log s35.188, s35.189.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError, useSharedCommandState } from '../src/chamber';
 import { createBuffer } from '../src/buffer';
@@ -124,26 +129,3 @@ describe('dispose releases what each one took', () => {
     expect([typeof ws.connect, typeof ws.disconnect]).toEqual(['function', 'function']);
   });
 });
-
-/*
- * Audit N8: eight names meant "the most entries this keeps" (`maxSize`,
- * `maxKeys`, `maxEntries`, `maxQueue`, `maxQueueSize`, `maxCommands`,
- * `errorCap`, `bufferLimit`). ECMA-262's `size` counts a Map's entries, and
- * W3C Resource Timing sets its buffer's limit through `maxSize`; the library's
- * own `size()` already counted entries and `maxSize` was its most used name.
- * Where the options configure more than the collection, its name sits inside:
- * the bus's `maxBufferSize` beside `bufferTTL`, the WebSocket transport's
- * `maxQueueSize` beside its connection. The old names are gone, with no
- * fallback (no deprecations). Log s35.188. Since then, `maxBufferSize` went
- * to `createBuffer({ maxSize })` (log 36.73) and `maxQueueSize` to the
- * transport's own outbox (log 36.74).
- *
- * Teardown had five names: `dispose` (the buses, plugins, composables, the
- * outbox), `teardown` (the SSE and Echo bridges), `close` (createChannel,
- * the Vitest MCP server), `destroy` (the router and its history) and the
- * docs' `stop` for serveMcpStdio's returned function. ECMA-262 names the
- * method `dispose` (`Symbol.dispose`, `DisposableStack.prototype.dispose`),
- * and `disposeAsync` for an async one. The WebSocket bridge's `disconnect()`
- * stays: a later `connect()` opens a new socket, so it is not a teardown.
- * The router's dispose is pinned by the router suite. Log s35.189.
- */

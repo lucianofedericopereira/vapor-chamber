@@ -1,4 +1,9 @@
-/** The work's steps (`reuse`, `admit`, `begin`) run around any work in one order, whatever the install order. The long note is at the end. */
+/**
+ * The work's steps (`reuse`, `admit`, `begin`) around a command's work, on the sync, async and test buses.
+ * Why: if plugin outcomes depended on install order, a limit in front of a cache would spend a slot on a hit, a breaker in front of a limit would count its refusal, and a retry would re-run steps meant to run once per dispatch.
+ * Shows: with either install order a cached hit spends no rateLimit slot and a refusal is no breaker failure; a stored answer skips every begin and the work; a throwing step is its plugin's `failed:plugin` and tickets taken still land; steps run once around retries; a ticket's signal and answer reach the work and the caller.
+ * See: log s36.107
+ */
 import { describe, expect, it } from 'vitest';
 import { _failures, type BaseBus, type Command, type CommandResult, type PluginParts, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit } from '../src/plugins-extra';
@@ -104,18 +109,3 @@ describe('work steps on the async bus', () => {
     expect(started?.aborted).toBe(true);
   });
 });
-
-/*
- * Plan 1.32 step 8c (log 36.107). `cache`, `idempotent`, `rateLimit`,
- * `circuitBreaker` and `supersede` were chain plugins, so their outcome
- * depended on their install order: a limit in front of a cache spent a slot
- * on a hit, a breaker in front of a limit counted its refusal, a supersede in
- * front of a limit aborted the command in flight for one the limit then
- * refused. Each is now made of the work's steps, which the bus runs in HTTP's
- * own order around the action's work (sent or local, a request's responder
- * too): every `reuse` (a stored answer is the command's), every `admit` (a
- * limit refuses, a check that takes nothing), every `begin` (the command goes
- * to the work, a ticket with its signal, its `landed` and its `answer`), the
- * work under the retry, each ticket's `landed`. Once per dispatch, never per
- * retry. The rows here run both install orders and must agree.
- */

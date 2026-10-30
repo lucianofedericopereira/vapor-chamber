@@ -1,8 +1,7 @@
 /**
- * createMcpHandler: a tool whose value JSON cannot encode (a BigInt id from a
- * database, a circular object) is answered as that call's failure, with its
- * id. It rejected the whole reply; over stdio that became `-32603` with
- * `id: null`, so the client's request was never answered.
+ * createMcpHandler: a tool whose value JSON cannot encode (a BigInt, a cycle).
+ * Why: if the encoding error rejects the whole reply, a stdio client's request gets `-32603` with `id: null` and is never answered.
+ * Shows: the call is answered with its own id and `isError: true`, for both a BigInt and a circular value.
  */
 import { describe, expect, it } from 'vitest';
 import { createMcpHandler } from '../src/mcp';

@@ -1,10 +1,11 @@
+/**
+ * createChamber, createWorkflow and createReaction from src/utilities.
+ * Why: a chamber must install and cleanly uninstall its namespaced handlers, a workflow must stop and compensate in reverse on failure, and a reaction must fire only as configured and keep delivering while tracking its chain.
+ * Shows: chamber prefixing, forwarded undo option, uninstall, no collision and no partial install; workflow order, failure with compensation, target and payload mapping, frozen steps; reaction firing, when, map, mapPayload, cleanup, wildcard source, and chain-tracking edges (foreign causation id, emitted source, 300 dispatches still all delivered).
+ */
 import { describe, expect, vi } from 'vitest';
 import { createChamber, createWorkflow, createReaction } from '../src/utilities';
 import { it } from '../src/vitest';
-
-// ---------------------------------------------------------------------------
-// createChamber
-// ---------------------------------------------------------------------------
 
 describe('createChamber', () => {
   it('installs handlers with namespace prefix', ({ bus }) => {
@@ -61,19 +62,13 @@ describe('createChamber', () => {
     expect(bus.dispatch('orderAdd', {}).value).toBe('order');
   });
 
-  // An install that threw part way left the handlers it had registered on the
-  // bus, with no uninstall returned to remove them. `$` names are the
-  // library's, so `x$y` makes the second register throw.
+  // `$` names are the library's, so `x$y` makes the second register throw.
   it('an install that throws part way leaves nothing registered', ({ bus }) => {
     const chamber = createChamber('cart', { add: () => 1, x$y: () => 2 });
     expect(() => chamber.install(bus)).toThrow();
     expect(bus.hasHandler('cartAdd')).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// createWorkflow
-// ---------------------------------------------------------------------------
 
 describe('createWorkflow', () => {
   it('runs all steps in order and returns combined results', async ({ bus }) => {
@@ -145,10 +140,6 @@ describe('createWorkflow', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createReaction
-// ---------------------------------------------------------------------------
-
 describe('createReaction', () => {
   it('dispatches target action after source succeeds', ({ bus }) => {
     bus.register('cartAdd',       (cmd) => cmd.target);
@@ -157,7 +148,7 @@ describe('createReaction', () => {
     createReaction('cartAdd', 'inventoryCheck').install(bus);
     bus.dispatch('cartAdd', { itemId: 7 });
 
-    // inventoryCheck was called (reaction fired)
+    // Only checks the handler is registered; it does not observe that the reaction fired.
     expect(bus.hasHandler('inventoryCheck')).toBe(true);
   });
 
@@ -197,8 +188,7 @@ describe('createReaction', () => {
     }).install(bus);
 
     bus.dispatch('src', {});
-    // The reaction also rides `__reactionHops` (cycle cap) and `__causationId`
-    // (tracing) on the payload - same `__`-key convention as the rest of the bus.
+    // The payload also carries `__reactionHops` and `__causationId`, hence objectContaining.
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({ echo: 1 }),
     }));
@@ -222,8 +212,7 @@ describe('createReaction', () => {
     bus.register('cartAdd',    () => 1);
     bus.register('cartRemove', () => 2);
     const handler = vi.fn(() => 1);
-    // Target must NOT match the source wildcard - 'stockSync' doesn't start
-    // with 'cart', so the reaction listener won't re-fire on its own output.
+    // The target must not match the source wildcard, or the reaction would re-fire on its own output.
     bus.register('stockSync', handler);
 
     createReaction('cart*', 'stockSync').install(bus);
@@ -235,15 +224,7 @@ describe('createReaction', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createReaction - chain tracking through meta.causationId
-//
-// The hop count is keyed by the id of the command that caused the next
-// dispatch, so the chain is walked through `meta` rather than through the
-// payload (which cannot carry a key when it is a primitive or an array).
-// These three cover the edges of that walk.
-// ---------------------------------------------------------------------------
-
+// The hop count is keyed by the causing command's id and walked through meta, since a primitive or array payload cannot carry a key.
 describe('createReaction - chain tracking edges', () => {
   it('starts a fresh count for a causationId this reaction never recorded', ({ bus }) => {
     const seen: Array<number | undefined> = [];
@@ -255,9 +236,7 @@ describe('createReaction - chain tracking edges', () => {
 
     createReaction('src', 'dst', { maxHops: 2 }).install(bus);
 
-    // A causation id from somewhere else entirely - a prior command, an HTTP
-    // bridge, a replay. It is present but absent from this reaction's map, so
-    // the chain starts at hop 1 rather than inheriting a stranger's depth.
+    // A causation id from elsewhere (prior command, HTTP bridge, replay) is absent from this reaction's map, so the chain starts at hop 1.
     bus.dispatch('src', {}, { __causationId: 'not-from-this-reaction' });
 
     expect(seen).toEqual([1]);
@@ -269,9 +248,7 @@ describe('createReaction - chain tracking edges', () => {
 
     createReaction('ping', 'dst').install(bus);
 
-    // `emit` builds `{ action, target }` with NO meta - it deliberately skips
-    // stampMeta (see _syncEmitInner). The reaction must still fire; it just has
-    // no id to key a chain by, and no causation to propagate.
+    // `emit` builds the command without meta (it skips stampMeta), so there is no id to key a chain by; the reaction must still fire.
     bus.emit('ping', { x: 1 });
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -289,10 +266,7 @@ describe('createReaction - chain tracking edges', () => {
 
     createReaction('src', 'dst').install(bus);
 
-    // Each source dispatch is its own chain root, so the map gains an entry per
-    // dispatch. Past the 256 cap the oldest is dropped; the reaction keeps
-    // firing, which is the whole point - eviction degrades counting, never
-    // delivery.
+    // Each dispatch is its own chain root and the map is capped at 256, so 300 exceeds it; only delivery is observed.
     for (let i = 0; i < 300; i++) bus.dispatch('src', i);
 
     expect(fired).toBe(300);

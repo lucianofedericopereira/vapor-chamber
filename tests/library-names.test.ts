@@ -1,4 +1,13 @@
-/** A name with `$` is the library's: an app's is refused, coded (log s35.117). */
+/**
+ * A name with `$` is the library's: an app's is refused with a coded error.
+ * Why: `$reset` and `$undo` commands belong to the library, so an app action or store key containing
+ * `$` would collide with them; the library's own `$` names must still register under a strict naming rule.
+ * Shows: register() on all three buses throws `core:invalid:name`, a store id or action key with `$`
+ * throws `store:invalid:name`, a store's `$reset` and an action's `$undo` register under a strict
+ * pattern, a second library copy gets a message naming both copies, a naming violation in throw mode
+ * is coded, and the test bus registers `$undo` so history undoes there.
+ * See: log s35.117
+ */
 import { describe, expect, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';

@@ -1,4 +1,9 @@
-/** Composables observe a sealed bus: seal protects the topology, not the observation layer (log s35.173). Rationale at the end. */
+/**
+ * Composables observe a sealed bus: seal protects the topology, not the observation layer.
+ * Why: useCommandError and useCommandHistory add an after-hook, which a sealed bus refuses; they install it past the seal and seal again.
+ * Shows: both record on a sealed bus, which stays sealed and still refuses register; useSharedCommandState works there; an unsealed bus stays unsealed.
+ * See: audit B13, log s35.173.
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError, useCommandHistory, useSharedCommandState } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
@@ -49,13 +54,3 @@ describe('controls', () => {
     dispose();
   });
 });
-
-/*
- * `seal()` "protects the handler/plugin topology, not the observation
- * layer", and useSharedCommandState installs its hook past the seal
- * (trackLoading: unseal, add the hook, seal again). useCommandError and
- * useCommandHistory called `bus.onAfter` directly, which a sealed bus refuses
- * with `core:refused:bus` (audit B13, probe W9). The three now share one
- * helper, `pastSeal`, which seals again before it returns, so a `register`
- * is still refused. Log s35.173.
- */

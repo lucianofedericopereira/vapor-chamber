@@ -1,5 +1,7 @@
 /**
- * Tests for src/stream-parser.ts - StreamParser / createStreamParser
+ * createStreamParser: values and paths, numbers, strings, chunked input, stream(), errors, reset, lifecycle callbacks.
+ * Why: a streamed JSON body (an LLM completion, an export) would be mis-parsed, throw on a long string, or lose a value split across chunks.
+ * Shows: onValue reports key, value and path for each scalar; strings decode escapes, UTF-8 and surrogate pairs, including a 1MB value and a pair on a flush seam; one-character writes reassemble; stream() reads a Response and treats a null body as an empty stream; errors are reported not thrown; reset() clears state; number edge states report their messages.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -92,16 +94,12 @@ describe('StreamParser - strings and escapes', () => {
 
   it('decodes \\uXXXX escapes, including a surrogate pair', () => {
     const { parser, values } = collect();
-    // é = é ; 😀 = 😀 (surrogate pair)
     parser.write('{"s":"\\u00e9 \\ud83d\\ude00"}');
     parser.end();
     expect(values[0]?.value).toBe('é 😀');
   });
 
-  // The module's headline input is an LLM completion or an export row - one
-  // long string value. `String.fromCharCode.apply` passes the buffer as call
-  // arguments, and engines cap argument counts, so the whole parse threw
-  // RangeError somewhere past ~65k characters.
+  // A long string must not be passed as call arguments: engines cap argument counts.
   it('round-trips a 1MB string value byte-identically', () => {
     const { parser, values, errors } = collect();
     const big = 'x'.repeat(1_000_000);
@@ -115,10 +113,7 @@ describe('StreamParser - strings and escapes', () => {
   });
 
   it('keeps a surrogate pair intact across a flush-chunk boundary', () => {
-    // flush() converts in 8192-unit chunks, and the split is on UTF-16 units -
-    // so a pair can straddle a boundary. Concatenating the halves must still
-    // yield one code point. 8191 'x' + 😀 puts the high surrogate at index
-    // 8191 and the low surrogate at 8192, exactly on the seam.
+    // Chunks split on 8192 UTF-16 units: 8191 'x' puts the pair across the seam.
     const { parser, values, errors } = collect();
     const value = `${'x'.repeat(8191)}😀tail`;
     parser.write(`{"s":"${value}"}`);
@@ -149,7 +144,7 @@ describe('StreamParser - chunked / streamed input', () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const encoder = new TextEncoder();
-        // Split into two chunks to prove incremental decoding works.
+        // Two chunks, so decoding is incremental.
         controller.enqueue(encoder.encode(body.slice(0, 8)));
         controller.enqueue(encoder.encode(body.slice(8)));
         controller.close();
@@ -162,9 +157,7 @@ describe('StreamParser - chunked / streamed input', () => {
     expect(values.map((v) => v.value)).toEqual([1, 2, 3]);
   });
 
-  // A 204, a 304, a HEAD reply or a hand-built `new Response(null)` all carry
-  // a null body, which must end the stream rather than reject out of stream()
-  // past onError.
+  // A null body (204, 304, HEAD) must end the stream, not reject out of stream() past onError.
   it('treats a body-less response as an empty stream', async () => {
     const errors: unknown[] = [];
     let ended = false;
@@ -180,8 +173,7 @@ describe('StreamParser - chunked / streamed input', () => {
 
     await expect(parser.stream(response)).resolves.toBeUndefined();
     expect(ended).toBe(true);
-    // Nothing was open, so ending is clean - same as a present but zero-chunk
-    // body, which is the behaviour this is made equivalent to.
+    // Nothing was open, so ending is clean.
     expect(errors).toEqual([]);
   });
 
@@ -239,16 +231,10 @@ describe('StreamParser - object/array lifecycle callbacks', () => {
     parser.write('{"list":[1]}');
     parser.end();
 
-    // `key` tracks the nearest enclosing OBJECT property name (arrays have
-    // no keys of their own - `path`'s index disambiguates array members),
-    // so the scalar array element still reports key "list".
+    // key is the nearest enclosing object property, so an array element reports "list".
     expect(events).toEqual(['obj-start', 'arr-start', 'value:list', 'arr-end', 'obj-end']);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Number-format error paths + uppercase exponent
-// ---------------------------------------------------------------------------
 
 describe('number edge states', () => {
   const parseWithErrors = (input: string) => {

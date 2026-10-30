@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.35.0 - 2026-10-30
+
+Aligned with Vue 3.6.0-rc.14, which needed no change here. Reading each module against that release found two fixes and a few simplifications.
+
+- Changed the peer range to `>=3.5.0 || >=3.6.0-rc.14` for `vue` and `@vue/reactivity`. Server and client must be on the same RC: rc.14 opens a Vapor `v-if` chain's branch with `<!--[1-->` in server output.
+- Improved, through Vue: a `v-vc-command` on hydrated markup follows the client when the server disagrees. In a `v-if` chain whose branches look alike, rc.13 kept the server's button, so it read "one", dispatched "two" and warned nothing (#16067). A first root that differs is replaced (#16044, #16049).
+- Improved, through Vue: a component named by a slot prop, `<Provider v-slot="{ comp }"><comp /></Provider>`, follows the prop, and its `useCommand().on()` listener follows the component (8809141). Slot props on a Vapor `<slot>` arrive normalized and carry `key` (#16045, #16059).
+- Improved, through Vue: `component:added` and `component:removed` reach the devtools hook for a Vapor component (#16027). `setupDevtools` is unchanged: it builds its panel from the bus.
+- Fixed `indexedDbStorage()` keeping a failed open: with no `indexedDB`, or an `open` that threw, every later call failed the same way, even once IndexedDB was there. A later call now opens.
+- Fixed `v-vc-command` on Vapor reading its action at mount and throwing away the value. `v-vc-command="s.a.name"` before `s.a` exists stopped the mount and left no listener. The action is read at each press only.
+- Improved `useMenu()`: a query commit, such as `setQuery` per keystroke, keeps the menu's array instead of rebuilding it for every reader.
+- Improved a dispatch and a query with steps, and an async dispatch with after-hooks: a thunk built only for steps or a responder no longer costs every call a context. Measured on an example-shaped session: 0.986x, 7 ns of 525 ns per operation (Apple M3, Node 24.22.1, log 36.F57).
+- Improved `stringifyQuery`: a value needing no escape runs no replacement, 0.56x on a mixed query (same host, log 36.F57).
+- Improved `form.set()`: with no errors from outside the rules it builds no second errors object and no key lists, 0.977x, 6 ns of 279 ns (same host, log 36.F57).
+- Fixed a form field named `__proto__` losing its server error: `setErrors` wrote it through the setter, and the form read valid.
+- Changed a plain store action's result to the state that action wrote, as `$reset` and a store with `undo` or `optimistic` already answer. When an `$onField` subscriber wrote during the action's delivery, the result was that later state. The later write still shows in `state`. The full IIFE's brotli budget moves to 30,474: this change is 10 bytes smaller raw and 3 larger in brotli.
+- Added to manual chapter 10: the Vitest settings for a test that mounts a Vapor component, an exact `vue` alias to the with-vapor build and `server.deps.inline` for vapor-chamber. The alias alone leaves the library on a second Vue, and `useRouter()` throws `no router provided`.
+- Added a scoped slot to the Vapor `RouterOutlet`: `<RouterOutlet v-slot:view="{ Component }"><Component /></RouterOutlet>` hands out the routed component, so an app can wrap it, in a `<Transition>` for one. The `default` slot stays the no-match fallback, and an outlet with no `view` slot renders as before.
+- Changed the size budgets for the first two: the IIFE variants 98,063 / 30,471, 71,020 / 22,207 and 73,469 / 22,892 raw / brotli, the Blade consumer 13,717 brotli. Performance decides over size.
+- Changed `schemaValidator` to ask the bus for no `validate` step on an action with no fields. A check still refuses and passes what it did.
+- Changed tests that hand-wrote compiler output or read Vue's entry by evaluating it: the bridge merge fixture compiles its template, a hydrating fixture carries the `__multiRoot` an SFC gets, and the bundler entry's exports come from an esbuild metafile.
+
 ## v1.34.0 - 2026-10-28
 
 The second documentation release: no runtime, type, test or CI change. Only Markdown files changed.

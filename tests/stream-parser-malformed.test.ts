@@ -1,15 +1,8 @@
 /**
- * StreamParser - malformed input.
- *
- * The existing suite parses well-formed JSON thoroughly; what it never does is
- * hand the parser something broken. That left the error arms of nearly every
- * state handler untested.
- *
- * These are the branches that matter most in a streaming parser: it consumes
- * bytes off a network, so malformed input is an expected condition, not an
- * exotic one. Each case pins the specific handler that must reject, and asserts
- * the *message* rather than just "an error happened" - otherwise a parser that
- * rejected everything for the wrong reason would pass.
+ * StreamParser on malformed input: structure, string escapes, keywords, numbers, and input that ends inside a number.
+ * Why: the parser reads bytes off a network, so broken JSON would be accepted, or rejected for the wrong reason, instead of reported with a specific message. Also the only file reaching the structure, escape, hex, keyword and number error arms, so the 100% floor needs it.
+ * Shows: each broken input reports its specific message (not just "an error"); valid whitespace, escapes, hex digits and number shapes report none; an unfinished number at end() is an error with no value, as with JSON.parse.
+ * See: log 36.13
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -46,9 +39,7 @@ describe('StreamParser - structural errors', () => {
   });
 
   it('accepts whitespace in every position the error arms guard', () => {
-    // The mirror image of the three cases above: each handler falls through to
-    // `err()` only for NON-whitespace, so this pins that the guard is a
-    // whitespace check and not an accident of ordering.
+    // Each handler must reject only non-whitespace.
     const { parser, values, errors } = collect();
     parser.write('{\n  "a"\t:\r1 ,\n  "b" : 2\n}');
     parser.end();
@@ -106,8 +97,6 @@ describe('StreamParser - keywords and numbers', () => {
   });
 });
 
-// An input that ends inside a number agrees with JSON.parse, the control
-// (log 36.13): an unfinished number is an error and never a value.
 describe('StreamParser - an input that ends inside a number', () => {
   function atEnd(json: string) {
     const { parser, values, errors } = collect();

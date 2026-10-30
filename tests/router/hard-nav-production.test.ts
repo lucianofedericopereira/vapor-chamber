@@ -1,14 +1,10 @@
 // @vitest-environment happy-dom
 /**
- * The production half of the hard-navigation refusal (router/index.ts `if (DEV)`).
- *
- * When an `router:missing:route` (or other HARD_NAV_CODE) error names a URL that is ALREADY
- * the current one, handing it back to the server would reload forever behind a
- * catch-all - so the router refuses. In dev it explains why and returns; in
- * production it falls through to the default report of the error. Both arms
- * refuse the navigation; they differ only in what gets logged, and only the dev
- * one was ever exercised because DEV is true under vitest unless a test
- * re-imports the module with NODE_ENV stubbed.
+ * The hard-navigation refusal in src/router/index.ts, in dev and with NODE_ENV stubbed to production.
+ * Why: a HARD_NAV_CODE error (router:missing:route) naming the URL already shown would, if handed to the server behind a
+ * catch-all, reload forever; both builds must refuse, dev explaining why and production reporting the error only.
+ * Shows: location.assign is not called in either build; dev logs the "does not hard-navigate" explanation,
+ * production does not and still logs the error.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,9 +23,8 @@ async function bootRouter(): Promise<{ router: any; errors: unknown[][]; assign:
   const errors: unknown[][] = [];
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args); });
 
-  // Sit on a URL the table cannot match, so navigating to it is `router:missing:route`
-  // AND `href === here` - the refusal case. Set the URL BEFORE spying, so the
-  // router reads the live location rather than a snapshot taken too early.
+  // Sit on a URL the table cannot match, so navigating to it is `router:missing:route` with `href === here`.
+  // The URL is set before the router is created so it reads the live location.
   window.history.replaceState({ __vr: 0 }, '', '/nowhere');
   const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
 
@@ -47,24 +42,22 @@ describe('hard-navigation refusal', () => {
     const { router, errors, assign } = await bootRouter();
     await router.isReady().catch(() => {});
 
-    expect(assign).not.toHaveBeenCalled(); // refused - no reload storm
+    expect(assign).not.toHaveBeenCalled();
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('so the router does not hard-navigate'))).toBe(true);
     router.dispose();
   });
 
   it('stays quiet about the reason in production, and still refuses', async () => {
-    // The `if (DEV)` FALSE arm: no explanatory message, falls through to the
-    // generic console.error(error). The refusal itself is unchanged.
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const { router, errors, assign } = await bootRouter();
     await router.isReady().catch(() => {});
 
-    expect(assign).not.toHaveBeenCalled(); // still refuses - that is the point
+    expect(assign).not.toHaveBeenCalled();
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('so the router does not hard-navigate'))).toBe(false);
-    expect(errors.length).toBeGreaterThan(0); // but the error is still surfaced
+    expect(errors.length).toBeGreaterThan(0);
     router.dispose();
   });
 });

@@ -1,13 +1,8 @@
 /**
- * useSharedCommandState - the bus's command state as a Vue view.
- *
- * Locks:
- *   - Multiple callers receive the SAME signal instances (not copies).
- *   - anyPending counts every dispatch on the bus, from any caller.
- *   - errors is a ring buffer capped at maxSize (default 10).
- *   - Ref-counted disposal: state is GC-eligible once all subscribers dispose.
- *   - Async + sync bus paths both update state correctly.
- *   - Per-bus isolation: separate buses get separate shared states.
+ * useSharedCommandState: the bus's command state as a Vue view.
+ * Why: every caller on a bus must read one state (anyPending, pending keys, the errors ring), or components would show different in-flight and error state for the same bus.
+ * Shows: callers share the same signal instances, buses are isolated, anyPending and pending(key) count every dispatch from any caller, errors is a ring capped at maxSize (default 10), clear() drops errors but not pending, and the state is released after the last dispose.
+ * See: src/chamber.ts
  */
 import { describe, expect, beforeEach } from 'vitest';
 import {
@@ -66,8 +61,7 @@ describe('useSharedCommandState - anyPending', () => {
     a.dispose(); b.dispose();
   });
 
-  // examples/vapor-sfc's StatusBar relies on this: its CartPanel dispatches
-  // through useCommand, and the bar shows it.
+  // The vapor-sfc StatusBar relies on this: a dispatch made through useCommand must show in the bar.
   it('anyPending and pending(key) count every dispatch, whoever made it', async ({ asyncBus: bus }) => {
     let release: () => void = () => {};
     bus.register('slow', () => new Promise<string>((r) => { release = () => r('ok'); }));
@@ -123,7 +117,6 @@ describe('useSharedCommandState - error capture', () => {
     for (let n = 0; n < 15; n++) bus.dispatch('boom', null);
 
     expect(s.errors.value).toHaveLength(10);
-    // Oldest 5 dropped; newest 10 remain. errors[0] should be e6.
     expect(s.errors.value[0]?.message).toBe('e6');
     expect(s.errors.value[9]?.message).toBe('e15');
     s.dispose();
@@ -204,11 +197,9 @@ describe('useSharedCommandState - disposal', () => {
     bus.dispatch('boom', null);
 
     a.dispose();
-    // b still subscribed - state alive, error count preserved
     expect(b.errors.value).toHaveLength(1);
 
     b.dispose();
-    // After last dispose, a NEW useSharedCommandState() should get a fresh state.
     const c = useSharedCommandState();
     expect(c.errors.value).toHaveLength(0);
     c.dispose();
@@ -218,12 +209,12 @@ describe('useSharedCommandState - disposal', () => {
     setCommandBus(bus as any);
     const shared = useSharedCommandState();
     bus.register('boom', () => { throw new Error('late failure'); });
-    shared.dispose(); // refCount -> 0, the observer handed back
+    shared.dispose(); // last holder: the observer is handed back
 
     bus.dispatch('boom', {});
 
     const fresh = useSharedCommandState();
-    expect(fresh.errors.value).toHaveLength(0); // late error not retained anywhere
+    expect(fresh.errors.value).toHaveLength(0);
     fresh.dispose();
     resetCommandBus();
   });

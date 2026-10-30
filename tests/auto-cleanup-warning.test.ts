@@ -1,8 +1,7 @@
 /**
- * Guards the dev-warning dedup in tryAutoCleanup: a composable used outside an
- * active Vue scope warns AT MOST ONCE per session, not once per call (which used
- * to flood test/non-component output). Own file so the module-level once-flag
- * starts fresh (vitest isolates modules per file).
+ * tryAutoCleanup's dev warning: a composable used outside an active Vue scope warns at most once per session.
+ * Why: a warning per call floods test and non-component output. Own file, so the module-level once-flag starts fresh.
+ * Shows: three calls outside any effectScope give one vue:missing:scope warning.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {

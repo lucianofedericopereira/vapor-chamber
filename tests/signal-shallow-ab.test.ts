@@ -1,21 +1,8 @@
 /**
- * Empirical proof: signal() backed by Vue shallowRef vs ref, measured on the
- * real dispatch path: a handler that writes a `signal()` per dispatch, the path
- * a command-driven state takes.
- *
- * Why this exists as its own test and not in perf.bench.ts: vitest's bench()
- * harness has a ~480µs/iteration setup floor (createCommandBus + effectScope +
- * the bench machinery) that swamps the signal-write cost and compresses every
- * dispatch case to the same ~2,100 ops/sec - it literally cannot resolve
- * the ref-vs-shallowRef difference. This harness uses precise process.hrtime
- * timing with the setup amortised, interleaves A/B reps to cancel thermal drift,
- * and takes medians. The numbers it prints are the source of truth for the
- * ref-vs-shallowRef ratios quoted in docs/performance.md §"reactive runtime
- * notes" finding #5 and docs/whitepaper.md §7.1.
- *
- * The assertions are RATIO-based (shallowRef ÷ ref), so they hold even under
- * --coverage instrumentation (both paths are slowed proportionally). They fail
- * only if the shallowRef optimization is genuinely removed or regressed.
+ * A/B timing of signal() backed by Vue shallowRef vs ref on the real dispatch path (a handler writes a signal per dispatch).
+ * Why: the library wires shallowRef so command-driven state does not pay for deep reactivity; the table this prints is the evidence for the ratios quoted in the docs.
+ * Shows: it prints median ops/sec for ref and shallowRef over three cases, and asserts only that every ratio is finite and positive. It asserts no timing threshold, so it cannot catch a regression; that guard is chamber.test.ts "signal() factory - shallow reactivity".
+ * See: docs/performance.md, docs/whitepaper.md 7.1, tests/under-coverage.ts
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { ref, shallowRef, effectScope } from 'vue';
@@ -28,6 +15,7 @@ import { runTiming } from './under-coverage';
 type Factory = (init: any) => any;
 type Kind = 'array' | 'counter';
 
+// Timed with process.hrtime and the setup amortised: vitest's bench() setup floor per iteration swamps the signal-write cost.
 function runOnce(kind: Kind, n: number): void {
   setCommandBus(createCommandBus());
   const bus = getCommandBus();
@@ -63,23 +51,15 @@ function median(xs: number[]): number {
 }
 
 describe('signal() shallowRef vs ref - empirical proof (real dispatch path)', () => {
-  // Leave the factory as the library default (shallowRef) for any later tests.
+  // The library default is shallowRef; restore it for any later test.
   afterAll(() => { configureSignal(shallowRef as any); });
 
   const results: Record<string, { ref: number; shallow: number; ratio: number }> = {};
 
-  // Skip under `npm run test:coverage`: V8 coverage instrumentation makes the
-  // heavy timing loops both meaningless (instrumented ratios aren't real) and
-  // slow (they blow the test timeout). Generous 45s timeout otherwise: this body
-  // is synchronous, CPU-bound work that runs concurrently with the rest of the
-  // suite, so under heavy parallel load wall-clock time stretches well past the
-  // raw compute time. Iteration/rep counts are sized to leave comfortable
-  // headroom under that timeout - the assertions only smoke-check that the
-  // ratios are finite/positive, so precision beyond this buys nothing. That
-  // timeout, not the assertions, was the source of the flake.
+  // Runs only when timing is opted in (runTiming) and never under coverage, where instrumented ratios are meaningless.
   it.skipIf(!runTiming)('measures the ref-vs-shallowRef diff and proves shallowRef is faster', async () => {
     await waitForVueDetection();
-    // sanity: the factory must produce a real Vue ref, not the plain fallback
+    // Vue must be detected, or the factories below would fall back to plain objects.
     expect(typeof (ref(0) as any).value).toBe('number');
 
     const cases: Array<{ key: string; kind: Kind; n: number; iters: number }> = [
@@ -88,13 +68,13 @@ describe('signal() shallowRef vs ref - empirical proof (real dispatch path)', ()
       { key: 'scalar increment /100', kind: 'counter', n: 100, iters: 400 },
     ];
 
-    // warmup both factories on every case
+    // Warm up both factories on every case.
     for (const c of cases) { opsPerSec(ref, c.kind, c.n, 30); opsPerSec(shallowRef, c.kind, c.n, 30); }
 
     for (const c of cases) {
       const refS: number[] = [];
       const shS: number[] = [];
-      // interleave ref/shallow reps so thermal drift hits both equally
+      // Interleave the reps so drift hits both factories equally.
       for (let rep = 0; rep < 5; rep++) {
         refS.push(opsPerSec(ref, c.kind, c.n, c.iters));
         shS.push(opsPerSec(shallowRef, c.kind, c.n, c.iters));
@@ -117,17 +97,11 @@ describe('signal() shallowRef vs ref - empirical proof (real dispatch path)', ()
       );
     }
 
-    // This test PRINTS the evidence (the table above, in CI logs and quoted in
-    // docs/performance.md) - that is the proof shallowRef wins. It deliberately
-    // does NOT assert a timing threshold: (a) it measures Vue's ref vs shallowRef
-    // *directly*, so it can't catch a library regression anyway - that guard is
-    // chamber.test.ts › "signal() factory - shallow reactivity" (isShallow); and
-    // (b) timing ratios are unstable under heavy parallel load / --coverage
-    // instrumentation, so asserting them just makes CI flaky. We only smoke-check
-    // that the measurement actually ran and produced finite, positive ratios.
+    // No timing threshold: ratios are unstable under parallel load, and this measures Vue's ref against shallowRef directly, so it cannot see a library regression.
+    // Smoke-check only that the measurement ran.
     const arr100 = results['array append /100 (v-for source)'].ratio;
     expect(Number.isFinite(arr100)).toBe(true);
-    expect(arr100).toBeGreaterThan(0); // ran; shallowRef isn't pathologically broken
+    expect(arr100).toBeGreaterThan(0);
     for (const v of Object.values(results)) {
       expect(Number.isFinite(v.ratio)).toBe(true);
       expect(v.shallow).toBeGreaterThan(0);

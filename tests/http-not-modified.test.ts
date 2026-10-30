@@ -1,4 +1,9 @@
-// A 304 resolves when the request opts in (resolveNotModified); otherwise it throws as before (panel 21).
+/**
+ * resolveNotModified: a 304 resolves when the request or client opts in, and throws otherwise.
+ * Why: a 304 answers an app's own conditional request ("what you hold is current"); resolving it by default would change behaviour for callers that catch it, and sharing one request between an opted-in and a plain read would resolve for one caller and throw for another.
+ * Shows: off by default a 304 throws a BusError with status 304; on per request, per client, or in postCommand it resolves with ok false; a plain read never joins a conditional or an opted-in one, while reads with equal headers share one request.
+ * See: log s35.83.
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -54,9 +59,7 @@ describe('resolveNotModified', () => {
   });
 
   it('a plain read never joins a conditional one: each gets its own answer', async () => {
-    // Different headers, different answers: the conditional read's 304 is not
-    // the plain read's. Before, one key (method, type, url) joined them, and
-    // the plain caller received the 304.
+    // Different headers give different answers: the conditional read's 304 must not reach the plain read.
     const http = createHttpClient();
     const before = hits;
     const [cond, plain] = await Promise.allSettled([
@@ -87,14 +90,3 @@ describe('resolveNotModified', () => {
     expect(opted.status === 'fulfilled' && opted.value.status).toBe(304);
   });
 });
-
-/*
- * Panel item 21 (owner, 2026-10-02): IN 1.26 as an OPT-IN. A 304 answers a
- * conditional request the app sent itself: "what you hold is current". The
- * shared retry loop threw it like any non-2xx, and no plugin or interceptor
- * could turn that into a resolve (onRejected returns void; the error is
- * rethrown). Resolving by default would change behaviour for anyone catching
- * it, so it is a config option, per request or per client. The dedupe key
- * carries the option, so the same answer never resolves for one caller and
- * throws for another. Not cached: the cache stores `ok` responses only.
- */

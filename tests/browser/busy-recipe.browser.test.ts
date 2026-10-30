@@ -1,4 +1,9 @@
-// The busy-display recipe of docs/accessibility.md on `vc-loading`: hidden before the delay, shown after, gone with the class; rationale at the end.
+/**
+ * The busy-display recipe of docs/accessibility.md on `vc-loading`: hidden before the delay, shown after, gone with the class.
+ * Why: a delay before showing busy is the app's display choice, so the library offers CSS, not an option; happy-dom runs no CSS animation.
+ * Shows: a slow command keeps the spinner hidden at 30 ms, shows it after 120 ms, and the answer hides it with the class.
+ * See: docs/accessibility.md "A busy display that waits".
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from 'vapor-chamber';
 import { bindCommands } from '../../src/command-binding';
@@ -42,10 +47,3 @@ describe('the delayed busy display, CSS only', () => {
       .toEqual({ early: { loading: true, seen: 'hidden' }, late: 'visible', after: 'hidden', loading: false });
   });
 });
-
-// docs/accessibility.md, "A busy display that waits": the owner ruled (2026-10-19) that a
-// delay before showing busy is the app's display choice, so the library has no option for
-// it. The recipe is CSS on the `vc-loading` class the binding sets from press to answer:
-// an animation with a 120 ms delay turns the spinner visible, and removing the class ends
-// it. A fast answer removes the class before the delay, so nothing flashes. Measured in
-// Chromium because happy-dom runs no CSS animation.

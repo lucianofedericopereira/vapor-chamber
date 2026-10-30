@@ -1,4 +1,9 @@
-/** useSharedCommandState().pending across its last holder leaving, and on a sealed bus. The long note is at the end. */
+/**
+ * useSharedCommandState().pending across its last holder leaving, and on a sealed bus.
+ * Why: the shared entry must outlive its last holder while a command it started is in flight, or the next holder (the page a route change mounts) reads the key false while the command runs; tracking must not use a seal-guarded hook, or pending() would throw core:refused:bus on a sealed bus.
+ * Shows: the next holder reads the key lit and then settled, the entry is released when the last key settles or at once with nothing in flight, no hooks or listeners remain, and on a sealed bus tracking works and the bus stays sealed.
+ * See: log s35.41, log s35.42
+ */
 import { describe, expect, it } from 'vitest';
 import { useSharedCommandState } from '../src/chamber';
 import { type CommandBus, createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
@@ -116,26 +121,3 @@ describe('pending on a sealed bus', () => {
     s.dispose();
   });
 });
-
-/*
- * External item 2 of the 1.26 evaluation, and what was found reproducing it
- * (log s35.41).
- *
- * The handover. The shared entry was dropped, and its before-hook and
- * observer unhooked, the moment the last holder left. A dispatch still in
- * flight then had nobody to settle it, and the next holder (the page a route
- * change mounts) built a fresh entry that had not seen it start: the key read
- * false while the command ran. The entry now outlives its last holder only
- * while a command it started is in flight; the settle that ends the last one
- * releases it (third test, `heldEntry` true then false), and with nothing
- * in flight the release is immediate (fourth). Keeping the entry armed for ever was measured and
- * declined: an unheld bus would pay the tracking on every dispatch, 6.5x.
- *
- * The sealed bus. Tracking was a before-hook, and a sealed bus refuses
- * `onBefore`, so `pending()` threw `core:refused:bus` whenever the entry
- * had to be built after `seal()`: on the first call, and again after every
- * holder had left (a route change). It then installed its hook past the seal.
- * It is now the bus's internal facts observer, which no seal guards and
- * no hook count shows (`hooks()` stays [0, 0]). The bus is still sealed for
- * the app, as the last assertions of both tests show.
- */

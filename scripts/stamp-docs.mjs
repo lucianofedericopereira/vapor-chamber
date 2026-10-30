@@ -177,9 +177,9 @@ const sizes = (() => {
   try {
     const md = readFileSync(join(root, 'docs/BUNDLE-SIZES.md'), 'utf8');
     const map = {};
-    // `| `./router` | 35.2 | 13.6 | 12.4 |` -> export -> { min, gzip, brotli }
-    for (const m of md.matchAll(/^\|\s*`([^`]+)`\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/gm)) {
-      map[m[1]] = { min: m[2], gzip: m[3], brotli: m[4] };
+    // `| `./router` | 35.2 | 12.4 |` -> export -> { min, brotli }
+    for (const m of md.matchAll(/^\|\s*`([^`]+)`\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/gm)) {
+      map[m[1]] = { min: m[2], brotli: m[3] };
     }
     return Object.keys(map).length ? map : null;
   } catch {
@@ -188,14 +188,13 @@ const sizes = (() => {
 })();
 if (sizes) {
   const put = (name, key) => { if (sizes[key]) VALUES[name] = sizes[key].brotli; };
-  // Variants are quoted with all three columns in manual chapter 8, "Pick a variant" chooser table, so
-  // those get raw/gzip too - same rule: if prose repeats a measured number, the
+  // Variants are quoted with both columns in manual chapter 8, "Pick a variant" chooser table, so
+  // those get raw too - same rule: if prose repeats a measured number, the
   // number comes from the generator, not from a human.
   const putAll = (name, key) => {
     if (!sizes[key]) return;
     VALUES[name] = sizes[key].brotli;
     VALUES[`${name}Raw`] = sizes[key].min;
-    VALUES[`${name}Gzip`] = sizes[key].gzip;
   };
   put('sizeBarrel', '.');
   put('sizeCore', 'core: createCommandBus alone');

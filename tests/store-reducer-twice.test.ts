@@ -1,4 +1,9 @@
-/** In development an `undo: true` store runs each reducer twice and warns once when the two differ (log s35.160). Rationale at the end. */
+/**
+ * In development an `undo: true` store runs each reducer twice and warns once per action when the two results differ as JSON.
+ * Why: a rollback of an older step replays later steps through their reducers, so a reducer that mints a value (an id, a time) would rebase to a different state and re-key rows; undo and redo do not need pure reducers.
+ * Shows: minting reducers warn once with the fix, pure and unserializable ones do not, parts the reducer leaves alone are never serialized, each pair warns exactly when JSON.stringify differs, and production runs the reducer once.
+ * See: log s35.157, log s35.158, log s35.160.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -62,7 +67,7 @@ describe('development: a reducer runs twice', () => {
 });
 
 describe('development: the two runs compared as JSON, without whole-state strings', () => {
-  /** An object that counts how often JSON.stringify reads it. */
+  // Counts how often JSON.stringify reads it.
   const counted = () => { const c = { n: 0, toJSON() { c.n++; return 'c'; } }; return c; };
 
   it('a part the reducer leaves alone is never serialized', () => {
@@ -112,8 +117,7 @@ describe('development: the two runs compared as JSON, without whole-state string
     store.$dispose();
   });
 
-  // Each pair: the reducer answers `a` on its first run and `b` on its second.
-  // It warns exactly when JSON.stringify gives two different strings.
+  // Each pair: the reducer answers `a` on its first run and `b` on its second; it warns exactly when JSON.stringify differs.
   class Point { constructor(public x: number) {} }
   const nul = Object.assign(Object.create(null), { a: 1 });
   const pairs: Array<[string, unknown, unknown]> = [
@@ -185,14 +189,3 @@ describe('production', () => {
     vi.resetModules();
   });
 });
-
-/*
- * A rollback of an older step replays every later step by calling its
- * reducer again (log s35.157). A reducer that mints a value, an id or a time,
- * then rebases to a different state: a re-keyed row, the data otherwise
- * right. React's StrictMode double-invokes reducers in development to expose
- * the same impurity. Here the two results are also compared (as JSON), and a
- * difference warns once per action with the fix: mint in the call. Undo and
- * redo do not need deterministic reducers (redo writes the recorded state,
- * s35.158). Production runs each reducer once; the check folds away with DEV.
- */

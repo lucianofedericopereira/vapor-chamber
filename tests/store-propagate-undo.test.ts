@@ -1,4 +1,9 @@
-/** A store across tabs carries commands, and an undo in any tab undoes the command in every tab. Rationale at the end. */
+/**
+ * A store across tabs carries commands, and an undo in any tab undoes the command in every tab.
+ * Why: sending whole states with a per-tab count would drop one of two simultaneous writes and leave Undo in one tab unable to take back another tab's write; a state message also grows with the state where a command does not.
+ * Shows: tabs end on one state after adds, undo, redo, simultaneous writes, a late-opening tab, a tab alone, a server state and a bfcache return; the receiving tab records the command in history with no dispatch; the wire carries only ask, lead and cmd messages (bye on leaving); an action the other tab lacks, and a history scoped away from it, are ignored.
+ * See: log s36.F30, s36.F39.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createAsyncCommandBus, createCommandBus, type Command } from '../src/command-bus';
@@ -368,9 +373,7 @@ describe('what else crosses', () => {
     await quiet(wire.heard);
     b.cart.add('sugar');
     expect(h.canUndo.value).toBe(true);
-    // The sugar reaches every tab before the checkout, so the server's state
-    // lands over it everywhere. Sent at once, the lead may run the sugar over
-    // the server's state instead, and then it stays and Undo stays on.
+    // The sugar must reach every tab before the checkout, or the lead may run it over the server state and Undo stays on.
     await quiet(wire.heard);
     await abus.dispatch('checkout', null);
     await quiet(wire.heard);
@@ -506,22 +509,3 @@ describe('edges', () => {
     expect(scoped.getState().past).toEqual([]);
   });
 });
-
-/*
- * Before, `share: shareTabs()` sent the whole state each write reached, with a
- * per-tab write count (`seq`), and the receiving tab applied the higher count.
- * That is an order rule: two tabs writing at once kept one state and dropped
- * the other tab's change. History never saw another tab's write, so Undo in
- * tab B could not take back tab A's coffee (step 9, Batch 6 finding 1). A
- * state message also grows with the state: about 15 us per write for a
- * 100-item cart, against about 570 ns for a command (log 36.F30).
- *
- * Now the store sends the command a write came from, with its `meta.id`, and
- * each tab applies it with its own reducer when it arrives: no dispatch, so no
- * plugin, listener or transport runs it twice, and the tab's history records
- * the same command. An undo goes out as the id of the command it reverses, and
- * each tab undoes that command itself. The tab holding the store's Web Lock
- * runs every tab's command and posts it on, so every tab ends on one state
- * (log 36.F39). A tab that opens asks it, takes its state, then runs its own
- * held writes again. A tab with no other tab open sends no write.
- */

@@ -1,48 +1,8 @@
 /**
- * EXPERIMENT -> SHIPPED: does precomputing a wildcard listener's prefix at
- * subscribe time pay for itself on the real dispatch path?
- *
- * WHERE THE IDEA CAME FROM. Vue 3.6.0-rc.6's `29ed4b0` ("perf(runtime-vapor):
- * cache template adopt target") hoists a per-call template-string scan into an
- * `AdoptTarget` descriptor that `template()` computes once per template factory
- * and hands back on every adoption, turning a hot-path re-parse into integer and
- * identity compares. Reading it turned the question on this repo's own fan-out:
- * `on()` classifies a pattern as a wildcard in order to pick a bucket, then
- * THROWS THAT RESULT AWAY, and every dispatch re-derives it inside
- * `matchesPattern` - `=== '*'`, a `charCodeAt`, and an LRU `Map.get`.
- *
- * WHY IT IS SHAPED THIS WAY - and this is the part the house rules force.
- * `_syncDispatchInner` carries a recorded counter-example: a cached `isBare`
- * boolean was tried there and measured **25% WORSE**, because adding a field
- * changed the hidden class of a hot object for no benefit. So "storing the
- * parse must be faster" is exactly the kind of claim this repo does not accept
- * unmeasured, and an isolated matcher loop will not settle it either -
- * docs/performance.md warns that isolated micro-benches inflate savings by
- * hoisting loop-invariant work. (Measured that way first, this one reported
- * 3.66x on the matcher alone. Treat that number as an upper bound, not a
- * result.)
- *
- * So both arms here run the REAL `bus.dispatch`, in ONE process, interleaved
- * AB/BA to cancel thermal drift, medians of several reps - the same method as
- * `tests/clock-source-ab.test.ts` and `scripts/ab-vue.mjs`.
- *
- * HOW THE BASELINE ARM IS BUILT. Arm A must be the real pre-change module, not
- * a hand-written imitation of it, or the measurement compares this file's
- * transcription skills rather than the two implementations. So the baseline is
- * DERIVED from the shipped source at run time: `src/command-bus.ts` is copied
- * into `tests/__ref/wildcard-prefix/` with the fan-out line reverted to its previous
- * `matchesPattern(...)` form and its two sibling imports repointed. That copy
- * exports a real `createCommandBus`, so arm A is the genuine old dispatch path.
- * `tests/__ref/` is the same scratch location `ab-vue.mjs` uses; it is never
- * published (package.json `files` ships dist/src/scripts) and is removed here in
- * `afterAll`. If the revert target ever stops matching the source the transform
- * throws, so this file cannot silently degrade into measuring one arm twice.
- *
- * NO TIMING THRESHOLD IS ASSERTED, per the house rule - single-host ratios are
- * unstable under parallel load and asserting them only makes CI flaky. The
- * printed table is the evidence. What IS asserted is equivalence: both arms
- * must fan out to exactly the same listeners for the same actions, including
- * the `'*'`-slices-to-`''` edge that the whole optimization rests on.
+ * A/B of wildcard fan-out in `createCommandBus`: precomputed listener prefix against the `matchesPattern` baseline, on the real dispatch path.
+ * Why: a wildcard listener that fans out to a different set of actions than the baseline would mis-route commands, and the prefix optimization is only worth keeping if it is measurably no slower.
+ * Shows: for six patterns, the shipped bus and a baseline built at run time from the shipped source (fan-out line reverted) deliver the same actions; a timing table prints under `npm run test:timing`, with only finite positive rates asserted and no ratio threshold.
+ * See: docs/performance.md, tests/clock-source-ab.test.ts, scripts/ab-vue.mjs
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,7 +17,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REF_DIR = resolve(HERE, '__ref', 'wildcard-prefix');
 const BASELINE = resolve(REF_DIR, 'command-bus-wildcard-baseline.ts');
 
-/** The line this change introduced, and the line it replaced. */
+/** The shipped fan-out line, and the form the baseline arm reverts it to. */
 const SHIPPED_LINE = 'if (!entry.off && action.startsWith(entry.prefix)) {';
 const BASELINE_LINE = 'if (!entry.off && matchesPattern(entry.pattern, action)) {';
 
@@ -91,8 +51,7 @@ type Factory = typeof createCommandBus;
 
 /**
  * One "op" is `n` dispatches through a fresh bus carrying `wilds` wildcard
- * listeners. A fresh bus per op is deliberate: it matches `clock-source-ab`'s
- * shape and keeps setup cost identical across arms.
+ * listeners; a fresh bus per op keeps setup cost identical across arms.
  */
 function opsPerSec(factory: Factory, wilds: string[], n: number, iters: number): number {
   const t0 = process.hrtime.bigint();
@@ -112,7 +71,7 @@ describe('wildcard listener prefix - real dispatch path A/B', () => {
     const base = (await import(/* @vite-ignore */ BASELINE)) as { createCommandBus: Factory };
     const baseline = base.createCommandBus;
 
-    // --- equivalence first. A faster wrong answer is not an optimization. ----
+    // Equivalence first: a faster wrong answer is not an optimization.
     const patterns = ['*', 'cart*', 'user*', 'c*', '**', 'cartAdd*'];
     const actions = ['cartAdd', 'cartRemove', 'userLogin', 'c', 'x', '*starred'];
     for (const pattern of patterns) {
@@ -128,25 +87,19 @@ describe('wildcard listener prefix - real dispatch path A/B', () => {
       }
       expect(hitsOld).toEqual(hitsNew);
     }
-    // The edge the optimization rests on: '*' slices to '' and every action
-    // startsWith(''). If that ever stopped holding, match-all would silently
-    // stop matching.
+    // '*' slices to '' and every action startsWith(''): match-all relies on it.
     expect(''.length).toBe(0);
     expect('anything'.startsWith('')).toBe(true);
 
     // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
     if (!runTiming) return;
 
-    // --- measurement --------------------------------------------------------
     const N = 2_000;
     const cases: Array<{ key: string; wilds: string[]; iters: number }> = [
-      // The shape the fast path already skips entirely - must show ~1.00x, and
-      // is the control: if it moves, the harness is measuring something else.
+      // Control: the fast path skips fan-out entirely, so it must stay ~1.00x.
       { key: 'CONTROL - no wildcard listeners', wilds: [], iters: 120 },
       { key: '1 wildcard listener', wilds: ['cart*'], iters: 100 },
       { key: '5 wildcard listeners', wilds: ['*', 'cart*', 'user*', 'order*', 'ship*'], iters: 60 },
-      // A logging/devtools bus: one '*' listener is the single most common
-      // real-world wildcard shape.
       { key: `1 '*' listener (logger shape)`, wilds: ['*'], iters: 100 },
     ];
 

@@ -1,4 +1,9 @@
-// A composable's busy state is the bus's per-key `pending`, never its own count; rationale at the end.
+/**
+ * A composable's busy state is the bus's per-key `pending`, never a count of its own.
+ * Why: a count per composable would make two buttons on one useCommand go busy together; each button must read the key it dispatches, and the state must be released with the scope.
+ * Shows: pending(action, target) is per key and per target; it counts a dispatch from any caller and is released on scope stop (useCommand and useVaporAsyncCommand); a thrown missing-handler is still a failed result on both buses; useCommand and useVaporAsyncCommand expose no busy or error state of their own and useCommandQuery keeps loading.
+ * See: log s36.84, src/command-state.ts
+ */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { useCommand, useCommandQuery, useSharedCommandState, waitForVueDetection } from '../src/chamber';
@@ -100,16 +105,3 @@ describe('the composables\' shapes', () => {
     });
   });
 });
-
-/*
- * Why this file exists. `loading` named three facts (capacity C18):
- * useCommand's and useVaporAsyncCommand's own dispatches, the shared state's
- * wrapper, and a key bus-wide. vapor-sfc's CartPanel had two buttons on one
- * useCommand, so both went busy. Plan 1.32 5 removes the per-composable count:
- * a button reads the key it dispatches, `pending(action, target)`, the bus's
- * command state (src/command-state.ts). `lastError` keeps one meaning too,
- * the bus-wide one: a dispatch's own failure is its result. useCommandQuery
- * keeps `loading`, since a query is a read and the command state never counts
- * one. `held()` is the release check: a fresh holder reads the same signal
- * only while the state is held, and the true case is its positive control.
- */

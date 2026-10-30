@@ -1,10 +1,15 @@
-/** useSharedCommandState().dispose() called twice by one holder. */
+/**
+ * useSharedCommandState().dispose() called twice by one holder (by hand, then by the scope stopping).
+ * Why: dispose() is public and also hooked to the scope, so a component that unhooks by hand and then unmounts would count its holder out twice, leaving the next holder's pending() unlit or its shared entry deleted and rebuilt.
+ * Shows: after the double dispose the next holder still tracks a command in flight, and with nothing in flight later holders share one entry (same errors list).
+ * See: log s35.42, src/chamber.ts
+ */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { useSharedCommandState, waitForVueDetection } from '../src/chamber';
 import { type CommandBus, createAsyncCommandBus } from '../src/command-bus';
 
-// The scope's dispose() reaches the holder only once Vue is detected (see the note at the end).
+// Auto-cleanup hooks the scope only once Vue is detected; without this wait the second dispose may never happen.
 beforeAll(() => waitForVueDetection());
 
 function held() {
@@ -40,7 +45,7 @@ describe('dispose twice', () => {
     a.pending('siteCreate');
     const p = bus.dispatch('siteCreate', undefined);
     a.dispose();
-    scope.stop(); // the auto-cleanup calls dispose again
+    scope.stop(); // auto-cleanup calls dispose a second time
     const b = useSharedCommandState({ bus });
     release();
     await p;
@@ -57,29 +62,10 @@ describe('dispose twice', () => {
     const a = scope.run(() => useSharedCommandState({ bus }))!;
     a.dispose();
     const b = useSharedCommandState({ bus });
-    scope.stop(); // a's second dispose
+    scope.stop(); // a's second dispose, after b took the entry
     const c = useSharedCommandState({ bus });
     expect(c.errors).toBe(b.errors);
     b.dispose();
     c.dispose();
   });
 });
-
-/*
- * Found by the perf-1.26 audit of 615c5fc (B3). A holder's dispose() is
- * public ("manually unhook") and is also registered with the scope by
- * tryAutoCleanup, so a component that unhooks by hand and then unmounts
- * calls it twice. Each call took the holder out of refCount again.
- * Mid-flight (the second test): refCount went to -1, the next holder brought
- * it to 0, and the settle that ended the last command released the entry
- * under that holder; its pending() never lit again (before-hooks 0).
- * Nothing in flight (the third test, older than B3): the second call deleted
- * the NEWER holder's entry from the map, so the holder after it built a
- * second entry: two on('*') observers, two error lists. dispose() now counts
- * each holder out once.
- * The second call comes from scope.stop() through tryAutoCleanup, which hooks
- * the scope only once the async Vue probe has resolved. Without the
- * beforeAll, a run where the probe was late never made the second call: the
- * tests passed without reaching the guard (seen as a coverage gap at the
- * guard in one full run).
- */

@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** Router guards and bus hooks, the same cases side by side. The long note is at the end. */
+/**
+ * Router guards and after-hooks, and the sync, async and test buses' after-hooks, run through the same removal, add, throw and abort cases.
+ * Why: a hook that removes itself or a later hook during a run would skip its neighbour or read past the end, so a before-hook would refuse the dispatch with core:refused:hook and an after-hook would log "Hook error"; hooks removed or added mid-run must behave the same on every subject.
+ * Shows: removal of self, of a later hook, twice, and clear() from a hook skip nothing and log nothing; an added hook runs in the same router navigation but from the next bus dispatch; a throwing after-hook is contained while a throwing router guard stops the navigation with router:failed:guard; a newer router request supersedes an older async guard.
+ * See: log s35.207, log s35.209, src/router/engine.ts.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
@@ -146,7 +151,6 @@ describe('removal during a run', () => {
     off();
     return (await s.run()).ok;
   };
-  const pick = (seen: Record<string, unknown>, names: string[]) => Object.fromEntries(names.map((n) => [n, seen[n]]));
 
   it('two removals in one run, itself then a later one: every subject runs neither again', async () => {
     expect(await onEvery(twoRemovals)).toEqual(each(allNames, { out: true, calls: ['A', 'B', 'D', 'B', 'D'], logged: 0 }));
@@ -279,32 +283,3 @@ describe('an async hook outlived by a newer request', () => {
     bus.dispose();
   });
 });
-
-/*
- * Plan 1.28 item 4 (log s35.207, fixed in s35.209). The router keeps its own
- * guard chain, whose comment (src/router/engine.ts, the guard loop) records
- * the bus's remove-during-iteration lesson. This file runs the same cases on
- * router guards, router after-hooks, both buses' after-hooks and the TestBus.
- * The bus's public before-hooks left in plan 1.32 step 8e (log 36.109).
- *
- * Removal: the router moves its cursor by identity. The bus's hook loops
- * walked to the length they started with while `addHook`'s unsubscribe
- * spliced, so a hook that removed itself or a later hook skipped its
- * neighbour, and the last slot read past the end: calling `undefined` threw a
- * TypeError. In a before-hook that throw was caught as a refusal, so the
- * dispatch failed with `core:refused:hook` and the handler never ran. In an
- * after-hook it was logged as "Hook error". The probe pinned it with
- * `it.fails` rows (970d9cd). The hooks now follow the listeners' rule
- * (fanOutListeners): an entry marked `off` and a replaced array, so a
- * dispatch runs the hooks that existed when it started and skips one removed
- * during it. The rows for two removals in one run and `clear()` from a hook
- * pin the cases a copy-only fix misses.
- *
- * Adding during a run: the bus runs a hook added during a dispatch from the
- * next one (its listeners' rule, the DOM's). Both router loops re-read the
- * length, so an added guard or after-hook runs in the same navigation.
- *
- * A newer request during an async guard: the router supersedes. On the bus a
- * newer request is `supersede`'s, a work step. Cancellation inside a started
- * dispatch is the handler's own (it reads `cmd.signal`).
- */

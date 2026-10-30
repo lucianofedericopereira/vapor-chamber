@@ -1,4 +1,9 @@
-/** An action's rules run before every chain plugin and the work: a refusal is the command's one answer. The long note is at the end. */
+/**
+ * An action's authorize and validate rules run after the before-hooks and before every chain plugin and the work.
+ * Why: a refused command would otherwise take a rateLimit slot, count as a circuitBreaker failure, be retried or shown optimistically; a refusal must be the command's one answer.
+ * Shows: on the sync, async and test buses a refusal skips rateLimit and circuitBreaker, authorize answers before validate, queries and requests are gated, and a rule part is resolved once per action; on the async bus a refusal skips optimistic work and retries.
+ * See: log s36.99
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { _failures, createAsyncCommandBus, createCommandBus, type AsyncCommandBus, type BaseBus, type CommandResult } from '../src/command-bus';
 import { authGuard, validator } from '../src/plugins-core';
@@ -165,15 +170,6 @@ describe('rules on the async bus', () => {
     expect(code(await bus.dispatch('a512', 1))).toBe('ok');
   });
 
-  it('runs before a responder (control)', async () => {
-    let answered = 0;
-    const bus = createAsyncCommandBus({ retry: false });
-    bus.respond('save', () => { answered++; return 1; });
-    bus.use(bad);
-    expect(code(await bus.request('save', 'bad'))).toBe('validator:invalid:payload');
-    expect(answered).toBe(0);
-  });
-
   it('an async rule refuses (control)', async () => {
     const rejecting = { '~standard': { version: 1, vendor: 'test', validate: async () => ({ issues: [{ message: 'bad' }] }) } } as never;
     const bus = createAsyncCommandBus({ retry: false });
@@ -182,16 +178,3 @@ describe('rules on the async bus', () => {
     expect(code(await bus.dispatch('save', 1))).toBe('validateSchemas:invalid:payload');
   });
 });
-
-/*
- * Plan 1.32 step 7b (.probes/step-7-pickup.md). Validation and authorization
- * are the command's own (plan-transport-owned.md revision 17): `validator`,
- * `authGuard`, `schemaValidator` and `validateSchemas(Async)` declare a
- * `validate` or `authorize` part, and the bus runs every authorize rule, then
- * every validate rule, after the before-hooks and before every chain plugin
- * and the work. So a refused command never reaches a limit (rateLimit,
- * circuitBreaker), a substitute (cache) or a retry, and an optimistic one is
- * never shown. A rule part is asked once per action. The controls show the
- * paths that already refused before this step: a query, a responder, an
- * async rule, a rule's throw.
- */

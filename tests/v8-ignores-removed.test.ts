@@ -1,4 +1,9 @@
-/** The invariants three removed `v8 ignore` guards stood on, pinned (log s35.122). */
+/**
+ * The invariants the removed `v8 ignore` guards in src relied on: a transactional batch stops at its first failure, and a buffer is released only when the bus has one.
+ * Why: with the guards gone, a rollback would act on a failed command, or register() would reach a missing buffer, if either invariant broke.
+ * Shows: a sync transactional batch with continueOnError stops at the failure and rolls back only the success; an async batch aborted mid-way rolls back what ran, newest first; register() on a bus without a buffer does not throw; a buffered command replays when its handler arrives.
+ * See: log s35.122
+ */
 import { describe, expect, vi } from 'vitest';
 import { createBuffer } from '../src/buffer';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';

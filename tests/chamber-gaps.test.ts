@@ -1,20 +1,7 @@
 /**
- * Supplemental coverage for src/chamber.ts.
- *
- *  - runDispatch and runCommand: an async rejection, a `{ ok:false }` with no
- *    error attached.
- *  - untracked: the `__VC_IIFE__` const-fold guard - at runtime in tests
- *    the identifier resolves via globalThis, so both arms are drivable.
- *  - useSharedCommandState: maxSize tightening, ring-buffer trim.
- *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction.
- *  - useCommandHistory redo payloads: object payload -> `__origin` spread
- *, array payload -> non-markable identity fallback.
- *  - KeepAlive wiring via a fake Vue namespace handed to configureVue():
- *    tryKeepAliveHooks' hasInjectionContext arm and getCurrentInstance
- *    fallback, and useCommandError's pause/resume closures
- * - reachable without a component tree because the fake
- *    namespace's onDeactivated/onActivated just hand the callbacks back.
- *  - readGlobal's catch via a throwing global getter.
+ * src/chamber.ts branches only these tests reach: dispatch error arms, the IIFE guard, buffer trims, the name cache, KeepAlive wiring, global probes.
+ * Why: coverage: without this file chamber.ts falls below 100 on all four axes; each case is still a real behaviour.
+ * Shows: rejections and errorless failures are failed results; __VC_IIFE__ bypasses tracking; maxSize tightens; the oldest name is evicted; KeepAlive pauses capture; a hostile global is survived.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { runCommand, runDispatch } from '../src/chamber';
@@ -34,10 +21,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetCommandBus();
 });
-
-// ---------------------------------------------------------------------------
-// runDispatch
-// ---------------------------------------------------------------------------
 
 /** A bus whose dispatch answers `value` (runDispatch calls bus.dispatch directly). */
 const answering = (value: unknown) => ({ dispatch: () => value }) as unknown as Parameters<typeof runDispatch>[0];
@@ -66,10 +49,7 @@ describe('runDispatch and runCommand error arms', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// untracked - __VC_IIFE__ guard
-// ---------------------------------------------------------------------------
-
+// In tests `__VC_IIFE__` resolves through globalThis, so both arms of the const-fold guard run.
 describe('untracked IIFE guard', () => {
   it('passes through when the IIFE flag is unset', () => {
     expect(untracked(() => 7)).toBe(7);
@@ -91,10 +71,6 @@ describe('untracked IIFE guard', () => {
     expect(seen).toEqual(['d', 'q', 'd']);
   });
 });
-
-// ---------------------------------------------------------------------------
-// useSharedCommandState
-// ---------------------------------------------------------------------------
 
 describe('useSharedCommandState', () => {
   it('tightens maxSize when a later caller asks for a smaller buffer', async () => {
@@ -120,10 +96,6 @@ describe('useSharedCommandState', () => {
 
 });
 
-// ---------------------------------------------------------------------------
-// useCommandGroup - name cache eviction
-// ---------------------------------------------------------------------------
-
 describe('useCommandGroup name cache', () => {
   it('evicts the oldest cached name past 256 distinct actions', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
@@ -143,18 +115,9 @@ describe('useCommandGroup name cache', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// useCommandHistory - redo payload variants
-// ---------------------------------------------------------------------------
-
 describe('useCommandHistory redo payload marking', () => {
   it('marks a redo via meta.origin, leaving the payload untouched', () => {
-    // Was: asserted the redo payload came through as
-    // `{ qty: 2, __origin: 'redo' }`. That pinned the MECHANISM (spreading a
-    // marker key into the caller's payload), not the contract. The marker now
-    // travels out-of-band via `_withOrigin`, so the replayed payload is the
-    // caller's original object - same identity, no injected key - and
-    // `meta.origin` carries the attribution the hook actually reads.
+    // The redo marker travels on meta via `_withOrigin`, never as a key in the caller's payload.
     const bus = createCommandBus();
     setCommandBus(bus);
     const payloads: any[] = [];
@@ -199,10 +162,7 @@ describe('useCommandHistory redo payload marking', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// KeepAlive hooks + error capture via a fake Vue namespace
-// ---------------------------------------------------------------------------
-
+// A fake Vue namespace whose onDeactivated/onActivated hand the callbacks back, so no component tree is needed.
 describe('KeepAlive wiring through configureVue', () => {
   it('registers hooks via hasInjectionContext and pauses/resumes error capture', async () => {
     vi.resetModules();
@@ -260,10 +220,6 @@ describe('KeepAlive wiring through configureVue', () => {
     expect(pause).toBeTypeOf('function');
   });
 });
-
-// ---------------------------------------------------------------------------
-// readGlobal - throwing global getter
-// ---------------------------------------------------------------------------
 
 describe('IIFE flag at module load', () => {
   it('wireUntracked returns early when __VC_IIFE__ is set before import', async () => {

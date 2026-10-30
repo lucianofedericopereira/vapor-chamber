@@ -1,15 +1,8 @@
 /**
- * Four defects found by reading the router cluster, none of which announces
- * itself: each degrades quietly rather than failing.
- *
- *  - a route record's `meta` was the table's own object, handed to every
- *    consumer for the router's life (fourth site of ../freeze's contract)
- *  - `usePagination` propagated NaN from a backend response straight into the
- *    pager UI, because neither `Math.max` nor `||` contains one
- *  - `revalidateRoutes` shared one AbortController, so any refresh cancelled
- *    every other one whatever it was refreshing
- *  - `matchPrefix` returned the first registered prefix, making overlapping
- *    prefixes resolve by object key order
+ * Shared and degenerate inputs to the router: frozen route meta, longest-prefix loader matching, and usePagination with non-numeric backend numbers.
+ * Why: a route's `meta` handed out as the table's own object could be mutated by any consumer; overlapping loader prefixes would resolve by object key order; a NaN from a backend response would reach the pager UI as a "NaN" page link with hasNext stuck false.
+ * Shows: route meta is deeply frozen in dev and left alone in production; the longest matching prefix wins in either map order, receives the ref with that prefix stripped, and is reported to defaultAffects; usePagination keeps total, lastPage, perPage and pageRange finite, falls back for a bad window, and go(NaN) writes no NaN to the URL.
+ * See: freeze.test.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -23,18 +16,14 @@ import type { RouteRecord } from '@router/types';
 import { makeRouter } from './fixture';
 
 describe('route meta is the table declaration, not the caller to keep', () => {
-  // Fresh objects per test on purpose: the freeze lands on the ROW's own meta,
-  // in place, so a shared fixture would carry the dev run's freeze into the
-  // production one. That is the behaviour, not a test artifact - rows come from
-  // a generated module and are not the caller's to mutate afterwards either.
+  // Fresh rows per test: the freeze lands on the row's own meta in place, so a shared row would carry the dev freeze into the production run.
   const rows = (): RouteRecord[] => [
     { name: 'p', path: '/p', component: 'P', meta: { title: 'shop.products', nested: { a: 1 } } },
   ];
 
   it('refuses a write through location.meta in dev', () => {
     const table = createRouteTable(rows());
-    // Asserted, not optional-chained: a `?.` here would let the test pass on a
-    // TypeError from `undefined` rather than on the frozen-write it is about.
+    // No `?.`: a TypeError from `undefined` must not pass for the frozen-write throw.
     const record = table.getRecord('p');
     if (!record) throw new Error('fixture: record "p" missing');
 
@@ -42,7 +31,7 @@ describe('route meta is the table declaration, not the caller to keep', () => {
     expect(() => {
       (record.meta as Record<string, unknown>).title = 'rewritten';
     }).toThrow();
-    // Deep, because a nested object is shared just as thoroughly as the top one.
+    // The freeze is deep: nested objects are shared too.
     expect(() => {
       (record.meta as { nested: Record<string, unknown> }).nested.a = 2;
     }).toThrow();
@@ -94,14 +83,13 @@ describe('matchPrefix - the longest prefix wins, not the first registered', () =
   });
 
   it('still reports a prefix loader to defaultAffects', () => {
-    // defaultAffects shares matchPrefix, so the two cannot drift on which
-    // handler a template belongs to.
+    // defaultAffects shares matchPrefix, so both pick the same handler.
     expect(defaultAffects(record, ['page'], both('general-first'))).toBe(true);
   });
 });
 
 describe('usePagination - a backend number is not a number', () => {
-  /** Same shape as composables.test.ts: an app context so inject resolves. */
+  /** An app context so inject resolves, as in composables.test.ts. */
   function withRouter<T>(router: unknown, fn: () => T): T {
     const app = createApp({});
     app.provide(ROUTER_KEY, router);
@@ -121,9 +109,7 @@ describe('usePagination - a backend number is not a number', () => {
   }
 
   it('keeps NaN out of the pager when the response is not numeric', async () => {
-    // `total: "many"` was enough: total was never coerced, so it reached
-    // Math.ceil as a string, lastPage became NaN, pageRange rendered a literal
-    // "NaN" page link, and hasNext was permanently false.
+    // A string total must be coerced: uncoerced it makes lastPage NaN.
     const router = await paginated({ items: [1, 2, 3], total: 'many' });
     const p = withRouter(router, () => usePagination());
 
@@ -146,8 +132,7 @@ describe('usePagination - a backend number is not a number', () => {
     const router = await paginated({ items: [1], total: 100, per_page: 10, last_page: 10 });
     for (const window of [Number.NaN, 0, -5]) {
       const p = withRouter(router, () => usePagination({ window }));
-      // `Math.max(1, Math.floor(NaN))` is NaN, which would make the run between
-      // first and last vanish and collapse the range to [1, last].
+      // `Math.max(1, Math.floor(NaN))` is NaN: the window would vanish and the range collapse to [1, last].
       expect(p.pageRange.value.length, String(window)).toBeGreaterThan(2);
       expect(p.pageRange.value.every((n) => Number.isFinite(n))).toBe(true);
     }

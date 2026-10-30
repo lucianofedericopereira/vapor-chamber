@@ -1,12 +1,7 @@
 /**
- * Coverage tests for the LLM/schema helper functions in src/schema.ts.
- *
- * Targets:
- *   - toCamel: leading-uppercase lowercasing branch (via normalizeSchema)
- *   - schemaLogger: target else-branch (no def.target / no cmd.target)
- *   - schemaLogger: payload else-branch (payload present, no def.payload)
- *   - createAsyncSchemaCommandBus: describe() arrow
- *   - getErrorEntry, describeErrorCodes, busApiSchema
+ * The LLM-facing schema helpers in src/schema.ts and src/error-registry.ts: key normalization, schemaLogger, describe(), error-code lookup and the bus API schema.
+ * Why: these feed the logs, prompts and tool lists a developer or model reads, so a wrong camel name, a mislabelled log line or a wrong description would mislead them. Also the only file reaching describeErrorCodes, busApiSchema, describe() and the camel-case replace, so the 100% floor needs it.
+ * Shows: PascalCase keys normalize to camelCase, schemaLogger prints raw target and payload without a marker when the schema has none and prints the settled result on an async bus, describe() matches describeSchema(), getErrorEntry and describeErrorCodes read the registry, busApiSchema lists the bus methods with signatures.
  */
 
 import { describe, expect, vi } from 'vitest';
@@ -21,16 +16,11 @@ import {
 import { ERROR_CODE_REGISTRY, describeErrorCodes, getErrorEntry } from '../src/error-registry';
 import { it } from '../src/vitest';
 
-
-// ---------------------------------------------------------------------------
-// toCamel - leading-uppercase branch (line 90), reached via normalizeSchema
-// ---------------------------------------------------------------------------
-
 describe('toCamel leading-uppercase normalization', () => {
   it('lowercases a leading uppercase letter in PascalCase keys', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // 'CartAdd' has no separators, so only the /^[A-Z]/ branch fires.
+    // No separators in 'CartAdd': only the leading-uppercase rule applies.
     const bus = createSchemaCommandBus({ CartAdd: { description: 'Add' } });
 
     expect(bus.getSchema()).toHaveProperty('cartAdd');
@@ -42,16 +32,12 @@ describe('toCamel leading-uppercase normalization', () => {
   it('combines separator and leading-uppercase normalization', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // 'Cart_Add' exercises both the separator replace and the leading-uppercase replace.
+    // 'Cart_Add' needs both the separator rule and the leading-uppercase rule.
     const bus = createSchemaCommandBus({ Cart_Add: { description: 'Add' } });
 
     expect(bus.getSchema()).toHaveProperty('cartAdd');
   });
 });
-
-// ---------------------------------------------------------------------------
-// schemaLogger - else branches (lines 201, 208)
-// ---------------------------------------------------------------------------
 
 describe('schemaLogger else branches', () => {
   it('logs raw target without a checkmark when the action has no schema def (line 201)', ({ bus }) => {
@@ -59,14 +45,14 @@ describe('schemaLogger else branches', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    // Logger schema knows nothing about 'ping' -> def is undefined -> else branch.
+    // The logger's schema does not know 'ping'.
     bus.use(schemaLogger({ cartAdd: { target: { id: 'number' } } }));
     bus.register('ping', () => 'pong');
     bus.dispatch('ping', { anything: true });
 
     const targetCall = log.mock.calls.find(c => c[0] === 'target:');
     expect(targetCall).toBeDefined();
-    // else branch logs exactly two args: label + raw value, no ✓ / ⚠ marker.
+    // Exactly two args: label and raw value, no marker.
     expect(targetCall).toHaveLength(2);
     expect(targetCall?.[1]).toEqual({ anything: true });
   });
@@ -76,8 +62,7 @@ describe('schemaLogger else branches', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    // def for 'cartClear' has a target but NO payload -> payload else branch fires
-    // when a payload is actually supplied on dispatch.
+    // 'cartClear' declares a target but no payload; the dispatch supplies one.
     bus.use(schemaLogger({ cartClear: { target: { force: 'boolean' } } }));
     bus.register('cartClear', () => 'cleared');
     bus.dispatch('cartClear', { force: true }, { reason: 'manual' });
@@ -88,7 +73,6 @@ describe('schemaLogger else branches', () => {
     expect(payloadCall?.[1]).toEqual({ reason: 'manual' });
   });
 
-  // Logs the real result on an ASYNC bus too, not a pending promise's `.ok`.
   it('logs the settled value on an async bus, not a pending promise', async ({ asyncBus: bus }) => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -98,17 +82,11 @@ describe('schemaLogger else branches', () => {
     bus.register('cartAdd', async () => 'added');
     await bus.dispatch('cartAdd', { id: 1 });
 
-    // `next()` hands back a promise here. Reading `.ok` off it yielded
-    // `undefined`, so this line took the error branch on a SUCCESS and printed
-    // the error - which was `undefined` too.
+    // On the async bus next() returns a promise; the logger must read its settled value.
     const resultCall = log.mock.calls.find(c => c[0] === 'result:');
     expect(resultCall?.[1]).toBe('added');
   });
 });
-
-// ---------------------------------------------------------------------------
-// createAsyncSchemaCommandBus.describe() - line 383
-// ---------------------------------------------------------------------------
 
 describe('createAsyncSchemaCommandBus describe()', () => {
   const schema: BusSchema = {
@@ -131,10 +109,6 @@ describe('createAsyncSchemaCommandBus describe()', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// getErrorEntry - lines 471-473
-// ---------------------------------------------------------------------------
-
 describe('getErrorEntry', () => {
   it('returns the registry entry for a known code', () => {
     const entry = getErrorEntry('core:missing:handler');
@@ -153,15 +127,11 @@ describe('getErrorEntry', () => {
   });
 
   it('returns undefined for an unknown code', () => {
-    // Cast - intentionally probing a code that is not in the registry.
+    // The cast probes a code that is not in the registry.
     const entry = getErrorEntry('VC_NOT_A_REAL_CODE' as any);
     expect(entry).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// describeErrorCodes - lines 481-487
-// ---------------------------------------------------------------------------
 
 describe('describeErrorCodes', () => {
   it('produces a header followed by one line per registry entry', () => {
@@ -169,7 +139,6 @@ describe('describeErrorCodes', () => {
     const lines = text.split('\n');
 
     expect(lines[0]).toBe('Error codes (code | severity | fix):');
-    // header line + one line per registry entry
     expect(lines).toHaveLength(ERROR_CODE_REGISTRY.length + 1);
   });
 
@@ -180,16 +149,12 @@ describe('describeErrorCodes', () => {
       expect(text).toContain(e.code);
       expect(text).toContain(e.fix);
     }
-    // spot-check the exact formatting of one row
+    // The exact format of one row.
     expect(text).toContain(
       'core:missing:handler | error | Register a handler with bus.register(action, handler) before dispatching.'
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// busApiSchema - lines 502-579
-// ---------------------------------------------------------------------------
 
 describe('busApiSchema', () => {
   it('describes the full bus API surface as a structured object', () => {
@@ -222,14 +187,11 @@ describe('busApiSchema', () => {
     expect(api.dispatch.params).toHaveProperty('payload');
     expect(api.dispatch.returns).toContain('CommandResult');
 
-    // emit takes no return value
     expect(api.emit.returns).toBe('void');
 
-    // registeredActions takes no params and returns string[]
     expect(api.registeredActions.params).toEqual({});
     expect(api.registeredActions.returns).toBe('string[]');
 
-    // request is the async path
     expect(api.request.returns).toContain('Promise');
   });
 });

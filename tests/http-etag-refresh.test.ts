@@ -1,4 +1,9 @@
-/** A stale entry's refresh sends its ETag; a 304 keeps the copy; no-store is honoured (step 3g, decision B). Rationale at the end. */
+/**
+ * A stale entry's refresh sends its stored ETag; a 304 keeps the stored copy; Cache-Control: no-store is honoured.
+ * Why: a refresh that dropped the ETag, or replaced the copy on a 304, would change the page's data object and re-render the router for nothing; a no-store response kept in the cache would be served after the server forbade it.
+ * Shows: a stale hit refreshes with If-None-Match and a 304 resolves to the same stored data and opens a new window; a 200 replaces the copy; a joined read gets the stored response; a write during the refresh stops the 304 storing; the app's own If-None-Match is kept; a response without an ETag refreshes as a plain read; a no-store response, or a refresh answered no-store, is not kept.
+ * See: tests/router/cache-groups.test.ts, Fetch 4.6
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -137,17 +142,3 @@ describe('Cache-Control: no-store', () => {
     expect(s.conditional.length).toBe(3);
   });
 });
-
-/*
- * Decision B (owner, 2026-10-19, .probes/plan-router.md): the client keeps its own
- * windows (`ttl`, `staleTtl`). Past the fresh window a stale hit is served at once and
- * refreshed behind it; when the stored response has an `ETag`, the refresh asks
- * `If-None-Match`. Fetch hands that 304 to the page, because a request carrying a
- * conditional header runs in "no-store" mode (Fetch 4.6, probed in Chrome 152,
- * .probes/step-3g-pickup.md). The 304 means "what you hold is current": the refresh
- * resolves to the stored response itself, so the page's data object stays the same and
- * the router does not re-render (tests/router/cache-groups.test.ts).
- *
- * `Cache-Control: no-store` says the response is not to be kept: it is not stored, and a
- * refresh answered so removes the copy. A server that declares neither sees no change.
- */

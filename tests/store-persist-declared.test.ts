@@ -1,4 +1,8 @@
-/** A state another command's reply declares is saved by the store's own persist: there is no scope to name it in. Rationale at the end. */
+/**
+ * A state another command's reply declares is saved by the store's own persist: there is no scope to name it in.
+ * Why: a reply declares a store's state as a step of the command that got it, so a persist scoped to the store's own actions would miss the write and a reload would show the old state.
+ * Shows: after a `checkout` reply declares the cart under `stores`, the cart state holds it and the storage holds the same JSON.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -31,12 +35,3 @@ describe("a state another command declares, and the store's persist", () => {
     expect(await checkout()).toEqual({ state: { items: [9] }, saved: '{"items":[9]}' });
   });
 });
-
-/*
- * A reply declares a store's state under `stores`; the store writes it as a
- * step of the command that got the reply (here `checkout`), inside the
- * dispatch. The `persist()` plugin saved by the commands it ran for, so one
- * scoped to the cart's own actions missed this write and a reload showed the
- * old cart (bug B1, docs only until 1.32). The store's own `persist` saves
- * after every write of the store, whatever wrote it: there is no scope to miss.
- */

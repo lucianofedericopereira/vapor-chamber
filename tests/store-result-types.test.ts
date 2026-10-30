@@ -1,4 +1,9 @@
-// A store's actions and $reset are typed by the bus they run on; rationale at the end.
+/**
+ * A store's actions and `$reset` are typed by the bus they run on: the result on a sync bus, a promise on an async bus, either on a bus typed as BaseBus.
+ * Why: if every bus typed them as `CommandResult | Promise<CommandResult>`, `cart.add(x).ok` would fail the type check on a sync bus although the call never returns a promise.
+ * Shows: type checks in a function that is never called (only `npm run typecheck` runs them) pin the three bus types; at runtime a sync bus answers a result and an async bus a promise.
+ * See: log s36.F37, log s36.F41, tests/composables-result-types.test.ts.
+ */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   createAsyncCommandBus,
@@ -60,18 +65,3 @@ describe('store result types', () => {
     async.$dispose();
   });
 });
-
-/*
- * Why this file exists. A store's actions and `$reset` dispatch on the bus the
- * store was given, so they return what that bus's dispatch returns. They were
- * typed `CommandResult | Promise<CommandResult>` on every bus, so on a sync bus
- * `cart.add(x).ok` failed the type check while the call never returned a
- * promise (log 36.F37 finding 3, B3 (a), log 36.F41). The type now follows the
- * bus by `ResultOn`, the rule the composables use
- * (tests/composables-result-types.test.ts): the result on a sync bus, a promise
- * on an async one, either on a bus typed only as BaseBus.
- *
- * The type checks sit in a function that is never called: the claim is about
- * types, which only `npm run typecheck` (tsconfig.tests.json) can check. The
- * runtime case shows the types describe what the call does.
- */

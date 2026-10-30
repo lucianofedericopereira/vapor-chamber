@@ -1,14 +1,8 @@
 /**
- * Does v-vc-command take keyboard focus away from the button it disables?
- *
- * The directive sets `el.disabled = true` while its dispatch is in flight
- * (src/directives.ts, mountCommand). HTML's focus fixup rule says a focused
- * element that stops being focusable loses focus to the document. If the
- * engine applies it, a keyboard user who presses Enter on Save is sent back to
- * the top of the page for every in-flight command.
- *
- * Two facts, recorded rather than guessed: the engine's behaviour on its own,
- * then the directive's. docs/accessibility.md.
+ * v-vc-command keeps keyboard focus on the button it marks busy, and keeps what disabling it would give.
+ * Why: HTML's focus fixup moves focus off a disabled element, so `disabled` would send a keyboard user to the top of the page on every press.
+ * Shows: the engine does move focus; the directive keeps it with aria-disabled, blocks a second press and app clicks, submits no form, works again after; AT sees it disabled.
+ * See: docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
@@ -18,8 +12,7 @@ import { matchers, tap } from '../../src/vitest-pure';
 
 expect.extend(matchers);
 
-// Two animation frames: HTML runs the focus fixup rule during a rendering
-// update, which a zero-delay timeout can precede.
+// Two frames: the focus fixup runs in a rendering update, which a zero-delay timeout can precede.
 const settle = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 afterEach(() => {
@@ -37,17 +30,12 @@ describe('focus and a disabled button (real Chromium)', () => {
     button.disabled = true;
     await settle();
 
-    // Measured on Chromium (headless shell 153, playwright 1.63): after the
-    // rendering update the button is no longer focused and focus is on <body>.
-    // A zero-delay timeout read the opposite, before the update ran.
+    // After the rendering update, focus is on <body>.
     expect(document.hasFocus()).toBe(true);
     expect(document.activeElement).toBe(document.body);
   });
 
-  // THE DEFECT this pins: `el.disabled = true` sends a keyboard user's focus to
-  // <body> for every in-flight dispatch, and it does not come back when the
-  // button is re-enabled (measured: during {disabled: true, focused: false},
-  // after {disabled: false, focused: false}). markBusy uses aria-disabled.
+  // With `disabled`, focus would go to <body> and not come back; markBusy uses aria-disabled.
   it('the directive keeps keyboard focus through an in-flight dispatch', async () => {
     let release!: () => void;
     const bus = createAsyncCommandBus();
@@ -75,13 +63,7 @@ describe('focus and a disabled button (real Chromium)', () => {
   });
 });
 
-/**
- * What `el.disabled = true` does today besides moving focus, measured on the
- * current code first, so a fix can prove it changes focus and nothing else:
- * a disabled button fires no click at all, so neither a second press nor the
- * app's own click listener runs while the dispatch is in flight, and a submit
- * button's form is not submitted by the press that started the dispatch.
- */
+/** What disabling would give besides moving focus, kept with aria-disabled: no second press, no app click, no form submit in flight. */
 describe('what the in-flight state must keep (real Chromium)', () => {
   function mountSave(type: 'button' | 'submit') {
     let release!: () => void;
@@ -113,8 +95,7 @@ describe('what the in-flight state must keep (real Chromium)', () => {
     expect(t.appClicks()).toBe(appClicksAfterFirst);
     t.release();
     await settle();
-    // `tap` records a dispatch when it settles, so the count is read after the
-    // release: one, the second press never dispatched.
+    // `tap` records a dispatch when it settles, so read after the release: one.
     expect(t.bus).toHaveBeenDispatchedTimes('saveThing', 1);
     t.teardown?.();
   });

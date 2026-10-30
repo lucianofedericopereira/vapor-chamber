@@ -1,4 +1,9 @@
-/** After two tabs meet, each tab's history is the same and true to the one state: stacks, canUndo, canRedo, an undo, a redo. Rationale at the end. */
+/**
+ * After two tabs meet, each tab's history is the same and true to the one state: stacks, canUndo, canRedo, an undo, a redo.
+ * Why: a tab whose history differs from the other tab's, or from the commands its state holds, would make Undo take a different step depending on when the writes met; the history an app reads, through history() or useCommandHistory, must match the shared state. Two histories on one bus are two stacks, so each tab reads and presses through one.
+ * Shows: for both history kinds, both tabs read equal state, past, future, canUndo and canRedo, the past targets match the state's items, through an undo in one tab, a redo in the other, and undoing everything.
+ * See: log s36.F39, log s36.F40.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus, type Command } from '../src/command-bus';
@@ -15,7 +20,7 @@ const closers: Array<() => void> = [];
 beforeEach(() => { vi.stubGlobal('window', {}); });
 afterEach(() => { while (closers.length) closers.pop()!(); vi.unstubAllGlobals(); });
 
-/** One history an app reads: its two stacks, whether it can undo and redo, and its presses. */
+// One history an app reads: its two stacks, whether it can undo and redo, and its presses.
 type View = { past(): readonly Command[]; future(): readonly Command[]; canUndo(): boolean; canRedo(): boolean; undo(): void; redo(): void };
 
 const kinds: Record<string, (bus: ReturnType<typeof createCommandBus>) => View> = {
@@ -42,7 +47,7 @@ function tab(name: string, kind: string) {
 }
 type Tab = ReturnType<typeof tab>;
 
-/** What an app reads of a tab's history, by each command's target. */
+// What an app reads of a tab's history, by each command's target.
 const read = (t: Tab) => ({
   state: t.store.state.value.items,
   past: t.h.past().map((c) => c.target),
@@ -51,7 +56,7 @@ const read = (t: Tab) => ({
   canRedo: t.h.canRedo(),
 });
 
-/** Both tabs read the same, and the history's past holds exactly the state's writes. */
+// Both tabs read the same, and the history's past holds exactly the state's writes.
 function same(a: Tab, b: Tab): ReturnType<typeof read> {
   const ra = read(a);
   expect(read(b)).toEqual(ra);
@@ -90,13 +95,3 @@ for (const kind of Object.keys(kinds)) {
     });
   });
 }
-
-/*
- * When the lead's command reaches a tab before the lead ran that tab's own
- * write, the tab runs its write again over the lead's (log 36.F39). Its state
- * and its ring then hold the lead's arrangement. Its history must too: a
- * history that differs from the other tab's, or from the commands its state
- * holds, changes what Undo takes there by when the writes met, the class of
- * bug B2 (B2-F1, log 36.F40). Each tab reads and presses through one history,
- * as an app does: two histories on one bus are two stacks.
- */

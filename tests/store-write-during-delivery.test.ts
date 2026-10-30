@@ -1,4 +1,8 @@
-/** A write made while a store's write is delivered is delivered after it, in order, on both runtimes. Rationale at the end. */
+/**
+ * A write made by a store subscriber while a field write is being delivered, on the Vue and core runtimes.
+ * Why: a write made in a subscriber must be delivered after the current delivery, in write order, or subscribers, fieldRef and share would stay on a stale value.
+ * Shows: every subscriber sees every write in order and ends on the state; a value overwritten within one delivery is skipped; a shared store sends it; fieldRef shows it; a subscriber's reads do not become dependencies of the writing effect.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { effect, effectScope, shallowRef } from 'vue';
 import { createCommandBus } from '../src/command-bus';
@@ -40,7 +44,7 @@ for (const [runtime, define] of [['vue', defineVue], ['core', defineCore]] as co
     });
 
     it('a shared store sends the write made in a subscriber', async () => {
-      vi.stubGlobal('window', {}); // a page: shareTabs opens only where there are tabs
+      vi.stubGlobal('window', {}); // shareTabs opens only where there is a page
       const name = `delivery-${define === defineCore ? 'core' : 'vue'}`;
       const wire = listen(name);
       const peer = (define as typeof defineCore)('cart', { state, reducers, share: shareTabs(name) })(createCommandBus());
@@ -81,19 +85,3 @@ describe('vue store', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Two bugs, one rule. The Vue store called `fn` inside
- * its watch effect's run, and a running effect does not re-run for a write it
- * causes itself, so a write made in a subscriber was never delivered: every
- * subscriber, `fieldRef` and `share` stayed on the value before it until some
- * later write. The core store delivered such a write INSIDE the running
- * delivery, so a subscriber after the writing one saw the new value and then
- * the old one, and ended on the old one. Now, on both runtimes, a write made
- * during a delivery is delivered after that delivery ends, in write order,
- * and every subscriber ends on the current state; a value written and
- * overwritten within one delivery is skipped, as an effect batch skips it.
- * The rejected shape, a scheduler that calls `fn` after the effect's run,
- * delivered out of order on Vue too and let `fn`'s reads become dependencies
- * of whatever effect made the write: the last test pins that they do not.
- */

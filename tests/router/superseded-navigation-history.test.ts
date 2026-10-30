@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** A navigation the user supersedes leaves the history where the user put it. The long note is at the end. */
+/**
+ * A navigation the user supersedes walks no history of its own, so the history stays where the user put it.
+ * Why: if a cancelled popstate navigation stepped the history back by its delta, two quick Backs during a slow page would end on the wrong page with the address bar on another; a refused one must still roll back.
+ * Shows: two quick Backs land on the second target with only the user's two `go(-1)` calls; a push that supersedes a held Back adds no step and lands on the push target; a guard that refuses a Back still calls `go(-1)` then `go(1)`; the superseded navigation answers router:aborted:navigation.
+ * See: log s35.90, dispose-cancels-navigation.test.ts
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -8,7 +13,7 @@ import { ROWS } from './fixture';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-/** Three pages, a memory history, and a guard that holds the FIRST navigation after it is armed. */
+/** Three pages, a memory history, and `holdNext()` to arm a guard that holds the first navigation after it. */
 async function threePages() {
   const history = createMemoryHistory('/');
   const router = createRouter({
@@ -92,27 +97,3 @@ describe('a superseded navigation walks no history', () => {
     router.dispose();
   });
 });
-
-/*
- * Router re-review, 1.26 (log 35.90). A popstate navigation that failed walked
- * the history back by its own delta (`revert`), so the address bar returned to
- * the page still on screen. It did the same when it was CANCELLED, and a
- * cancelled navigation is one the user replaced with a newer one: the browser
- * is already where the newer one put it. Two quick Backs during a slow page
- * therefore ran: the first Back's navigation, cancelled, stepped forward one
- * entry; the router read that step as a third navigation, which cancelled the
- * second Back's and stepped forward again. The page ended on /list with the
- * address bar on /other, where the user had pressed Back twice from /other.
- *
- * Now a cancelled navigation returns `cancelled` and walks nothing; vue-router
- * does the same (its popstate handler skips `go(-delta)` for
- * NAVIGATION_CANCELLED). A refused one (a guard's `false`, an unmatched URL, a
- * failure) still walks back: the third test is that control. The second test
- * is the push case: a push from the entry the Back reached, so the entries
- * after it are dropped, as after any Back and click.
- *
- * `router.dispose()` cancelling a held Back walks no history either
- * (tests/router/dispose-cancels-navigation.test.ts), which before this needed a
- * `stopped` flag of its own; the cancelled path is now the reason, and the flag
- * is gone. That test is its pin.
- */

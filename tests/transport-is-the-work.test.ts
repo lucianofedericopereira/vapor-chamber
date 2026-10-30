@@ -1,4 +1,10 @@
-/** A transport is declared at the bus and is the work for its actions, never a plugin. The long note is at the end. */
+/**
+ * A transport declared at the bus runs as the work for its actions, never as a plugin.
+ * Why: the bus must run the action's transport where it runs a local handler (inside every plugin, under
+ * the retry, with the answer written there); use() must refuse a transport, or it would sit outside that path.
+ * Shows: a single transport or a pattern map (most specific wins), $ actions staying local, history, retry,
+ * answer, query, buffer, request, defineTransport, inspectBus and dispose, batching, the test bus, and the use() refusal.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBuffer } from '../src/buffer';
 import { createAsyncCommandBus, inspectBus } from '../src/command-bus';
@@ -172,15 +178,3 @@ describe('the transport is the work', () => {
     expect([typeof t.connect, typeof t.disconnect, typeof t.send]).toEqual(['function', 'function', 'function']);
   });
 });
-
-/*
- * Step 3a of .probes/plan-1.32.md (plan-transport-owned.md F1 and R1-R9; the
- * prototype 18c6326 proved the shape on the 23 built-ins). The bus runs the
- * action's transport where it runs a local handler: inside every plugin,
- * under the retry, with the answer written there. A transport is declared
- * once at the bus, one or a map by action pattern resolved by the most
- * specific match, and `use()` refuses one. The names follow a collision grep:
- * `httpTransport`, `wsTransport`, `defineTransport` (the router's `http` option
- * is an HTTP client, a second meaning for `http`). Each test is red before:
- * the factories do not exist, the option is ignored, `use()` accepts a bridge.
- */

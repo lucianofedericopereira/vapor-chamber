@@ -1,24 +1,8 @@
 /**
- * vaporChamberHMR against a REAL Vite dev pipeline.
- *
- * src/vite-hmr.ts sat on the coverage exclusion list with the reason "Vite
- * plugin code that exercises in a real Vite server, not a unit test
- * environment". That reason was true and it was also the hole: the plugin
- * claimed `.vue` and `.vapor.vue` and had never once delivered a shim to
- * either, while 24 unit tests passed, because the unit tests called
- * `plugin.transform()` directly and the string they fed it was not what Vite
- * feeds it. `enforce: 'pre'` means the plugin sees RAW SFC text, where a
- * prepended import lands outside every block and compiler-sfc drops it with no
- * diagnostic.
- *
- * A real server is the only thing that can tell the difference, and it turns
- * out to cost about a second: `createServer({ middlewareMode: true })` never
- * listens on a port, and `transformRequest` walks the actual plugin container -
- * alias, our `pre` transform, plugin-vue, the import rewriter, the lot.
- *
- * The fixture is written to a temp directory rather than pointed at
- * examples/vapor-sfc, so this test owns its inputs and cannot be broken by an
- * edit to an example.
+ * `vaporChamberHMR` (src/vite-hmr.ts) run through a real Vite dev server, with a temp-directory fixture the test owns.
+ * Why: a unit call to `plugin.transform()` is fed text Vite does not feed it; the plugin runs `enforce: 'pre'` on raw SFC text, where a prepended import lands outside every block and compiler-sfc drops it silently. Also the only file reaching transformIndexHtml's output and the virtual module's skip, so the 100% floor needs it.
+ * Shows: the shim reaches a script module that imports the package and the index.html ahead of the entry, an SFC compiles byte-identical to `vue()` alone with an unflattened sourcemap, and over real HTTP the browser URL serves the shim and its Vue priming module.
+ * See: tests/vite-hmr.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -28,19 +12,8 @@ import { createServer, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { vaporChamberHMR } from '../src/vite-hmr';
 
-/**
- * fetch(), retrying only a failure to CONNECT.
- *
- * `listen()` having resolved means the socket is bound, not that this worker
- * will get scheduled to accept on it. Under full-suite load - 178 workers on a
- * busy machine - the connect attempt outlived its timeout and the test failed
- * with `TypeError: fetch failed / connect ETIMEDOUT`, twice, at whichever fetch
- * happened to go first. It never failed in isolation.
- *
- * Only a connect-level failure is retried. An HTTP response, of any status, is
- * returned to the caller untouched, so a 404 or a 500 still fails the assertion
- * it was going to fail - this hides a starved event loop, never a broken server.
- */
+// fetch(), retrying only a failure to connect: `listen()` resolving means the socket is bound, not that a loaded worker accepts on it in time.
+// Any HTTP response, of any status, is returned untouched, so a 404 or 500 still fails its assertion.
 async function fetchWhenReady(url: URL, attempts = 5): Promise<Response> {
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -60,40 +33,26 @@ let root: string;
 let server: ViteDevServer;
 let plain: ViteDevServer;
 
-/**
- * The same app twice: once with the plugin, once with vue() alone as control.
- *
- * `listening` swaps middleware mode for a real socket on an ephemeral port and
- * lets Vite serve index.html itself, which is the only way to exercise the
- * transform middleware that decodes the `/@id/__x00__` URL.
- */
+// The same app twice: with the plugin, and with vue() alone as control.
+// `listening` swaps middleware mode for a real socket on an ephemeral port, the only way to exercise the middleware that decodes `/@id/__x00__`.
 async function serve(withPlugin: boolean, listening = false): Promise<ViteDevServer> {
   return createServer({
     root,
     configFile: false,
     logLevel: 'silent',
     appType: listening ? 'spa' : 'custom',
-    // `watch: null` is not tidiness - without it `server.close()` never settles
-    // in middleware mode, because the chokidar instance keeps the process alive
-    // and Vite waits on it. Nothing here edits a file after the server starts,
-    // so there is nothing for a watcher to do.
+    // `watch: null`: without it `server.close()` never settles in middleware mode (the chokidar instance keeps it alive).
     server: listening
       ? { port: 0, hmr: false, watch: null }
       : { middlewareMode: true, hmr: false, watch: null },
-    // The fixture lives outside this project's node_modules, so both bare
-    // specifiers are aliased to real files. The plugin matches on SOURCE text
-    // and alias rewrites ids rather than text, so `from 'vapor-chamber'` still
-    // reads as itself by the time we see it.
+    // The fixture lives outside this project's node_modules, so both bare specifiers are aliased; the plugin matches source text, which alias leaves alone.
     resolve: {
       alias: {
         'vapor-chamber': resolve(__dirname, '../src/index.ts'),
         vue: resolve(__dirname, '../node_modules/vue/dist/vue.runtime.esm-bundler.js'),
       },
     },
-    // Both specifiers are aliased to source files, so there is nothing to
-    // pre-bundle. Left on, the optimiser starts a scan on the first request and
-    // `close()` waits for it - the whole suite hung for 30s on that, not on
-    // anything this plugin does.
+    // Nothing to pre-bundle; with discovery on, the optimiser scans on the first request and `close()` waits for it.
     optimizeDeps: { noDiscovery: true, include: [] },
     plugins: withPlugin ? [vue(), vaporChamberHMR()] : [vue()],
   });
@@ -139,8 +98,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
       server.transformRequest('/src/App.vue'),
       plain.transformRequest('/src/App.vue'),
     ]);
-    // The dependency optimiser stamps a per-server hash into resolved URLs;
-    // that is server identity, not plugin output.
+    // The optimiser stamps a per-server hash into resolved URLs: server identity, not plugin output.
     const norm = (s: string) => s.replace(/\?v=\w+/g, '');
 
     expect(withPlugin?.code).not.toContain(SHIM);
@@ -148,10 +106,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
   });
 
   it('does not flatten the sourcemap it passes through', async () => {
-    // Injecting on the same line means no line moves, so no map is needed and
-    // the downstream map arrives intact. The predecessor emitted a line-shift
-    // map that collapsed every chained segment onto column 0, which showed up
-    // here as a mappings string a fraction of the control's length.
+    // Injecting on the same line moves no line, so the downstream map must arrive intact.
     const [withPlugin, control] = await Promise.all([
       server.transformRequest('/src/App.vue'),
       plain.transformRequest('/src/App.vue'),
@@ -160,8 +115,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
   });
 
   it('serves the shim module itself, with the dispose hook wired', async () => {
-    // Addressed by module id here. The URL form the HTML tag uses is a
-    // middleware concern, and is checked over real HTTP below.
+    // By module id; the URL form the HTML tag uses is checked over real HTTP below.
     const out = await server.transformRequest(`\0${SHIM}`);
     expect(out?.code).toContain('__VAPOR_CHAMBER_BUS__');
     expect(out?.code).toContain('import.meta.hot');
@@ -173,30 +127,16 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
       '<body><script type="module" src="/src/bare.ts"></script></body></html>');
 
     expect(html).toContain(`/@id/__x00__${SHIM}`);
-    // Ahead of the app's own entry, so the shim (and the Vue priming it pulls)
-    // evaluates first - module scripts run in document order.
+    // Module scripts run in document order, so the shim (and the Vue priming it pulls) must come first.
     expect(html.indexOf(SHIM)).toBeLessThan(html.indexOf('/src/bare.ts'));
   });
 
-  /**
-   * OVER REAL HTTP, because everything above this point is still the plugin
-   * being asked about itself. The `/@id/__x00__` URL in that script tag is
-   * decoded by Vite's transform middleware, not by any hook this plugin owns,
-   * so an in-process call can only confirm the string we wrote - which is
-   * exactly the mistake that let the SFC injection pass for six releases.
-   * A listening server answering a fetch is the difference between "the tag
-   * says the right thing" and "a browser gets the shim".
-   */
+  // Over real HTTP: the `/@id/__x00__` URL is decoded by Vite's transform middleware, not by a hook this plugin owns, so an in-process call only confirms the string we wrote.
   it('a browser fetching that tag really receives the shim', async () => {
     const live = await serve(true, true);
     try {
       await live.listen();
-      // Use the URL Vite reports, unchanged. This server binds IPv6 only:
-      // rewriting `localhost` to 127.0.0.1 here turned the intermittent
-      // `ETIMEDOUT ::1:PORT` into a deterministic `ECONNREFUSED 127.0.0.1:PORT`,
-      // which is how we learned that. The intermittent failure is the worker's
-      // event loop being starved under full-suite load so the listener does not
-      // accept in time - not the address family. fetchWhenReady handles it.
+      // The URL Vite reports, unchanged: this server binds IPv6 only, so rewriting `localhost` to 127.0.0.1 would be refused.
       const base = live.resolvedUrls?.local[0];
       expect(base).toBeTruthy();
 
@@ -208,8 +148,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
       expect(res.status).toBe(200);
       const body = await res.text();
       expect(body).toContain('__VAPOR_CHAMBER_BUS__');
-      // It pulls the Vue priming module too, which is the ordering the design
-      // depends on - and that module resolved, so it is not the no-op stub.
+      // The shim pulls the Vue priming module too.
       expect(body).toContain('vapor-chamber-hmr-vue-prime');
     } finally {
       await live.close();
@@ -217,8 +156,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
   });
 
   it('reaches an app whose entry never names the package', async () => {
-    // The module-graph route cannot see this entry at all: nothing in it
-    // matches, so the transform declines and the HTML tag is the only route.
+    // Nothing in this entry matches, so the transform declines and the HTML tag is the only route.
     const entry = await server.transformRequest('/src/bare.ts');
     expect(entry?.code).not.toContain(SHIM);
 

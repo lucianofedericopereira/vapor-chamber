@@ -1,4 +1,9 @@
-/** Accepted: a passing failure of the status monitor is not the end of the job. Rationale at the end. */
+/**
+ * Accepted: a passing failure of the status monitor is not the end of the job.
+ * Why: a poll is a GET, safe to send again; a 503, a 429 or any Retry-After says the job is still running.
+ * Shows: transient or wait-declaring answers poll again up to the finished state; a verdict still ends it, maxWait still caps it.
+ * See: src/failure.ts, tests/accepted.test.ts.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { createAsyncCommandBus, type BusError, type CommandResult } from '../src/command-bus';
@@ -48,12 +53,3 @@ describe('Accepted - transient monitor answers', () => {
     expect(codeOf(await end(40))).toBe('transport:timeout:job');
   });
 });
-
-/*
- * A poll is a GET, safe to send again (the one retry rule, failure.ts
- * `retryClass`). A monitor answering a 503 or 429, or any answer with
- * `Retry-After`, says nothing about the job: it is still running. A transient
- * answer (by `retryClass`) or one declaring a wait waits and polls again,
- * within `maxWait`. Anything else ends the job: a verdict, an abort, a lost
- * reply (tests/accepted.test.ts). Ported from tests/poll-with-transient.test.ts.
- */

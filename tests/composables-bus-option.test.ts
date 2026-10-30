@@ -1,4 +1,9 @@
-// Every bus composable runs on the bus it is given, sync or async; rationale at the end.
+/**
+ * Every bus composable runs on the bus it is given, sync or async, never the shared one.
+ * Why: the shared bus is one module global per process, so a concurrent SSR server needs a bus per request, passed explicitly.
+ * Shows: the case list covers every use* and define*Command export (a new one without the option fails); each reaches its own bus on both kinds; history undoes on it.
+ * See: src/shared-bus.ts, log s35.221.
+ */
 import { describe, expect, afterEach } from 'vitest';
 import { effectScope } from 'vue';
 import * as root from '../src/index';
@@ -88,6 +93,7 @@ const kinds: Record<string, () => BaseBus> = {
 };
 
 describe('the bus option', () => {
+  // The guard: router composables are not listed, since they take the router, not a bus.
   it('covers every composable of the root and vapor-chamber/reactive', () => {
     const names = [...Object.keys(root), ...Object.keys(reactive)];
     const exported = names.filter((n) => /^use[A-Z]/.test(n) || /^define\w*Command$/.test(n));
@@ -142,21 +148,3 @@ describe('the bus option', () => {
     }
   }
 });
-
-/*
- * Why this file exists. src/shared-bus.ts tells concurrent SSR servers to
- * create a bus per request and pass it explicitly, because the shared bus is
- * one module global per process. Until 1.29.0 only useSharedCommandState,
- * useVaporAsyncCommand and useTransitionCommand took a bus. The other six
- * composables and defineVaporCommand always used the shared one, so that
- * advice could not be followed (log s35.221).
- *
- * The first test is the guard. It lists every `use*` and `define*Command`
- * export of the package root and of vapor-chamber/reactive, and requires a
- * case here for each, so a new composable without the option fails this file.
- * Router composables are not listed: they take the router, not a bus.
- *
- * Each case runs on both bus kinds. setCommandBus() accepts either, and its
- * docblock says the composables handle an async bus. Before this file nothing
- * checked that per composable.
- */

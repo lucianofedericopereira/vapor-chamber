@@ -1,18 +1,14 @@
 /**
- * Supplemental coverage for src/mcp.ts, plus a regression test for the
- * inherited-key hole in the tools/call gate.
- *
- *  - tools/call name gate: `schema[name] === undefined` walked the prototype
- *    chain, so `constructor` / `toString` / `__proto__` / `hasOwnProperty`
- *    passed as "known tools" and reached bus.dispatch - names tools/list never
- *    advertises. Now Object.hasOwn.
- *  - callTool's dispatch-throws arm.
- *  - a malformed envelope with NO id - a notification, which must never be
- *    answered even when invalid.
- *  - a non-object payload passing through untouched.
- *  - tool mapping without required fields and without a description.
- *  - serveMcpStdio: the no-Node guard, blank-line skip,
- *    parse errors, notification silence, and stop().
+ * The MCP handler's tools/call gate and envelope, tool mapping, and the stdio transport.
+ * Why: an agent must only reach tools that tools/list advertises (inherited `Object.prototype` names
+ * such as `constructor` are not tools), a failing handler must not kill the server, a malformed
+ * notification must never be answered, and the stdio transport must survive hostile input (over-long
+ * lines, bad `maxInFlight` / `maxLineLength`, a stop() mid-call) without hanging. Also the only file
+ * reaching serveMcpStdio's Node guard, backpressure and over-long-line resync, so the 100% floor needs it.
+ * Shows: inherited keys are refused with -32602 and never dispatched, a throwing dispatch becomes an
+ * error result, a non-object payload is refused, an object payload is forwarded by reference, envelope
+ * replies and silences, `required` and `description` omitted from tool mapping when absent, and
+ * serveMcpStdio's guard, framing, backpressure, clamping and teardown behaviour.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActionFilter } from '../src/action-filter';
@@ -35,18 +31,13 @@ function makeHandler(overrides: { dispatch?: any; schema?: BusSchema } = {}) {
   return { handle, mcp: mcpClient(handle), dispatch };
 }
 
-/** Detached in afterEach so a failing assertion cannot leak a stdin listener
- *  into the next test (it would answer that test's input through its spy). */
+/** Detached in afterEach so a failing assertion cannot leak a stdin listener into the next test. */
 const stops: Array<() => void> = [];
 
 afterEach(() => {
   for (const stop of stops.splice(0)) stop();
   vi.unstubAllGlobals();
 });
-
-// ---------------------------------------------------------------------------
-// tools/call name gate - inherited keys (regression)
-// ---------------------------------------------------------------------------
 
 describe('tools/call rejects inherited Object.prototype keys', () => {
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'])(
@@ -73,47 +64,30 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// callTool arms
-// ---------------------------------------------------------------------------
-
 describe('callTool', () => {
   it('turns a throwing dispatch into an error result, not a protocol error', async () => {
     const dispatch = vi.fn(() => { throw new Error('handler exploded'); });
     const { mcp } = makeHandler({ dispatch });
 
-    // call() throws on a protocol error, so a returned result is not one.
-    // tool failures are results
+    // call() throws on a protocol error, so a returned result is a tool failure.
     expect(await mcp.call('cartAdd', { target: { id: 1 } })).toBeToolError('handler exploded');
   });
 
   it('refuses a non-object payload instead of dispatching it unattributed', async () => {
-    // A MOCKED dispatch cannot show why: schema.ts checks payload shape only
-    // when the action declares payload fields, so against a REAL bus a bare
-    // value would dispatch with `meta.origin === undefined`, an agent command
-    // indistinguishable from a local one. The end-to-end assertion is in
-    // tests/mcp.test.ts.
+    // Mocked dispatch: a bare payload on a real bus would carry no `meta.origin`; the end-to-end attribution check is in tests/mcp.test.ts.
     const dispatch = vi.fn(async (_action: string, _target: unknown, _payload?: unknown) => ({ ok: true as const, value: 1 }));
     const { mcp } = makeHandler({ dispatch });
 
     for (const bad of ['a bare string', [1, 2], 42, true]) {
       expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: bad })).toBeToolError(/payload must be an object/);
     }
-    // Refused at the boundary - the bus is never reached at all.
+    // Refused at the boundary: the bus is never reached.
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('forwards the payload to the bus untouched', async () => {
-    // Was: asserted the payload arrived spread with `__origin: 'agent'`. The
-    // marker now travels out-of-band via `_withOrigin`, so the bus receives
-    // exactly what the client sent - by reference, with no allocation and no
-    // key injected into user data.
-    //
-    // NOTE: `dispatch` is MOCKED here, so `meta.origin` does not exist to
-    // assert - a mock cannot show attribution, which is precisely how the
-    // original attribution hole hid. The end-to-end guarantee is pinned
-    // against a REAL bus in tests/mcp.test.ts ("never lets an MCP dispatch
-    // reach a handler unattributed").
+    // The origin marker travels out-of-band via `_withOrigin`, so the bus gets the client's payload by reference with no key injected.
+    // Mocked dispatch: attribution is checked against a real bus in tests/mcp.test.ts.
     const dispatch = vi.fn(async (_action: string, _target: unknown, _payload?: unknown) => ({ ok: true as const, value: 1 }));
     const { mcp } = makeHandler({ dispatch });
 
@@ -133,14 +107,10 @@ describe('callTool', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// envelope handling
-// ---------------------------------------------------------------------------
-
 describe('JSON-RPC envelope', () => {
   it('never answers a malformed NOTIFICATION', async () => {
     const { handle } = makeHandler();
-    // Bad jsonrpc version, no id -> a notification: MUST NOT be replied to.
+    // No id makes it a notification, which is never replied to.
     expect(await handle({ jsonrpc: '1.0', method: 'tools/list' })).toBeNull();
     expect(await handle({ jsonrpc: '2.0' })).toBeNull(); // no method, no id
   });
@@ -159,10 +129,6 @@ describe('JSON-RPC envelope', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// tool mapping arms
-// ---------------------------------------------------------------------------
-
 describe('busToMcpTools', () => {
   it("omits `required` when every field is 'any'", () => {
     const [tool] = busToMcpTools({ ping: { target: { anything: 'any' } } } as unknown as BusSchema);
@@ -177,10 +143,6 @@ describe('busToMcpTools', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// serveMcpStdio
-// ---------------------------------------------------------------------------
-
 describe('serveMcpStdio', () => {
   it('throws outside Node', () => {
     vi.stubGlobal('process', undefined);
@@ -194,17 +156,12 @@ describe('serveMcpStdio', () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
     stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA }, { actionFilter: all }));
 
-    // Blank lines between real messages must be skipped, not parse-errored.
     process.stdin.emit('data', '\n\n' + JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) + '\n');
     process.stdin.emit('data', 'not json at all\n');
-    // A notification produces no output.
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     await new Promise(r => setTimeout(r, 0));
 
-    // Matched by id, not position: replies are written in COMPLETION order.
-    // The parse error is produced synchronously while the ping goes through the
-    // async handler, so the error lands first - legal JSON-RPC (responses may
-    // be out of order; `id` correlates), and worth pinning as actual behaviour.
+    // Replies are written in completion order (the parse error lands before the async ping), so match by id.
     const replies = written.map(w => JSON.parse(w));
     expect(replies).toHaveLength(2);
     expect(replies.find(r => r.id === 1)).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
@@ -236,10 +193,6 @@ describe('serveMcpStdio', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// serveMcpStdio - input-driven limits
-// ---------------------------------------------------------------------------
-
 describe('serveMcpStdio limits', () => {
   function capture(): string[] {
     const written: string[] = [];
@@ -254,13 +207,12 @@ describe('serveMcpStdio limits', () => {
       { actionFilter: all, maxLineLength: 64 },
     ));
 
-    // A client streaming a huge "line" with no newline in sight.
     process.stdin.emit('data', 'x'.repeat(200));
     expect(written).toHaveLength(1);
     expect(JSON.parse(written[0]!).error.code).toBe(-32700);
     expect(JSON.parse(written[0]!).error.message).toMatch(/exceeds 64 characters/);
 
-    // The tail of that line is discarded, and the NEXT line still works.
+    // The tail of the abandoned line is discarded; the next line is served.
     process.stdin.emit('data', 'more junk from the same line\n');
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'ping' }) + '\n');
     await new Promise(r => setTimeout(r, 0));
@@ -277,7 +229,7 @@ describe('serveMcpStdio limits', () => {
       { actionFilter: all, maxLineLength: 64 },
     ));
 
-    // Total far exceeds the cap, but every individual line is short.
+    // The total exceeds the cap; each line is under it.
     const many = Array.from({ length: 20 }, (_, i) =>
       JSON.stringify({ jsonrpc: '2.0', id: i, method: 'ping' })).join('\n') + '\n';
     process.stdin.emit('data', many);
@@ -293,7 +245,7 @@ describe('serveMcpStdio limits', () => {
     const pause = vi.spyOn(process.stdin, 'pause');
     const resume = vi.spyOn(process.stdin, 'resume');
 
-    // Handlers that park until released - enough to exceed maxInFlight.
+    // Handlers park until released, so more than maxInFlight calls are pending.
     const releases: Array<() => void> = [];
     const dispatch = vi.fn(() => new Promise<any>((resolve) => {
       releases.push(() => resolve({ ok: true, value: 1 }));
@@ -306,9 +258,8 @@ describe('serveMcpStdio limits', () => {
     for (let i = 0; i < 5; i++) process.stdin.emit('data', line(i));
     await new Promise(r => setTimeout(r, 0));
 
-    // Saturated: the source was paused rather than opening 5 dispatches...
     expect(pause).toHaveBeenCalled();
-    expect(dispatch.mock.calls.length).toBeGreaterThan(1); // ...and NOT serialised to one
+    expect(dispatch.mock.calls.length).toBeGreaterThan(1); // concurrent, not serialised to one
     resume.mockClear();
 
     for (const release of releases.splice(0)) release();
@@ -316,9 +267,6 @@ describe('serveMcpStdio limits', () => {
     expect(resume).toHaveBeenCalled();
   });
 
-  // Both options are reachable from the public API and both had a value that
-  // stopped the server dead - the same class as `cache({ maxSize: -1 })`, which
-  // hung on its first eviction.
   it('maxInFlight: 0 does not strand stdin paused forever', async () => {
     capture();
     const pause = vi.spyOn(process.stdin, 'pause');
@@ -333,18 +281,11 @@ describe('serveMcpStdio limits', () => {
     process.stdin.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`);
     await new Promise((r) => setTimeout(r, 0));
 
-    // Unclamped: inFlight rose to 1, `1 >= 0` paused, and on completion
-    // `0 < 0` was false so it never resumed - one message served, then a hang
-    // with nothing in flight. Measured: pause 1, resume 0.
+    // A bound of 0 is clamped; unclamped, the first message would pause stdin and the completion would never resume it.
     expect(resume).toHaveBeenCalled();
   });
 
-  // A tiny cap legitimately abandons partial lines - that is the documented
-  // behaviour, not a bug. What the clamp buys is that a NEGATIVE cap cannot
-  // exist: `buffer.length > -5` is true even for an empty buffer, and the
-  // error it reported quoted a negative length back at the client.
-  // NaN loses every comparison, so `inFlight >= maxInFlight` would never pause
-  // and the backpressure this option provides would silently not exist.
+  // NaN loses every comparison, so an unchecked `inFlight >= maxInFlight` would never pause and backpressure would not exist.
   it('a NaN maxInFlight still applies backpressure at the default bound', async () => {
     capture();
     const pause = vi.spyOn(process.stdin, 'pause');
@@ -365,7 +306,7 @@ describe('serveMcpStdio limits', () => {
     for (let i = 0; i < 40; i++) process.stdin.emit('data', line(i));
     await new Promise((r) => setTimeout(r, 0));
 
-    // Default is 32, so 40 concurrent lines must have tripped the pause.
+    // The default bound is 32, so 40 concurrent lines trip the pause.
     expect(pause).toHaveBeenCalled();
     for (const release of releases.splice(0)) release();
   });
@@ -377,14 +318,14 @@ describe('serveMcpStdio limits', () => {
       { actionFilter: all, maxLineLength: -5 },
     ));
 
-    // A whole line in one chunk is never partial, so it is served normally.
+    // A negative cap would reject even an empty buffer; clamped, a whole line in one chunk is served.
     process.stdin.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'ping' })}\n`);
     await new Promise((r) => setTimeout(r, 0));
 
     const replies = written.map((w) => JSON.parse(w));
     expect(replies).toEqual([{ jsonrpc: '2.0', id: 7, result: {} }]);
 
-    // And a partial line reports a sane cap rather than a negative one.
+    // A partial line reports the clamped cap, not a negative one.
     process.stdin.emit('data', 'partial with no newline');
     await new Promise((r) => setTimeout(r, 0));
     const last = JSON.parse(written[written.length - 1]!);
@@ -410,17 +351,14 @@ describe('serveMcpStdio limits', () => {
     release();
     await new Promise(r => setTimeout(r, 0));
 
-    // The late result is discarded, and the teardown's backpressure bookkeeping
-    // must not touch a stdin this server no longer owns.
+    // The late result is discarded and the bookkeeping does not touch a stdin the server no longer owns.
     expect(written).toHaveLength(0);
   });
 
   it('survives a handler rejection and keeps serving (-32603)', async () => {
     const written = capture();
     let calls = 0;
-    // tools/list is the only method here that reads the schema (ping does
-    // not), so the SECOND read is the second tools/list - make that one throw
-    // and the handler's promise rejects.
+    // Only tools/list reads the schema here, so the second read is the second tools/list; make it throw.
     const getSchema = () => {
       if (++calls === 2) throw new Error('schema source died');
       return SCHEMA;
@@ -434,7 +372,6 @@ describe('serveMcpStdio limits', () => {
 
     const replies = written.map(w => JSON.parse(w));
     expect(replies.some(r => r.error?.code === -32603)).toBe(true);
-    // The transport did not die: the later ping was still answered.
     expect(replies.find(r => r.id === 3)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
   });
 });

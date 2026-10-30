@@ -1,4 +1,9 @@
-/** In development an undo store's double run applies a reducer that returns its own state once, as production does. The long note is at the end. */
+/**
+ * In development an undo store's double run applies a reducer that returns its own state once, as production does.
+ * Why: a reducer that changes its state in place and returns it would be run twice on one object in development, so development would hold [1,1,2,2] where production holds [1,2].
+ * Shows: an in-place reducer applies once in development and in production, a reducer that mints a value still warns, and a new-object reducer applies once.
+ * See: log s35.160, s35.211, docs/store.md.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -48,14 +53,3 @@ describe('the development double run of an undo store', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Found by the Pinia 4.1.0 harvest (.probes/pinia-4.1-harvest.md), 2026-10-20. In development
- * an `undo: true` store runs each reducer twice and compares the two states, to catch a
- * reducer that mints an id or a time (log s35.160). A reducer that changes its state in place
- * and returns it was run twice on that one object, so development held [1,1,2,2] where
- * production held [1,2]. A reducer that returns the state it was given has minted nothing, so
- * the second run is skipped: one identity comparison, in development only (log 35.211's rule,
- * no whole-state strings, holds). A write in place stays what docs/store.md says: no write.
- * Owner: only a clear bug lands, so no general in-place detector.
- */

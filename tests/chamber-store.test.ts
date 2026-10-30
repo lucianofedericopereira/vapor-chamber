@@ -1,57 +1,8 @@
 /**
- * ACCEPTANCE CRITERIA for `vapor-chamber/store`, written against the
- * composition plan that has since been deleted into the docs it fed
- * (docs/store.md, docs/whitepaper.md 8.2, ROADMAP posture). git has it.
- *
- * Written BEFORE any implementation, the order that paid for itself on
- * `revalidateRoutes`: two of that section's three claims were falsified by
- * writing criteria against today's exports, before either became code. This
- * file does the same for the larger section, and has already found one.
- *
- * ============================================================================
- * FINDING - the plan's Vue-access pattern is not reachable, and should not be.
- * ============================================================================
- *
- * Section 3 lists among the patterns adopted from Pinia 4: "injection-first +
- * active-instance-fallback resolution on `hasInjectionContext()`". That reads
- * as though the store would resolve Vue the way `chamber.ts` does. It cannot,
- * and it should not want to:
- *
- *   - `_vueHasInjectionContext` is module-private in chamber.ts. Six `@internal`
- *     accessors are exported (`getVaporAppFn`, `getDefineVaporComponentFn`,
- *     ...) and there is none for it. `effectScope` is not exposed at all.
- *   - More decisively, chamber.ts reaches Vue through a runtime PROBE, and that
- *     probe is the source of this repo's two shipped prod-only bugs: it
- *     resolves under a dev server and cannot resolve in a production bundle.
- *     `vapor-chamber/vue` and `vapor-chamber/vapor` exist to kill exactly that
- *     failure class.
- *
- * So the store imports what it needs (`getCurrentScope`, `onScopeDispose`,
- * `shallowRef`) STATICALLY from `vue`, the way `src/router/**` already does. An
- * upstream rename becomes a consumer build error rather than a runtime null.
- * That also settles placement: a module with static `vue` imports cannot live
- * in the root barrel, which is Vue-less by construction - so
- * `vapor-chamber/store` is a subpath because it genuinely isolates a cost,
- * which is the only thing that convention exists for.
- *
- * ============================================================================
- * WHAT THIS MUST NOT BECOME
- * ============================================================================
- *
- * Whitepaper section 3.6 says "The bus coordinates state transitions. It does not
- * store state." That stands and is load-bearing here: the store owns state, and
- * the bus stays the ONLY way state changes. A store that mutates its own signal
- * directly - without a dispatch - is the design failure this file exists to
- * prevent, because it would put a second mutation channel next to the bus and
- * quietly cost every plugin below.
- *
- * The claim the whitepaper's former section 6 (now appendix A.3) made, and
- * this module DOES contradict, is its other one, about package scope:
- * "Adding a state layer to vapor-chamber would create a fourth source of truth
- * and a competition problem." Section 3 is the counter-argument (a bus-backed
- * store is structurally different from Pinia, which grew a bus of about 60 lines
- * inside itself, 4.0.3, for want of one underneath), and it gets recorded in the landing
- * commit rather than assumed here.
+ * vapor-chamber/store: what it is built from, how it behaves, and its URL-backed fields.
+ * Why: the store owns state but the bus stays the only way it changes, so every plugin applies; it imports vue statically, never through chamber.ts's probe, which a production bundle cannot resolve.
+ * Shows: a subpath whose graph reaches only vue; no ambient-bus fallback; state replaced whole, no setter; actions are commands; a registry per bus; $reset, $dispose; url fields via the router.
+ * See: docs/store.md, docs/whitepaper.md 3.6 and 8.2, src/store.ts, log s35.130, log s35.184, plan 1.32 4.2.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -66,24 +17,17 @@ import { requireDist } from './require-dist';
 import { saveTo } from '../src/store-persist';
 import { history } from '../src/plugins-core';
 
-/**
- * The surface the store will compose. Real assertions today: each one is a
- * premise of the design above, and a change to any of them changes the design.
- */
+/** The surface the store is built from: each case is a premise of the design, and a change to any changes it. */
 describe('composition surface - what the store is built from', () => {
   it('ships as its own subpath, because it imports vue statically', async () => {
-    // Stage 1 asserted the opposite - that `./store` did not exist yet - which
-    // was the honest thing to pin before it did. It exists now, and the reason
-    // it is a subpath rather than a barrel export is the static `vue` import:
-    // the root barrel is Vue-less by construction.
+    // A subpath, not a barrel export: the root barrel is Vue-less, and the store imports vue.
     const pkg = await import('../package.json');
     expect(Object.keys(pkg.default.exports)).toContain('./store');
   });
 
   it('does NOT expose hasInjectionContext or effectScope - the finding above', async () => {
     const chamber = await import('../src/chamber');
-    // If either of these ever appears, revisit the static-import decision: the
-    // store could then resolve Vue the way the plan originally described.
+    // If either appears, revisit the static-import decision.
     expect(Object.keys(chamber)).not.toContain('getHasInjectionContextFn');
     expect(Object.keys(chamber)).not.toContain('getEffectScopeFn');
   });
@@ -95,12 +39,7 @@ describe('composition surface - what the store is built from', () => {
   });
 
   it('has an ambient bus, which the store deliberately does not use', () => {
-    // This surface exists and works. The store still refuses it. `useStore`
-    // takes the bus as a required argument, and the reason is recorded in
-    // src/store.ts: reaching for this accessor imports chamber.ts, whose
-    // top-level probe then runs on every `vapor-chamber/store` import - and a
-    // module global is the one thing that cannot isolate an SSR request, which
-    // is the entire purpose of keying the store registry per bus.
+    // The store refuses it: it imports chamber.ts and its probe, and a module global cannot isolate an SSR request.
     const a = createCommandBus();
     setCommandBus(a);
     expect(getCommandBus()).toBe(a);
@@ -120,27 +59,13 @@ describe('composition surface - what the store is built from', () => {
   });
 
   it('imports vue and the probe-free bus module, nothing else - the boundary the probe argument rests on', () => {
-    // The first draft of src/store.ts failed this. It read well and pulled
-    // chamber.ts through a default argument, so importing the store executed
-    // the very probe its own docblock says it exists to avoid. Nothing in the
-    // behaviour suite could see that; only the built graph shows it.
-    // `process.cwd()`, NOT `import.meta.url`. Under happy-dom, where this file ran,
-    // `import.meta.url` is an http://localhost URL, so `existsSync` answered false for every run and
-    // the assertion below could never fail. It was written, it passed, and it
-    // was inert - the exact shape this suite has a rule against.
+    // Only the built graph shows what importing the store pulls in; no behaviour test can.
+    // `process.cwd()`, not `import.meta.url`: under happy-dom that is an http URL, and existsSync would always be false.
     const built = resolve(process.cwd(), 'dist/store.js');
     requireDist(existsSync(built));
     const src = readFileSync(built, 'utf8');
     const imports = [...src.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
-    // The whole graph the entry reaches, chunk by chunk: the bundler regroups
-    // chunks as modules move (saveTo and shareTabs left their own chunk twice
-    // in 1.32's step 4), so the boundary is checked on the graph, not on chunk
-    // names. Its one external is `vue`; no chunk in it is chamber.js, the
-    // module with the probe, or the bus. What it holds: the store
-    // implementation both entries share (log s35.130), the failure module that
-    // mints the coded refusals, the library's names and the set of commands a
-    // transport carried out (log s35.184), the fast lane the field events ride
-    // (plan 1.32 4.2), and the store's options' values (saveTo, shareTabs).
+    // The whole graph, not chunk names, which the bundler regroups: one external, vue, and no chamber.js or bus chunk.
     expect(imports).toContain('vue');
     const files = new Set<string>();
     const externals = new Set<string>();
@@ -166,13 +91,7 @@ describe('composition surface - what the store is built from', () => {
     expect(files.has('chamber.js')).toBe(true);
   });
 
-  /**
-   * The central claim of section 3's table: a store gets undo, history and
-   * every listener for free because its actions are COMMANDS, so the existing
-   * plugins already apply. That is testable without a store - if it were
-   * false, the whole premise would be. Saving is the store's own option.
-   * (plan 1.32 4.2, tests/store-persist.test.ts).
-   */
+  /** The store's premise, testable without a store: plugins apply to any command, so store actions get undo and history free. */
   it('applies the existing plugins to plain commands, which is why a store needs no store-specific ones', () => {
     const bus = createCommandBus();
     let state = { items: [] as number[] };
@@ -217,9 +136,7 @@ describe('defineChamberStore - behaviour', () => {
 
   it('mutates ONLY through a dispatch - state has no setter', ({ bus }) => {
     const cart = useCart(bus);
-    // The bus is the only mutation channel. A direct write must not be a
-    // second one, so `state` is a getter and assignment throws under ESM
-    // strict mode rather than silently opening a bypass.
+    // `state` is a getter, so a write throws in strict mode instead of opening a second mutation channel.
     expect(() => {
       (cart.state as { value: unknown }).value = { items: [99] };
     }).toThrow();
@@ -312,8 +229,7 @@ describe('defineChamberStore - behaviour', () => {
     cart.add(1);
     cart.add(2);
     await Promise.resolve();
-    // Section 3's premise: undo observed a STORE mutation without knowing a
-    // store exists, because the mutation was a command.
+    // Undo observed a store mutation without knowing a store exists, because it was a command.
     expect(saved).toEqual({ items: [1, 2] });
     expect(hist.getState().canUndo).toBe(true);
     cart.$dispose();

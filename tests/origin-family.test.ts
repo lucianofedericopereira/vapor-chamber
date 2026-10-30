@@ -1,13 +1,7 @@
 /**
- * The flag-across-await family (TODO items 18, 24, 28, 33) and the TestBus meta
- * gap - five consumers of one fix: a marker that travels ON the dispatch
- * (`__origin` read by stampMeta) instead of a module-level flag set before an
- * await and cleared in `finally`.
- *
- * Every one of these passes on a sync bus, which is why the whole family
- * survived a green suite: on a sync bus the dispatch completes inside the
- * `try`, so the flag holds. On an async bus the plugin chain runs a microtask
- * later, after `finally` already fired.
+ * The origin marker that travels on the dispatch (`__origin` read by stampMeta), its consumers (MCP, redo, createReaction), and TestBus meta.
+ * Why: a module-level flag set before an await and cleared in `finally` is gone when an async bus runs its plugin chain, so a local dispatch would be attributed to the agent, redo() would record twice and a reaction loop would run unbounded.
+ * Shows: _withOrigin marks only the first dispatch and does not leak or lose the mark across an await; MCP, redo() and reactions behave on an async bus; TestBus stamps meta like the real bus.
  */
 import { describe, expect, vi } from 'vitest';
 import {
@@ -23,10 +17,6 @@ import { idempotent } from '../src/plugins-extra';
 import { useCommandHistory } from '../src/chamber';
 import { createMcpHandler } from '../src/mcp';
 import { it } from '../src/vitest';
-
-// ---------------------------------------------------------------------------
-// 18 - the agent origin across an await
-// ---------------------------------------------------------------------------
 
 describe('item 18 - MCP origin attribution on an async bus', () => {
   it('stamps the MCP dispatch and only the MCP dispatch', async ({ asyncBus: bus }) => {
@@ -46,7 +36,6 @@ describe('item 18 - MCP origin attribution on an async bus', () => {
       Object.assign(bus, { getSchema: () => ({ agentWrite: {}, localWrite: {} }) }) as never,
     );
 
-    // MCP call goes in flight and parks inside its handler...
     const agentCall = handler({
       jsonrpc: '2.0',
       id: 1,
@@ -55,46 +44,17 @@ describe('item 18 - MCP origin attribution on an async bus', () => {
     });
     await vi.waitFor(() => expect(releaseAgentCall).not.toBeNull());
 
-    // ...and a LOCAL dispatch enters the chain during exactly that window.
+    // The local dispatch runs while the agent call is parked in its handler.
     await bus.dispatch('localWrite', {});
     releaseAgentCall?.();
     await agentCall;
 
     expect(origins).toEqual([
       { action: 'agentWrite', origin: 'agent' },
-      { action: 'localWrite', origin: undefined }, // was 'agent' - misattributed
+      { action: 'localWrite', origin: undefined },
     ]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 24 - createChannel() echo suppression across an await
-// ---------------------------------------------------------------------------
-
-class FakeChannel {
-  static channels = new Map<string, FakeChannel[]>();
-  onmessage: ((event: { data: unknown }) => void) | null = null;
-  closed = false;
-  constructor(public name: string) {
-    const peers = FakeChannel.channels.get(name) ?? [];
-    peers.push(this);
-    FakeChannel.channels.set(name, peers);
-  }
-  postMessage(data: unknown): void {
-    // Real BroadcastChannel never echoes to the sender - that is precisely why
-    // one tab looked fine and two tabs ping-ponged.
-    for (const peer of FakeChannel.channels.get(this.name) ?? []) {
-      if (peer !== this && !peer.closed) peer.onmessage?.({ data: structuredClone(data) });
-    }
-  }
-  close(): void {
-    this.closed = true;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 28 - redo() double-record across an await
-// ---------------------------------------------------------------------------
 
 describe('item 28 - redo() on an async bus records once', () => {
   afterEach(() => resetCommandBus());
@@ -109,19 +69,17 @@ describe('item 28 - redo() on an async bus records once', () => {
 
     history.undo();
     expect(history.past.value).toHaveLength(0);
-    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus
 
     history.redo();
     await new Promise((r) => setTimeout(r, 10)); // let the async dispatch settle
 
-    expect(history.past.value).toHaveLength(1); // was 2
+    expect(history.past.value).toHaveLength(1);
     expect(history.canRedo.value).toBe(false);
   });
 
   it('a PRIMITIVE payload (which cannot carry __origin) still records once - identity fallback', async ({ asyncBus: bus }) => {
-    // The marker rides the payload object; a primitive payload has nowhere
-    // to put it. redo() arms a one-shot identity match instead. Without it,
-    // the hook records the redo a second time on BOTH bus types.
+    // A primitive payload cannot carry the marker, so redo() arms a one-shot identity match instead.
     setCommandBus(bus as never);
     bus.register('setCount', async () => 'ok', { undo: () => {} });
 
@@ -130,13 +88,13 @@ describe('item 28 - redo() on an async bus records once', () => {
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
 
     history.undo();
-    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus
     history.redo();
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 20)); // grace: a double-record would land here
 
-    expect(history.past.value).toHaveLength(1); // double-recorded before the fallback
-    expect(history.past.value[0]?.payload).toBe(5); // handler saw the primitive untouched
+    expect(history.past.value).toHaveLength(1);
+    expect(history.past.value[0]?.payload).toBe(5);
     expect(history.canRedo.value).toBe(false);
   });
 
@@ -149,22 +107,17 @@ describe('item 28 - redo() on an async bus records once', () => {
     await bus.dispatch('setCount', target, 5);
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     history.undo();
-    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus
     history.redo();
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 20));
     expect(history.past.value).toHaveLength(1);
 
-    // Same action/target/payload dispatched AGAIN, outside any redo - the
-    // consumed fallback must not swallow it.
+    // Same action/target/payload outside any redo: the consumed fallback must not swallow it.
     await bus.dispatch('setCount', target, 5);
     await vi.waitFor(() => expect(history.past.value).toHaveLength(2));
   });
 });
-
-// ---------------------------------------------------------------------------
-// 33 - self-matching reactions
-// ---------------------------------------------------------------------------
 
 describe('item 33 - createReaction cycles', () => {
   it('refuses a directly self-matching reaction at install', () => {
@@ -200,12 +153,8 @@ describe('item 33 - createReaction cycles', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('maxHops'));
   });
 
-  // The hop counter rides `__reactionHops` in the payload - the same convention
-  // `__origin` was MOVED OFF for this exact reason: a primitive or an array
-  // cannot carry a key. When `mapPayload` returns one, the marker is dropped,
-  // every hop reads as hop 1, and the cap that bounds an unbounded async loop
-  // never fires. Sync bus here so the run terminates either way (depth 16
-  // backstops it) and the assertion is about which bound did the stopping.
+  // The hop counter rides `__reactionHops` in the payload, which a primitive or array cannot carry.
+  // Sync bus so the run ends either way (depth 16 backstops it); the assertion is which bound stopped it.
   it.each([
     ['a number', () => 42],
     ['an array', () => [1, 2]],
@@ -226,7 +175,6 @@ describe('item 33 - createReaction cycles', () => {
     }).install(bus);
     bus.dispatch('cartRecalculate', {});
 
-    // Without the marker the chain runs until MAX_DISPATCH_DEPTH (16) instead.
     expect(runs).toBeLessThanOrEqual(4); // original + 3 hops
     expect(error).toHaveBeenCalledWith(expect.stringContaining('maxHops'));
   });
@@ -258,10 +206,6 @@ describe('item 33 - createReaction cycles', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 19 - TestBus meta
-// ---------------------------------------------------------------------------
-
 describe('item 19 - TestBus commands carry meta', () => {
   it('stamps the same meta the real bus does', () => {
     const bus = createTestBus();
@@ -281,8 +225,7 @@ describe('item 19 - TestBus commands carry meta', () => {
 
     bus.dispatch('save', { id: 1 });
 
-    // `idempotent` guards on `cmd.meta` and silently took its no-op branch -
-    // a test wiring it to the TestBus passed while verifying nothing.
+    // `idempotent` guards on `cmd.meta`; without meta it would take its no-op branch.
     expect(seen[0]).toBeTypeOf('string');
   });
 
@@ -294,10 +237,6 @@ describe('item 19 - TestBus commands carry meta', () => {
     expect(seen).toMatchObject({ id: expect.any(String) });
   });
 });
-
-// ---------------------------------------------------------------------------
-// _withOrigin - the one-shot slot the three marker sites share
-// ---------------------------------------------------------------------------
 
 describe('_withOrigin - slot discipline', () => {
   it('is one-shot: only the FIRST dispatch inside the callback is marked', ({ bus }) => {
@@ -314,9 +253,7 @@ describe('_withOrigin - slot discipline', () => {
   });
 
   it('does not leak when the callback throws BEFORE any dispatch stamps meta', () => {
-    // Leak protection, not a settlement guard. `validateNaming` throws inside
-    // dispatch before stampMeta runs, so without the `finally` the slot would
-    // survive and mis-attribute whatever dispatched next.
+    // `validateNaming` throws before stampMeta runs; without the `finally` the slot would survive to the next dispatch.
     const strict = createCommandBus({
       naming: { pattern: /^[a-z][a-zA-Z0-9]*$/, onViolation: 'throw' },
     });
@@ -325,7 +262,6 @@ describe('_withOrigin - slot discipline', () => {
 
     expect(() => _withOrigin('agent', () => strict.dispatch('Bad Name!', {}))).toThrow();
 
-    // The next, unrelated dispatch must be unattributed.
     strict.dispatch('goodName', {});
     expect(origins).toEqual([undefined]);
   });
@@ -334,7 +270,6 @@ describe('_withOrigin - slot discipline', () => {
     const origins: unknown[] = [];
     bus.register('a', async (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 
-    // The mcp.ts shape - await the result of the wrapped dispatch.
     await _withOrigin('agent', () => bus.dispatch('a', {}));
     await bus.dispatch('a', {});
 
@@ -346,7 +281,7 @@ describe('_withOrigin - slot discipline', () => {
     bus.register('a', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 
     bus.dispatch('a', {}, { __origin: 'custom' });
-    // ...and the slot wins when both are present.
+    // The slot wins when both are present.
     _withOrigin('sync', () => bus.dispatch('a', {}, { __origin: 'custom' }));
 
     expect(origins).toEqual(['custom', 'sync']);

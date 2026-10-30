@@ -1,4 +1,9 @@
-/** A request JSON cannot encode fails as transport:invalid:json, alone, with nothing sent and no re-send. Rationale at the end. */
+/**
+ * A request that JSON cannot encode (a BigInt, a cycle) fails as transport:invalid:json, alone, with nothing sent and no re-send.
+ * Why: such a request never leaves, so reporting it as a lost reply or a plugin fault would re-send an idempotent action for nothing, fail an encodable batch neighbour, or point the developer at the wrong cause.
+ * Shows: the http client, safe.post, postCommand, httpTransport (with and without an httpClient, batched or not) and wsTransport all report transport:invalid:json with the TypeError as cause, no extra POST, no attempts context, and no console error; the encodable control request still succeeds.
+ * See: audit D11.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, postCommand } from '../src/http';
@@ -105,18 +110,3 @@ describe('the transports', () => {
     ws.disconnect();
   });
 });
-
-/*
- * Audit D11 (owner 2026-10-12). A request holding a value JSON cannot encode
- * (a BigInt, a cycle) never leaves, and each path said something else:
- * the http and batching bridges answered `transport:lost:reply`, "no
- * response", so the bus re-sent an idempotent action twice for nothing and
- * a batch failed its encodable neighbour too; the ws bridge answered
- * `transport:failed:plugin` and told the developer to fix the plugin; the
- * client threw a raw TypeError, and `safe` returned it where its type says
- * BusError. Now one code, at the one place each path encodes:
- * `transport:invalid:json` (condition `invalid`: final, never re-sent; the
- * pair of `remote:unexpected:json`), the TypeError its cause. The batching
- * bridge encodes each command when it is dispatched, so a bad one fails
- * before it is queued, and the batch body is joined from the encoded parts.
- */

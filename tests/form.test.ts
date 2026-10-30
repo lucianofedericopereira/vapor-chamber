@@ -1,12 +1,13 @@
+/**
+ * createFormBus: values, dirty and touched state, validation, submit, headless mode, bus injection, submit races, formValidate and history.
+ * Why: a form is the user's input path; if its state or submit guard drifted, a user could submit unvalidated values, submit twice, or see no errors.
+ * Shows: set/touch/reset update state; rules fill errors and isValid; submit gates onSubmit and touches all fields; the headless option works with plain wrappers; an injected bus sees formSet/formReset; submit validates and sends the same values and refuses a second overlapping call; formValidate reports validity; a form makes eight signals; history records formSet but its undo restores no field.
+ */
 import { describe, it, expect, vi } from 'vitest';
 import { createFormBus } from '../src/form';
 import type { CreateSignal } from '../src/signal';
 import { createCommandBus } from '../src/command-bus';
 import { history, logger } from '../src/plugins';
-
-// ---------------------------------------------------------------------------
-// createFormBus
-// ---------------------------------------------------------------------------
 
 describe('createFormBus', () => {
   it('initialises with the provided field values', () => {
@@ -46,10 +47,6 @@ describe('createFormBus', () => {
     expect(form.errors.value).toEqual({});
   });
 });
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
 
 describe('createFormBus - validation', () => {
   const rules = {
@@ -121,10 +118,6 @@ describe('createFormBus - validation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Plugin integration
-// ---------------------------------------------------------------------------
-
 describe('createFormBus - plugin integration', () => {
   it('plugins receive formSet commands', () => {
     const intercepted: string[] = [];
@@ -147,8 +140,6 @@ describe('createFormBus - plugin integration', () => {
     expect(form.bus).toBeDefined();
     expect(typeof form.bus.dispatch).toBe('function');
   });
-
-  // -- reactive: false (headless/SSR mode) ----------------------------------
 
   describe('reactive: false (headless mode)', () => {
     it('works with plain get/set wrappers instead of Vue signals', () => {
@@ -200,10 +191,6 @@ describe('createFormBus - plugin integration', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createFormBus - bus injection
-// ---------------------------------------------------------------------------
-
 describe('createFormBus - bus injection', () => {
   it('uses injected bus instead of creating an isolated one', () => {
     const sharedBus = createCommandBus();
@@ -236,20 +223,14 @@ describe('createFormBus - bus injection', () => {
     const form = createFormBus({ fields: { y: '' } });
     form.set('y', 'test');
 
-    // sharedBus should NOT see form commands - isolated by default
     expect(seen).toHaveLength(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// submit() races - `values` is live state, so submit() must not read it twice
-// across an await.
-// ---------------------------------------------------------------------------
-
+// `values` is live state: submit() must not read it twice across an await.
 describe('createFormBus - submit() races', () => {
   it('validates and submits the SAME values when a set() lands mid-validation', async () => {
-    // set() also runs the rules (live per-field feedback), so every invocation
-    // parks - collect all the resolvers and release them together.
+    // set() also runs the rules, so every invocation parks; release them all together.
     const releases: Array<() => void> = [];
     const validated: string[] = [];
     const submitted: string[] = [];
@@ -257,7 +238,6 @@ describe('createFormBus - submit() races', () => {
     const form = createFormBus({
       fields: { email: 'valid@example.com' },
       rules: {
-        // The module's own pitch for concurrent rules: a slow server-side check.
         email: async (value: string) => {
           validated.push(value);
           await new Promise<void>((resolve) => {
@@ -279,8 +259,6 @@ describe('createFormBus - submit() races', () => {
     await pending;
 
     expect(validated[0]).toBe('valid@example.com');
-    // Was 'changed-after-validation@example.com': the value submitted had
-    // never been validated, and the value validated was never submitted.
     expect(submitted).toEqual(['valid@example.com']);
   });
 
@@ -300,9 +278,9 @@ describe('createFormBus - submit() races', () => {
 
     const first = form.submit();
     await vi.waitFor(() => expect(releaseSubmit).not.toBeNull());
-    const second = await form.submit(); // the second click
+    const second = await form.submit();
 
-    expect(second).toBe(false); // refused, not queued behind the first
+    expect(second).toBe(false); // refused, not queued
     expect(calls).toBe(1);
     expect(form.isSubmitting.value).toBe(true); // still owned by the first call
 
@@ -311,11 +289,7 @@ describe('createFormBus - submit() races', () => {
     expect(form.isSubmitting.value).toBe(false);
   });
 
-  // The test above lets the first submit REACH onSubmit before clicking again,
-  // so `isSubmitting` is already true by then and the guard is guaranteed to
-  // see it. A real double-click lands both clicks in the same turn, while the
-  // first call is still inside `await runRulesAsync` - and `isSubmitting` is
-  // not set until validation resolves. Two clicks, two onSubmit round-trips.
+  // Both calls start before validation resolves, when isSubmitting is not yet set.
   it('two clicks in the same turn run onSubmit once', async () => {
     let calls = 0;
     const form = createFormBus({
@@ -331,8 +305,6 @@ describe('createFormBus - submit() races', () => {
     expect(form.isBusy.value).toBe(false);
   });
 
-  // The same window, entered through an async validator: the refused click must
-  // not clear the validating/busy flags the live call still owns.
   it('a click during async validation does not disturb the in-flight submit', async () => {
     let releaseRule: (() => void) | null = null as (() => void) | null;
     let calls = 0;
@@ -359,11 +331,6 @@ describe('createFormBus - submit() races', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formValidate - the internal sync-validation command (dispatchable directly,
-// e.g. from a plugin or a toolbar's "check form" affordance)
-// ---------------------------------------------------------------------------
-
 describe('formValidate internal command', () => {
   it('touches every field, records sync errors, and reports validity', () => {
     const form = createFormBus({
@@ -380,7 +347,6 @@ describe('formValidate internal command', () => {
       valid: false,
       errors: { email: 'Invalid email', age: 'Required' },
     });
-    // All fields touched so errors become visible in the UI
     expect(form.touched.value).toEqual({ email: true, age: true });
     expect(form.isValid.value).toBe(false);
     expect(form.errors.value).toEqual({ email: 'Invalid email', age: 'Required' });
@@ -404,7 +370,7 @@ describe('rule/values mismatch and optional onSubmit', () => {
   it('a rule for a key not present in fields is skipped by sync and async validation', async () => {
     const form = createFormBus({
       fields: { email: 'a@b.com' },
-      // `ghost` has a rule but no field - must be ignored, not crash or error
+      // `ghost` has a rule but no field.
       rules: { email: (v: string) => (v.includes('@') ? null : 'bad'), ghost: () => 'never' } as never,
     });
     form.set('email', 'x@y.z'); // live sync validation path

@@ -1,9 +1,7 @@
 /**
- * Observable adapter - bridges bus events to Symbol.observable / RxJS.
- *
- * Locks v1.2.x behavior: each subscribe creates an independent listener;
- * unsubscribe drops it; Symbol.observable interop returns self; dispatchFrom
- * emits values from a source Observable into the bus.
+ * observe() and dispatchFrom(): the Observable adapter between bus events and Symbol.observable / RxJS.
+ * Why: a subscriber that misses events, a leaked listener after unsubscribe, an RxJS `from()` that cannot read the adapter, or a source value whose failed dispatch goes unhandled would break reactive code built on the bus.
+ * Shows: subscribers get `{ cmd, result }` per matching dispatch, each with its own listener that unsubscribe drops; the interop returns the same observable and RxJS `from()` reads it; `dispatchFrom` forwards values, reports a rejected async dispatch on `<action>:error` without an unhandled rejection, leaves a sync dispatch alone, and emits `:error` and `:complete` from the source.
  */
 import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -50,7 +48,7 @@ describe('observe(bus, pattern)', () => {
     expect(sub.closed).toBe(true);
 
     bus.dispatch('act', null);
-    expect(fn).toHaveBeenCalledOnce(); // not called again
+    expect(fn).toHaveBeenCalledOnce();
   });
 
   it('multiple subscribers each get their own listener', ({ bus }) => {
@@ -74,7 +72,7 @@ describe('observe(bus, pattern)', () => {
   });
 
   it("RxJS's from() reads it on a runtime with no Symbol.observable (Node, every browser)", ({ bus }) => {
-    // RxJS keys the interop on the string '@@observable' then (rxjs internal/symbol/observable).
+    // Without Symbol.observable, RxJS falls back to the string key '@@observable'.
     expect((Symbol as any).observable).toBeUndefined();
     bus.register('cartAdd', () => 1);
     const seen: string[] = [];
@@ -96,7 +94,6 @@ describe('dispatchFrom(bus, action, source)', () => {
     const handler = vi.fn((cmd) => cmd.target);
     bus.register('tick', handler);
 
-    // Build a minimal hand-rolled observable for the test
     const source = {
       subscribe(o: any) {
         o.next(1);
@@ -112,11 +109,7 @@ describe('dispatchFrom(bus, action, source)', () => {
     expect(handler.mock.calls[2]![0].target).toBe(3);
   });
 
-  // "Fire-and-forget" applied to the RESULT, not to failure. On an async bus
-  // `dispatch` returns a promise, and discarding it left a rejection with no
-  // handler - an unhandled rejection, which Node terminates the process over
-  // by default. Measured before the fix: one emitted value into a bus with
-  // onMissing 'throw' produced exactly that.
+  // On an async bus dispatch returns a promise; a discarded rejection would be unhandled, which ends a Node process by default.
   it('reports a rejected async dispatch instead of leaving it unhandled', async () => {
     const seen: unknown[] = [];
     const onUnhandled = (reason: unknown) => { seen.push(reason); };
@@ -137,8 +130,7 @@ describe('dispatchFrom(bus, action, source)', () => {
     await new Promise((r) => setTimeout(r, 20));
     process.off('unhandledRejection', onUnhandled);
 
-    expect(seen).toEqual([]); // nothing escaped
-    // ...and the failure is observable on the same channel source errors use.
+    expect(seen).toEqual([]);
     expect(errors).toHaveLength(1);
     expect((errors[0] as Error).message).toMatch(/No handler registered/);
   });
@@ -152,7 +144,6 @@ describe('dispatchFrom(bus, action, source)', () => {
 
     dispatchFrom(bus, 'tick', source as any);
 
-    // A sync result is not a thenable, so the promise branch never runs.
     expect(handler).toHaveBeenCalledOnce();
   });
 

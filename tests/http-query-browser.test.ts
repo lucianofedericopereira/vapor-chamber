@@ -1,12 +1,8 @@
 // @vitest-environment happy-dom
 /**
- * Covers src/http-query.ts's browser-path branches (lines 28-29). Every other
- * caller of buildFullUrl runs in the plain 'node' vitest environment (no
- * `window`), so both ternaries there only ever took their SSR-fallback side:
- *   - `typeof window !== 'undefined' ? window.location.origin : ...` - the
- *     `window` global was never actually defined anywhere else.
- *   - `url.startsWith('http') ? undefined : origin` - every existing call
- *     passes a relative path, never an already-absolute URL.
+ * buildFullUrl in src/http-query.ts when `window` is defined (happy-dom).
+ * Why: in a browser a relative URL would resolve against the wrong origin, or an absolute URL would get the page origin prepended. Also the only file reaching the `window` arm of buildFullUrl, so the 100% floor needs it.
+ * Shows: a relative path starts with window.location.origin and carries the query; an absolute URL is kept as given and carries the query.
  */
 import { describe, it, expect } from 'vitest';
 import { buildFullUrl } from '../src/http-query';

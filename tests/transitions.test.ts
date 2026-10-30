@@ -1,5 +1,9 @@
 /**
- * Tests for transitions.ts - createTransitionBridge + useTransitionCommand
+ * createTransitionBridge and useTransitionCommand: Vue transition hooks dispatched as bus commands.
+ * Why: Vue waits for done() indefinitely, so a hook that never calls it, or a throwing bus, would leave an
+ * element stuck in its transitioning state with no error; done() must fire exactly once on every path.
+ * Shows: namespaced and plain action names for all hooks and onMove, the target, the phase signal, done()
+ * on sync, throwing, async, rejecting, missing and never-settling handlers (timeout, NaN fallback), and the shared-bus wrapper.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -11,7 +15,6 @@ import {
 } from '../src';
 import { createTransitionBridge, useTransitionCommand } from '../src/transitions';
 
-// Minimal mock element
 function mockEl(): Element {
   return { tagName: 'DIV' } as unknown as Element;
 }
@@ -162,10 +165,8 @@ describe('createTransitionBridge', () => {
 
     t.onEnter(mockEl(), done);
 
-    // done() should NOT be called synchronously since the handler is async
     expect(done).not.toHaveBeenCalled();
 
-    // Wait for the async handler to complete
     await new Promise(r => setTimeout(r, 50));
 
     expect(done).toHaveBeenCalledTimes(1);
@@ -222,9 +223,7 @@ describe('createTransitionBridge', () => {
   });
 
   it('swallows a synchronous dispatch throw (naming:throw) - transitions never break', () => {
-    // A strict naming bus throws synchronously in dispatch() when the action
-    // violates the pattern. dispatchSafe's catch must absorb it for both the
-    // direct path (onMove) and the done() path (onEnter), and done() still fires.
+    // A strict naming bus throws synchronously; both the direct path (onMove) and the done() path (onEnter) must absorb it.
     const strictBus = createCommandBus({
       naming: { pattern: /^app:/, onViolation: 'throw' },
       onMissing: 'ignore',
@@ -238,11 +237,6 @@ describe('createTransitionBridge', () => {
   });
 });
 
-// Vue waits for done() indefinitely, so a handler that never settles left the
-// element stuck in its transitioning state for the life of the page, with no
-// error anywhere. Measured before the guard: done() was never called and the
-// phase never left 'leaving'. directives.ts already capped its own dispatches
-// for exactly this reason; this module did not.
 describe('createTransitionBridge - done() timeout', () => {
   it('calls done() when an async handler never settles', async () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -274,8 +268,7 @@ describe('createTransitionBridge - done() timeout', () => {
     release();                                   // ...then the handler lands
     await new Promise((r) => setTimeout(r, 10));
 
-    // Calling done() twice would have Vue finish a transition it already
-    // finished, so `settled` makes it exactly-once.
+    // A second done() would have Vue finish a transition it already finished.
     expect(calls).toBe(1);
   });
 
@@ -304,12 +297,7 @@ describe('createTransitionBridge - done() timeout', () => {
     let doneCalled = false;
     t.onLeave(mockEl(), () => { doneCalled = true; });
 
-    // This asserted an immediate done(), which is what `| 0` produced by
-    // mapping NaN to 0 and letting the floor lift it to 1ms. The element was
-    // never stuck, but a leave transition that fires done() on the next tick is
-    // a transition that does not play - a bad option silently removing the
-    // animation rather than the timeout. ../bounds falls back to the documented
-    // 30s instead, which is what an ABSENT timeout already meant.
+    // A bad timeout must not fire done() on the next tick (that would skip the animation); it falls back to the 30s default.
     await vi.advanceTimersByTimeAsync(100);
     expect(doneCalled).toBe(false);
 

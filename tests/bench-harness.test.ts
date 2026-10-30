@@ -1,29 +1,8 @@
 /**
- * Bench-harness integrity.
- *
- * A bench that does not execute the code named in its label is worse than no
- * bench: it produces a number, the number is stable, and it gets quoted.
- * Both benches drove the history like this:
- *
- *     const bus = createCommandBus();
- *     const history = useCommandHistory({}, bus);   // <- second argument
- *     for (...) bus.dispatch('act', i, { qty: i });
- *
- * `useCommandHistory(options)` takes ONE parameter. Without a `bus` option
- * (added in 1.29.0) it observes the SHARED bus from `getCommandBus()`. The
- * second argument was silently dropped, and no compiler objected: `tests/` was
- * not type-checked then (tsconfig.tests.json does it now). The history
- * subscribed to one bus while the loop dispatched on another, so the `onAfter`
- * hook the first bench is named for never fired, and the `past` stack the
- * second bench undoes/redoes was always empty - `undo()`/`redo()` returned
- * immediately without ever reaching the marked-dispatch path.
- *
- * Measured before the fix: `past.length` 0 after 10 dispatches, `undo()`
- * undefined. The benches now pass their bus as `useCommandHistory({ bus })`;
- * these assertions pin why a bus given any other way is not the one observed.
- *
- * The bench rows are stable ids, the same in every release, so the bench of
- * one release compares with the next by id: the list is pinned below.
+ * The bench harness: the row ids of tests/perf.bench.ts, and the bus useCommandHistory observes.
+ * Why: a bench that does not run the code its label names still yields a stable number that gets quoted.
+ * Shows: the ids are the pinned list, unique and dotted, a rename is caught; history observes the shared bus without `bus`, undo and redo reach the marked path, an extra argument is ignored.
+ * See: tests/composables-bus-option.test.ts.
  */
 
 import { readFileSync } from 'node:fs';
@@ -35,6 +14,7 @@ import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
 
+/** Stable across releases, so one release's bench compares with the next by id. */
 const IDS = [
   'history.dispatch', 'history.undoredo', 'origin.wrapped',
   'dispatch.sync.bare', 'dispatch.sync.parts3', 'query.sync.bare', 'query.sync.stepped', 'emit.listeners3',
@@ -101,8 +81,7 @@ describe('useCommandHistory bus selection', () => {
     expect(history.undo()).toBeDefined();
     expect(history.redo()).toBeDefined();
 
-    // redo re-dispatches through the bus - the path `_withOrigin` marks, and
-    // the one the "undo+redo cycle" bench exists to measure.
+    // redo re-dispatches through the bus: the path `_withOrigin` marks, which the undo+redo bench measures.
     expect(runs).toBe(2);
     expect(history.past.value).toHaveLength(1);
   });
@@ -111,11 +90,7 @@ describe('useCommandHistory bus selection', () => {
     const local = createCommandBus();
     local.register('act', (cmd) => cmd.target);
 
-    // The shape the benches used. `useCommandHistory` has one parameter, so
-    // this attaches to the shared bus and observes nothing dispatched on
-    // `local`. The bus goes in the options, `useCommandHistory({ bus })`
-    // (tests/composables-bus-option.test.ts). The type checker now rejects a
-    // second argument, hence the cast that reproduces the old call.
+    // A second argument is dropped (the bus goes in the options); the cast gets it past the type checker.
     const history = (
       useCommandHistory as (o: object, bus?: unknown) => ReturnType<typeof useCommandHistory>
     )({}, local);

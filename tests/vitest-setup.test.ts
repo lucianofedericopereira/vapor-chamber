@@ -1,15 +1,8 @@
 /**
- * src/vitest.ts's own branches, driven through a stand-in for the three Vitest
- * APIs it calls at load: `inject`, `expect.extend`, `beforeEach`.
- *
- * The real thing is covered elsewhere: this repository's suite runs with the
- * entry as its setup file, and tests/vitest-consumer.test.ts runs it from a
- * packed install. What neither reaches from inside one configuration is the
- * other configuration - no plugin (nothing provided) versus an exclude list -
- * and what the hook does for a file on that list.
- *
- * Its own file, and the fresh registry is the last thing it creates, because a
- * reset registry gives every later shared bus a new module instance.
+ * The `vapor-chamber/vitest` setup entry (src/vitest.ts), driven through a stand-in for the Vitest APIs it calls at load: `inject`, `expect.extend`, `beforeEach`, `afterEach`, `test`.
+ * Why: a user's Vitest run would register the matchers twice or not at all, tap a file the plugin excluded, or share one bus between files.
+ * Shows: one beforeEach and one afterEach and the full matcher set; `test` extended with bus and asyncBus and exported as `it` and `test`; a fresh tapped bus per file without the plugin; a file on the provided exclude list left untapped.
+ * See: src/vitest.ts, tests/vitest-consumer.test.ts
  */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
@@ -42,6 +35,7 @@ async function loadSetup(provided: unknown) {
 }
 
 afterAll(() => {
+  // Last in the file: a reset registry gives every later shared bus a new module instance.
   vi.resetModules();
 });
 

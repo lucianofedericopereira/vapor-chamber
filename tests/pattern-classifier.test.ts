@@ -1,4 +1,9 @@
-/** One pattern rule, one classifier: every reader of an action pattern agrees with it. The long note is at the end. */
+/**
+ * The one action-pattern classifier (`_patternPrefix`): a trailing `*` matches every action starting with the text before it, `*` matches all, any other pattern is one action's name.
+ * Why: if a reader classified a pattern on its own, a listener, a plugin scope, a transport map or an authGuard could disagree about which actions a pattern covers, e.g. protect or skip the wrong action.
+ * Shows: the classifier's prefixes; matchesPattern, `_scoped`, `on`/`offAll`, the transport map and authGuard all agree with the rule for every pattern and action in the table; the most specific transport pattern wins over written order; no other src file tests a pattern's trailing `*`.
+ * See: log s36.104
+ */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -87,23 +92,7 @@ describe('the one pattern classifier', () => {
       }
     };
     walk(root);
-    // pattern.ts: `_patternPrefix` itself. router/table.ts reads a route
-    // segment and vite-hmr.ts a file glob: neither is an action pattern.
+    // pattern.ts is the classifier; router/table.ts reads a route segment and vite-hmr.ts a file glob, not action patterns.
     expect(sites.sort()).toEqual(['pattern.ts:1', 'router/table.ts:1', 'vite-hmr.ts:1']);
   });
 });
-
-/*
- * An action pattern means one thing across the library (memory
- * one-term-one-meaning): a trailing `*` matches every action that starts with
- * the text before it, so `*` matches every action, and any other pattern is
- * one action's name. Before plan 1.32 step 8a five places classified a
- * pattern on their own: `on()` and `offAll()` (isWildcardPattern),
- * `matchesPattern`, `_scoped`, `mostSpecific`'s rank and authGuard's
- * `protected`. `_patternPrefix` is the one classifier now, and each of them
- * reads it. The agreement table runs every reader through the bus it serves:
- * a listener, a plugin's scope, a transport map, a guard. authGuard read a
- * bare name as a prefix until log 36.104: one meaning now, there too. The
- * source guard is the total rule: no src file tests a pattern's trailing `*`
- * outside the classifier.
- */

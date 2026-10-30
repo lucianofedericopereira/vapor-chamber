@@ -1,25 +1,8 @@
 /**
- * DEV in a consumer's production build: folded in EVERY chunk, not only in the
- * chunk that defines it.
- *
- * The ESM build's DEV folds when a consumer's bundler replaces
- * `process.env.NODE_ENV` - both arms of the expression read false and the
- * minifier drops every `if (DEV)` branch with its warning string. That held for
- * one-chunk apps and fails for code-split ones: a minifier folds a constant
- * only inside the chunk that defines it, so ONE shared exported DEV would
- * leave a chunk that imports it shipping every warning string, dead at runtime
- * (examples/vapor-island-cart's Cart chunk did; docs/rc-alignment-log.md s19.4).
- *
- * scripts/build.mjs now derives DEV once per importing module, so no chunk
- * imports it from another. The two shapes below are the examples' own: one
- * chunk (vapor-sfc), and islands loaded through dynamic imports that share a
- * store (vapor-island-cart), where the island reaching chamber.ts is not the
- * chunk holding the bus. Built with Vite's build API in production, as those
- * apps are; `vue` external, so only this library's code is in the chunks.
- *
- * What this cannot check lives in the log, measured by hand in a real browser:
- * DEV true in a page under Vite's dev server, and no ReferenceError on a
- * no-bundler page. tests/dev-flag.test.ts evaluates the expression for both.
+ * DEV in a consumer's production build: folded in every chunk, not only the chunk that defines it.
+ * Why: a minifier folds a constant only inside its own chunk, so one shared DEV would ship every warning string in a code-split app; the build derives DEV per module.
+ * Shows: Vite production builds of one chunk and of code-split islands (the vapor-sfc and vapor-island-cart shapes) carry no hint, no unfolded expression; no dist chunk imports DEV.
+ * See: docs/rc-alignment-log.md s19.4, scripts/build.mjs, tests/dev-flag.test.ts.
  */
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -30,10 +13,10 @@ import { requireDist } from './require-dist';
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
 requireDist(existsSync(dist('index.js')) && existsSync(dist('vue.js')));
 
-/** chamber.ts's DEV-only probe-path hint - the string s19.4 found shipped. */
+/** chamber.ts's DEV-only probe-path hint. */
 const HINT = 'Vue detected at runtime rather than at build time';
 /** chamber.ts's runtime probe as it lands in a consumer bundle: proof chamber.ts is in the graph.
- *  Its specifier is a module binding (VUE_PKG, log 36.F26), minified to `x="vue"` or `x=\`vue\``. */
+ *  Its specifier is a module binding (VUE_PKG), minified to `x="vue"` or `x=\`vue\``. */
 const PROBE = /[\w$]\s*=\s*["'`]vue["'`]/;
 /** What the DEV expression leaves behind if it does not fold. Not bare `import.meta`:
  *  Vite's own preload helper reads `import.meta.url` in any app with a dynamic import. */
@@ -97,6 +80,7 @@ async function chunks(entry: string): Promise<string[]> {
   return outputs.filter((o) => o.type === 'chunk').map((c) => (c as { code: string }).code);
 }
 
+// Not checkable here: DEV true under Vite's dev server, and no ReferenceError on a no-bundler page (tests/dev-flag.test.ts).
 describe('DEV folds in every production chunk (Vite build API)', () => {
   it('one chunk (the vapor-sfc shape)', async () => {
     const code = await chunks('one.js');

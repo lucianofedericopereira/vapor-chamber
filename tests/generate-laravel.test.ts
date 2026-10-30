@@ -1,12 +1,8 @@
 /**
- * generate-laravel codegen smoke test - locks the schema -> Laravel contract.
- *
- * Runs scripts/generate-laravel.mjs against a temp schema module and asserts:
- *   - config/vapor-chamber.php registers every action (camelCase-normalized)
- *   - action stubs carry the class name, Validator rules per field, result keys
- *   - existing stubs are preserved without --force (user logic survives)
- *   - --force regenerates stubs
- *   - garbage schemas exit(1) with a clear message
+ * scripts/generate-laravel.mjs run against a temp schema module.
+ * Why: the generated Laravel actions must validate what the TS schema validates; if rules, authorization or stub preservation were wrong, the server would accept payloads the browser rejects or overwrite a user's action logic.
+ * Shows: the config registers every action in schema order with camelCase keys; stubs carry class name, signature, Validator rules, per-field attribute names, an optional Gate call before validation and result keys; existing stubs survive unless --force; --namespace and .json schemas work; garbage schemas exit 1 with a message.
+ * See: scripts/generate-laravel.mjs.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -78,7 +74,6 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
     expect(config).toContain("'handlers' => [");
     expect(config).toContain("'cartAdd'");
     expect(config).toContain('\\App\\Actions\\CartAdd::class');
-    // order_create is normalized to camelCase to match the bus
     expect(config).toContain("'orderCreate'");
     expect(config).toContain('\\App\\Actions\\OrderCreate::class');
     expect(config).not.toContain('order_create');
@@ -102,24 +97,17 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
   it('derives Validator rules from target/payload field maps', () => {
     const cartAdd = readFileSync(actionPath('CartAdd'), 'utf8');
     expect(cartAdd).toContain('Validator::make(');
-    // The client's rules, in Laravel's: present (only a missing field fails,
-    // as schema.ts reads `undefined`), and the strict variants, so "5" is not
-    // a number and "1" not a boolean (D13 G3).
+    // Mirrors the client: `present` (only a missing field fails) and strict variants, so "5" is not a number and "1" not a boolean.
     expect(cartAdd).toContain("'target.id' => 'present|numeric:strict',");
     expect(cartAdd).toContain("'target.name' => 'present|string',");
     expect(cartAdd).toContain("'payload.qty' => 'present|numeric:strict',");
     expect(cartAdd).toContain("'payload.gift' => 'present|boolean:strict',");
-    // 'any' fields get no rule
     expect(cartAdd).not.toContain("'payload.meta'");
     expect(cartAdd).toContain(')->validate();');
 
     const orderCreate = readFileSync(actionPath('OrderCreate'), 'utf8');
     expect(orderCreate).toContain("'payload.items' => 'present|list',");
-    // An 'object' field gets more than `present|array`: a decoded JSON list
-    // and a decoded JSON object are BOTH PHP arrays, and schemaValidator on
-    // the TS side rejects a list for an 'object' field - so without the extra
-    // check a payload the browser refuses would pass on the server. The two
-    // sides of one schema have to agree.
+    // A decoded JSON list and object are both PHP arrays, so an 'object' field needs the list check to match the client.
     expect(orderCreate).toContain("'payload.options' => ['present', 'array', function");
     expect(orderCreate).toContain('array_is_list($value)');
     expect(orderCreate).toContain('The :attribute field must be an object, not a list.');
@@ -127,10 +115,9 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
 
   it('names each field in its messages, not the rule key (D13 G1, R73, R76)', () => {
     const cartAdd = readFileSync(actionPath('CartAdd'), 'utf8');
-    // Validator::make()'s third argument (messages) stays empty, its fourth
-    // maps each rule key to the field's own name.
+    // Validator::make() gets empty messages and a fourth argument mapping each rule key to the field's own name.
     expect(cartAdd).toMatch(/\],\n {12}\[\],\n {12}\[\n {16}'target\.id' => 'id',\n {16}'target\.name' => 'name',\n {16}'payload\.qty' => 'qty',\n {16}'payload\.gift' => 'gift',\n {12}\],\n {8}\)->validate\(\);/);
-    // The closure writes `:attribute`, which Laravel replaces with that name.
+    // The closure writes `:attribute`, which Laravel replaces.
     const orderCreate = readFileSync(actionPath('OrderCreate'), 'utf8');
     expect(orderCreate).toContain("'payload.options' => 'options',");
     expect(orderCreate).not.toContain('{$attribute}');
@@ -141,8 +128,7 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
     expect(stub).toContain('use Illuminate\\Support\\Facades\\Gate;');
     expect(stub).toContain("Gate::forUser($user)->authorize('checkout', [$target, $payload]);");
     expect(stub).toContain('Requires the "checkout" ability');
-    // authorization runs before validation - an unauthorized caller learns nothing
-    // about the shape of data it isn't allowed to touch
+    // Authorization runs first: an unauthorized caller learns nothing about the data shape.
     expect(stub.indexOf('Gate::forUser')).toBeLessThan(stub.indexOf('Validator::make('));
   });
 

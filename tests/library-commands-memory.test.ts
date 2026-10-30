@@ -1,4 +1,13 @@
-/** The library's `$` commands are state changes: cache and idempotent never answer one from memory. Log s35.150. */
+/**
+ * The library's `$` commands (`<id>$reset`, `<action>$undo`) are state changes: cache and idempotent never answer one from memory.
+ * Why: a second `$reset` answered from the first one's stored result would report ok without
+ * resetting, and a second `$undo` of the same recorded command (history sends it again after a redo)
+ * would not run the inverse.
+ * Shows: repeated `$reset` and `$undo` run every time under cache and idempotent, app actions are still
+ * cached and collapsed, supersede's aborted signal reaches an inverse, and a plugin with no actions
+ * still sees every `$` command.
+ * See: log s35.150, log s35.114
+ */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type Command, type CommandResult } from '../src/command-bus';
 import { cache, idempotent, supersede } from '../src/plugins-extra';
@@ -97,21 +106,3 @@ describe('controls: refusing a $ command stays allowed and visible', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Log s35.150. A `$` name is the library's
- * own command (src/library-names.ts): `<id>$reset`,
- * `<action>$undo`. Each is a state change. A plugin may refuse one (35.114:
- * rateLimit, circuitBreaker; the caller sees it), but cache()
- * stored the first `$reset` and answered the second from memory with
- * `ok: true`, and idempotent() collapsed it the same way. The sender's
- * `pace` runs a `$` call at once (tests/pace.test.ts).
- *
- * The fix sits where it costs least: cache does not STORE a `$` result (its
- * miss path; a hit pays nothing), idempotent does not RECORD one (its
- * completion path).
- * history sends the same recorded command to `$undo` after a redo
- * (ledger.ts), so the second test is that case. supersede() neither answers
- * nor postpones (probe P2); its one effect on an undo, the aborted signal an
- * inverse receives, is pinned here and stated on RegisterOptions.undo.
- */

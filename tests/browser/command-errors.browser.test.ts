@@ -1,9 +1,8 @@
 /**
- * vc-error made semantic. The class is for styling and a screen reader cannot
- * see it; a failed command is a status message (WCAG 4.1.3): announced, focus
- * left where it is. The words are the failure's own (since v1.24 a backend
- * problem's `detail`, already localized) through the document's shared live
- * region (src/a11y.ts); an app that took the announcing over gets them instead.
+ * vc-error made semantic: a failed command is a status message, announced with focus left where it is.
+ * Why: the class is for styling and a screen reader cannot see it (WCAG 4.1.3); the words are the failure's own, a backend problem's localized `detail`.
+ * Shows: a failure is announced in its own words and keeps vc-error and focus; a success says nothing; an app's announcer gets the message instead.
+ * See: src/a11y.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber';

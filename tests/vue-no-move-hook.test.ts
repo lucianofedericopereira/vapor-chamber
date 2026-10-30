@@ -1,6 +1,8 @@
 /**
- * GUARD - no installed Vue runtime has an `onMove` hook. The bridge's
- * `onMove` docblock rests on it. The long note is at the end of this file.
+ * The shipped Vue runtime dists, current and the `vue35` copy, searched for an `onMove` hook.
+ * Why: `createTransitionBridge` documents `onMove` as a hook the app calls, not one Vue calls; if a Vue added a hook of that name, the bridge would have to hand it to Vue again.
+ * Shows: no runtime-core, runtime-dom, runtime-vapor or vue dist .js file contains the text `onMove`, and `moveClass` is found in them as a positive control; a hook name built at runtime would escape this text search.
+ * See: log s36.6, src/transitions.ts
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -41,24 +43,3 @@ describe('Vue calls no onMove hook', () => {
     });
   }
 });
-
-/*
- * WHY THIS FILE EXISTS. `createTransitionBridge` returns an `onMove` that
- * dispatches `<namespace>Move`, and until the rc.11 cycle its docblock said
- * Vue calls it on a TransitionGroup move. Vue has no such hook: not in
- * BaseTransition, Transition or TransitionGroup, on either renderer, at any
- * 3.6 tag checked (beta.13, beta.17, rc.1, rc.5, rc.11) nor in 3.5. A real
- * Chromium reorder with a CSS move transform called no bridge function
- * (docs/rc-alignment-log.md, 36.6 R2). Every earlier test called the hook by
- * hand.
- *
- * So the bridge keeps `onMove` out of a spread and documents it as a hook the
- * app calls. If a later Vue adds a hook by that name, this fails, and the
- * bridge should hand it to Vue again.
- *
- * It reads the shipped runtime dists, current and the `vue35` copy, rather
- * than a source checkout: what an app installs is what calls the hooks. A
- * hook name built at runtime would escape a text search, so the cycle record
- * also lists runtime-dom's `callHook` sites. `moveClass` is the positive
- * control: TransitionGroup's own move option, in every Vue that has one.
- */

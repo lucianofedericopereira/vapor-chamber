@@ -1,4 +1,9 @@
-/** `cacheMode` means for the client's own store what it means for the browser's: no-cache validates, reload reads past, no-store skips. Rationale at the end. */
+/**
+ * `cacheMode` on the HTTP client's own store: no-cache validates, reload reads past the copy, no-store skips the store.
+ * Why: if the store ignored cacheMode, a read that must be current (a router refresh) could not say so and would get a fresh stored copy.
+ * Shows: with a fresh copy, no-cache sends its ETag and a 304 answers the stored copy, a changed answer is read and stored, reload sends no ETag and stores, no-store neither reads nor stores, and no-cache with nothing stored or no ETag sends a plain request.
+ * See: audit M2, WHATWG Fetch (cache mode).
+ */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -65,7 +70,7 @@ describe("cacheMode over the client's own store", () => {
     http.clearCache();
     const answered = await refresh;
     await http.get('/e', fresh);
-    // The third read finds nothing stored: a plain request, no ETag.
+    // The third read finds nothing stored, so it sends no ETag.
     expect({ same: answered.data === first.data, sent: s.sent }).toEqual({ same: true, sent: [undefined, '"e1"', undefined] });
   });
 
@@ -94,12 +99,3 @@ describe("cacheMode over the client's own store", () => {
     expect(s.sent).toEqual([undefined, undefined]);
   });
 });
-
-// Rationale.
-// The 1-7 fix-up (audit M2, coordinator 2026-10-21) removes
-// `invalidateCache(pattern)`: the server declares what a write makes stale
-// (its cache groups), and a read that must be current says so with
-// `cacheMode: 'no-cache'`. Before, `cacheMode` reached only fetch, and the
-// client's own store still answered a fresh copy, so a router refresh had to
-// drop its entry by pattern first. Fetch's modes (WHATWG Fetch, "cache mode")
-// now mean the same for both caches.

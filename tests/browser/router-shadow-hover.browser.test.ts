@@ -1,6 +1,8 @@
 /**
  * Hover preheat of a router link inside an open shadow root, with a real pointer in Chromium.
- * The long note is at the end.
+ * Why: at the document a shadow event's target is the host, and a move inside one root stops at the host; the hover reads composedPath and listens on each open root.
+ * Shows: light and shadow links preheat; between links, from a plain element, across nested roots, the link under the pointer; re-entry once; a re-render no error; teardown stops it.
+ * See: log 36.17 F8, log 36.19 item 2, DOM Standard dispatch steps 6.9.3 and 6.9.7.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -47,6 +49,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
+// happy-dom does not retarget event.target to the host at the document, so only a real engine shows this.
 describe('hover preheat across a shadow root (real Chromium)', () => {
   it('control: a light-DOM link is preheated on hover', async () => {
     const seen: string[] = [];
@@ -184,31 +187,3 @@ describe('hover follows the pointer inside shadow roots (real Chromium)', () => 
     expect(seen).toEqual([]);
   });
 });
-
-// The note.
-//
-// Complexity review F8 (log 36.17). At the document, a pointer event from
-// inside a shadow root has the host as its target, so a `closest('a[href]')`
-// from the target cannot see a link inside the shadow tree. The click path
-// scanned `event.composedPath()`, which an open shadow root's nodes are part
-// of. The hover now finds its link the same way (`anchorOf`). Red before: the
-// shadow case, with the light-DOM hover as the control. happy-dom passes the
-// shadow case before the fix too: it does not retarget `event.target` to the
-// host at the document, so only a real engine shows this.
-//
-// Log 36.19 item 2. A move between two nodes of one shadow root never reached
-// the document: the dispatch stops at the host when the target and the related
-// target retarget to it (DOM Standard, dispatch steps 6.9.3 and 6.9.7). So
-// the hover warmed the link the pointer left, never the one under it. Every
-// open shadow root an event comes from now gets the listeners too, each unseen
-// root out to the document. Red before: one root (`["/a"]`), the plain element
-// first (`[]`), nested outer first (`["/a"]`) and inner first (`["/b"]`: the
-// `mouseout` from B never reached the document, so B's timer ran). Attaching
-// only the innermost root was seeded once and turned the inner-first test red
-// (`[]`): the outer root stayed deaf. Pins, green before and after: a root
-// entered again (root and document both arm one timer), a re-render inside
-// the link (a walk that read `.host` off the removed node threw there, seeded
-// once: one error, the link still preheated by the next event), and teardown
-// (root listeners added without teardown's signal, seeded once: `["/b"]`).
-// The 1000 ms delay: with 100 ms, Playwright's own latency between two hovers
-// sometimes passed the delay and the first link warmed legitimately.

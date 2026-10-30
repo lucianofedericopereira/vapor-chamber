@@ -1,17 +1,8 @@
 // @vitest-environment happy-dom
 /**
- * Two router behaviours that had no coverage, both of the kind that only shows
- * up in a browser and therefore never in a unit test written against the
- * engine: scroll restoration on commit, and `resolve()` degrading gracefully
- * before the route table exists.
- *
- * Neither is defensive filler. Scroll-on-commit is what makes a hash link land
- * on its anchor instead of the top of the page, and its `catch` exists because
- * a location hash is user-controlled text that is NOT guaranteed to be a valid
- * CSS selector - `#2024` throws in `querySelector`. `resolve()`'s fallback is
- * what keeps `<RouterLink :to>` rendering an href during the window before
- * `start()` has loaded a remote table, which is exactly when a server-rendered
- * page is being hydrated.
+ * Scroll on commit and on back/forward, inline routes payload errors, idle preheat teardown, and resolve() before the table is ready.
+ * Why: a hash link would land on the top instead of its anchor, a hash that is not a valid CSS selector (`#2024`) would break navigation itself, back/forward would fight the browser's own scroll restoration, and links would render no href while a remote table loads. Also the only file reaching the hash-anchor scroll and the no-DOM inline rejection, so the 100% floor needs it.
+ * Shows: a matching anchor is scrolled into view and the top is not; a missing anchor or an invalid selector falls back to the top; scroll:false never scrolls; an inline JSON table loads, and a missing DOM or element rejects with a message; arming and disposing preheat does not throw; resolve() degrades to the raw string or `path`; a popstate does not scroll.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,14 +29,12 @@ describe('scroll on commit', () => {
 
     const router = makeRouter({ scroll: true });
     await router.isReady();
-    // start() commits the initial route, which legitimately scrolls to the top
-    // (no hash). Clear that first so the assertion below is about the push.
+    // The initial commit scrolls to the top; clear it so the assertion is about the push.
     scrollTo.mockClear();
     await router.push('/list#section');
 
     expect(scrollIntoView).toHaveBeenCalled();
-    // The early `return` after a hit is the point - landing on the anchor and
-    // ALSO jumping to the top would put the user somewhere they did not ask for.
+    // A hit must not also jump to the top.
     expect(scrollTo).not.toHaveBeenCalled();
     router.dispose();
   });
@@ -61,9 +50,7 @@ describe('scroll on commit', () => {
   });
 
   it('survives a hash that is not a valid CSS selector', async () => {
-    // `#2024` is a legal URL fragment and an illegal selector - querySelector
-    // throws. Without the catch, any such link would break navigation itself,
-    // not merely fail to scroll.
+    // `#2024` is a legal fragment and an illegal selector: querySelector throws.
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
     const router = makeRouter({ scroll: true });
     await router.isReady();
@@ -86,9 +73,7 @@ describe('scroll on commit', () => {
 
 describe('inline routes payload', () => {
   it('builds the table from a JSON script element', async () => {
-    // The shape `examples/router-demo` ships: routes embedded in the page as
-    // `<script type="application/json">`, read synchronously in the
-    // constructor because `base` must be known before the history is built.
+    // Read synchronously in the constructor: `base` must be known before the history is built.
     const el = document.createElement('script');
     el.type = 'application/json';
     el.id = 'vcr-routes';
@@ -106,9 +91,7 @@ describe('inline routes payload', () => {
   });
 
   it('reports a missing DOM rather than crashing on `document`', async () => {
-    // Inline routes are the one routes source that cannot work without a DOM,
-    // so an SSR render that reaches it must say why. Without the guard this is
-    // a ReferenceError from deep inside the constructor.
+    // Inline routes need a DOM: an SSR render must get a message, not a ReferenceError.
     using _document = stubGlobal('document', undefined);
     const router = makeRouter({
       routes: { inline: '#routes' } as never,
@@ -119,11 +102,7 @@ describe('inline routes payload', () => {
   });
 
   it('surfaces router:missing:inline at start(), not at construction', async () => {
-    // Two different readers touch the same selector, and only one throws.
-    // The constructor calls `readInlinePayload`, which swallows and returns
-    // null - it runs only to learn `base` before the history is built, and a
-    // missing element there is not yet fatal. `loadInlineTable` at start() is
-    // where the absence actually matters, so that is where it reports.
+    // The constructor's read swallows a missing element (it only needs `base`); loadInlineTable at start() reports it.
     const router = makeRouter({
       routes: { inline: '#not-present' } as never,
       components: {},
@@ -135,9 +114,7 @@ describe('inline routes payload', () => {
 
 describe('idle preheat', () => {
   it('arms for records flagged meta.preheat and tears down cleanly', async () => {
-    // preheatIdle() only engages when at least one flagged record is still
-    // uncached; with none flagged the whole path is skipped, which is what the
-    // existing tests exercised.
+    // preheatIdle() only engages when a flagged record is still uncached.
     const loaded: string[] = [];
     const router = makeRouter({
       routes: [
@@ -155,18 +132,14 @@ describe('idle preheat', () => {
     });
 
     await router.isReady();
-    // No assertion on WHEN the idle callback fires - that is the browser's
-    // call and racing it would make this flaky. What matters is that arming
-    // and tearing down the idle queue is exercised and does not throw.
+    // When the idle callback fires is the browser's call; asserting it would be flaky.
     expect(() => router.dispose()).not.toThrow();
   });
 });
 
 describe('resolve() before the table is ready', () => {
   it('degrades to the raw string when the location cannot be resolved', () => {
-    // No isReady() on purpose: a remote-table router renders links during the
-    // window before start() resolves, and an href of `undefined` there is a
-    // broken page.
+    // No isReady() on purpose: links render before a remote table has loaded.
     const router = makeRouter({ scroll: true });
     expect(router.resolve('/definitely-not-a-route')).toContain('/definitely-not-a-route');
     router.dispose();
@@ -182,10 +155,7 @@ describe('resolve() before the table is ready', () => {
 
 describe('scroll restoration on back/forward', () => {
   it('does NOT scroll to top on a popstate navigation', () => {
-    // `if (!info.popstate)` - the else. On back/forward the browser restores
-    // the previous scroll position itself; scrolling to top would fight it.
-    // Every other navigation test drives push(), so only the scroll-to-top arm
-    // ran and this deliberate no-op was asserted nowhere.
+    // On back/forward the browser restores scroll itself; scrolling to top would fight it.
     window.history.replaceState({ __vr: 0 }, '', '/');
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
 

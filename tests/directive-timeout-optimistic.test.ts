@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// v-vc-command's own timeout is a give-up, not a failure: the late result decides the rollback. Notes at the end.
+/**
+ * v-vc-command's own timeout is a give-up, not a failure: the late result decides the rollback.
+ * Why: the dispatch may still land after the directive gives up; rolling back at the give-up would undo state the server applied.
+ * Shows: on both renderers the give-up reports and releases; a late success keeps, a late failure or rejection rolls back once, even after unmount.
+ * See: log 36.16 item 3.
+ */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type VaporApi, compileVapor, compileVdom } from './compile-vapor';
 import { resetCommandBus, setCommandBus } from '../src/chamber';
@@ -9,7 +14,7 @@ import { createDirectivePlugin, vcCommandVapor, vcOptimisticVapor, vcPayloadVapo
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 const vapor = async (): Promise<VaporApi> => (await import(/* @vite-ignore */ WITH_VAPOR)) as unknown as VaporApi;
 
-// A 50 ms give-up; each wait below is three times that, on fake timers.
+// A 50 ms give-up, each wait three times that, on fake timers: a stalled real clock could fire it early.
 const TEMPLATE = `<button v-vc-command.50="'cartAdd'" v-vc-optimistic="fn">go</button>`;
 const sleep = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 const settle = () => sleep(0);
@@ -87,7 +92,7 @@ describe.each(['vapor', 'vdom'] as const)('v-vc-command on %s: a slow dispatch a
     const m = await mountOn(renderer, fn);
     m.button.click();
     await sleep(150);
-    // The give-up is reported and the button released, as before.
+    // The give-up is reported and the button released.
     expect([log, look(m.button)]).toEqual([['apply'], { loading: false, error: true, aria: null }]);
     gate.ok();
     await settle();
@@ -122,6 +127,7 @@ describe.each(['vapor', 'vdom'] as const)('v-vc-command on %s: a slow dispatch a
     expect([log, [m.button.className, look(m.button)]]).toEqual([['apply', 'rollback'], before]);
   });
 
+  // A wrapped dispatch: a real bus rejects only at the start of a dispatch, never late.
   it('timeout, then the dispatch itself rejects late: rolled back once', async () => {
     let reject!: (e: Error) => void;
     const late = new Promise<CommandResult>((_, r) => { reject = r; });
@@ -162,21 +168,3 @@ describe.each(['vapor', 'vdom'] as const)('v-vc-command on %s: a slow dispatch a
     m.unmount();
   });
 });
-
-/*
- * Log 36.16 item 3 (F5's lead in the complexity review). The directive's
- * documentation: "the rollback runs if the dispatch fails" (vcOptimisticVapor).
- * Its own timeout is the directive giving up (`directive:timeout:dispatch`),
- * not the dispatch failing, and the dispatch may still land: an app whose
- * server applies the command after the timeout saw its optimistic state undone
- * at the give-up. Now the give-up is reported and the button released as
- * before, and the late result decides: a failure (or a rejection) runs the
- * rollback once, a success runs nothing. The late result touches no element,
- * so after an unmount it still runs the rollback, which is the app's own state.
- * The rejection case wraps a real async bus's `dispatch`: the bus itself
- * rejects only at the start of a dispatch (a naming violation), never late.
- *
- * The waits run on fake timers. On real ones, a stall of 60 ms after the click
- * (a loaded machine) left the 50 ms give-up due before the next `setTimeout(0)`,
- * so "a success within the timeout keeps" read `vc-error`.
- */

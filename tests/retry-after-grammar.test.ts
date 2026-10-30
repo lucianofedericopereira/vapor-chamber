@@ -1,4 +1,9 @@
-/** Retry-After is read by RFC 9110's grammar: delay-seconds or an HTTP-date. The long note is at the end. */
+/**
+ * _parseRetryAfter reads Retry-After by RFC 9110's grammar: delay-seconds (1*DIGIT) or an HTTP-date.
+ * Why: if the header were read with `Number()`, `-5`, `1.5`, `1e1`, `0x10` or `+3` would become waits, and a negative or zero wait turns a 503 with a bad header into a request storm. If dates went through `Date.parse`, an asctime-date (no zone) would be read as local time and non-HTTP-date forms would be accepted.
+ * Shows: digits-only seconds and the three GMT date forms are read (whatever the local zone); signs, fractions, exponents, hex, whitespace, Infinity and dates in other forms give undefined; a two-digit rfc850 year is its next occurrence, across a century.
+ * See: RFC 9110 5.6.7, RFC 9110 10.2.3, log s35.41, log s35.100
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _parseRetryAfter } from '../src/http';
 
@@ -48,26 +53,3 @@ describe('Retry-After by RFC 9110', () => {
     }
   });
 });
-
-/*
- * Found by the 1.26 evaluation (external item 6, log s35.41). The parser read
- * the header with `Number()`, which accepts far more than RFC 9110 section
- * 10.2.3 allows: `delay-seconds = 1*DIGIT`. `-5` became a wait of -5,000 ms,
- * `1.5` 1,500, `1e1` 10,000, `0x10` 16,000, `+3` 3,000. A negative or zero
- * wait is how a 503 with a bad header turned into a request storm in the
- * outbox. The seconds branch now takes digits only; everything else goes to
- * the HTTP-date branch, where none of those is one of its three shapes. A
- * value fetch hands over has no surrounding whitespace (the Fetch
- * standard strips it), so a digit-only test of the raw value is the grammar.
- *
- * The HTTP-date branch (log s35.100). It was
- * `Date.parse`, which reads an asctime-date (no zone) as LOCAL time - 3 h late
- * on a UTC-3 machine - and takes any form it knows: ISO, `10/1/2026`, a
- * numeric offset, lowercase names, a made-up weekday. RFC 9110 5.6.7: an
- * HTTP-date is IMF-fixdate, or the obsolete rfc850-date or asctime-date a
- * recipient MUST still accept, all three GMT. The branch now takes those
- * three shapes only and computes the time in GMT itself. A two-digit year is
- * its next occurrence: the RFC's 50-year rule only moves a year into the
- * past, which no wait reads, and `Date.parse`'s own rule read `00` sent late
- * in 2099 as 2000.
- */

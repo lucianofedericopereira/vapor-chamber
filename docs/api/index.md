@@ -111,7 +111,7 @@ the markup and warns in development. Returns `unbind()`.
 
 ### busApiSchema
 
-**Function** - [src/schema.ts:608](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L608)
+**Function** - [src/schema.ts:606](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L606)
 
 ```ts
 busApiSchema() => Record<string, { description: string; params: Record<string, string>; returns: string; }>
@@ -358,7 +358,7 @@ Delays pass `max: MAX_TIMEOUT_MS`.
 
 ### createAsyncCommandBus
 
-**Function** - [src/command-bus.ts:3701](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3701)
+**Function** - [src/command-bus.ts:3722](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3722)
 
 ```ts
 createAsyncCommandBus<M extends CommandMap = CommandMap>(options?: AsyncCommandBusOptions) => AsyncCommandBus<M>
@@ -378,7 +378,7 @@ if (result.ok) console.log(result.value); // { name: 'Alice', ... }
 
 ### createAsyncSchemaCommandBus
 
-**Function** - [src/schema.ts:533](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L533)
+**Function** - [src/schema.ts:531](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L531)
 
 ```ts
 createAsyncSchemaCommandBus<S extends BusSchema>(schema: S, options?: AsyncSchemaCommandBusOptions) => AsyncSchemaCommandBus<InferMap<S>>
@@ -499,7 +499,7 @@ tabSync.dispose() // on unmount
 
 ### createCommandBus
 
-**Function** - [src/command-bus.ts:2829](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2829)
+**Function** - [src/command-bus.ts:2839](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2839)
 
 ```ts
 createCommandBus<M extends CommandMap = CommandMap>(options?: CommandBusOptions) => CommandBus<M>
@@ -542,7 +542,7 @@ createCommandPool(size?: number) => CommandPool
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:286](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L286)
+**Function** - [src/directives.ts:288](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L288)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
@@ -597,7 +597,7 @@ realtime.dispose();
 
 ### createFormBus
 
-**Function** - [src/form.ts:265](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L265)
+**Function** - [src/form.ts:273](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L273)
 
 ```ts
 createFormBus<T extends Record<string, any>>(options: FormBusOptions<T>) => FormBus<T>
@@ -665,7 +665,7 @@ createReaction('cartAdd', 'inventoryCheck', {
 
 ### createSchemaCommandBus
 
-**Function** - [src/schema.ts:579](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L579)
+**Function** - [src/schema.ts:577](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L577)
 
 ```ts
 createSchemaCommandBus<S extends BusSchema>(schema: S, options?: SchemaCommandBusOptions) => SchemaCommandBus<InferMap<S>>
@@ -843,7 +843,7 @@ const bus = createAsyncCommandBus({ transport: offlineFirst })
 
 ### defineVaporAsyncComponent
 
-**Function** - [src/chamber-vapor.ts:202](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L202)
+**Function** - [src/chamber-vapor.ts:201](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L201)
 
 ```ts
 defineVaporAsyncComponent<T = any>(loader: (() => Promise<unknown>) | object) => T | null
@@ -855,7 +855,7 @@ Wraps Vue's `defineVaporAsyncComponent()`. Async Vapor
 components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
 The loading placeholder receives the deferred component's props and slots
 (beta.14+) - render a skeleton matching the final shape. Per-beta detail:
-CHANGELOG / whitepaper alignment log.
+whitepaper appendix B, and log section 37.
 
 Returns null if the Vapor runtime (Vue 3.6+) is not detected.
 
@@ -866,7 +866,7 @@ const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:242](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L242)
+**Function** - [src/chamber-vapor.ts:241](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L241)
 
 ```ts
 defineVaporCommand<B extends BaseBus = CommandBus<import("./command-bus").CommandMap>, D extends number | undefined = undefined, T extends number | undefined = undefined>(action: string, handler: Handler, options?: VaporCommandOptions<B, D, T>) => { dispatch: (target: any, payload?: any) => PacedOn<B, CommandResult, D, T>; dispose: () => void; }
@@ -896,7 +896,7 @@ dispatch({ name: 'page_view', params: { page: '/landing' } });
 
 ### defineVaporComponent
 
-**Function** - [src/chamber-vapor.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L178)
+**Function** - [src/chamber-vapor.ts:177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L177)
 
 ```ts
 defineVaporComponent<T = any>(options: object) => T | null
@@ -907,8 +907,7 @@ defineVaporComponent - define a Vapor component with proper type inference.
 Wraps Vue's `defineVaporComponent()`. Use this to get full
 TypeScript inference for props, emits, and slots in Vapor components.
 Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
-compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
-whitepaper alignment log).
+compiler optimizations are Vue behavior (whitepaper appendix B, and log section 37).
 
 Returns null if the Vapor runtime (Vue 3.6+) is not detected.
 
@@ -1034,7 +1033,7 @@ const systemPrompt = `When the bus returns an error, use this table:\n${describe
 
 ### describeSchema
 
-**Function** - [src/schema.ts:448](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L448)
+**Function** - [src/schema.ts:446](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L446)
 
 ```ts
 describeSchema(schema: BusSchema) => string
@@ -1268,7 +1267,7 @@ bus.use(idempotent({ actions: ['order*'] }));
 
 ### indexedDbStorage
 
-**Function** - [src/idb.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/idb.ts#L70)
+**Function** - [src/idb.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/idb.ts#L72)
 
 ```ts
 indexedDbStorage(dbName?: string, storeName?: string) => PersistStorage
@@ -1290,7 +1289,7 @@ defineChamberStore('cart', { state, reducers, persist: saveTo({ key: 'vc:cart', 
 
 ### inspectBus
 
-**Function** - [src/command-bus.ts:3924](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3924)
+**Function** - [src/command-bus.ts:3945](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3945)
 
 ```ts
 inspectBus(bus: BaseBus) => BusInspection
@@ -1584,7 +1583,7 @@ defineChamberStore('cart', { state, reducers, persist: saveTo({ key: 'vc:cart' }
 
 ### schemaLogger
 
-**Function** - [src/schema.ts:355](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L355)
+**Function** - [src/schema.ts:353](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L353)
 
 ```ts
 schemaLogger(schema: BusSchema, options?: SchemaLoggerOptions) => PluginParts
@@ -1747,7 +1746,7 @@ bus.use(supersede({ actions: ['productSearch'] }));
 
 ### synthesize
 
-**Function** - [src/schema.ts:428](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L428)
+**Function** - [src/schema.ts:426](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L426)
 
 ```ts
 synthesize(schema: BusSchema, bus: CommandBus | AsyncCommandBus, text: string, options?: SynthesizeOptions) => Promise<CommandResult>
@@ -1795,7 +1794,7 @@ toTools(schema: BusSchema, provider?: "anthropic" | "openai") => AnthropicTool[]
 
 ### unsealBus
 
-**Function** - [src/command-bus.ts:3762](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3762)
+**Function** - [src/command-bus.ts:3783](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3783)
 
 ```ts
 unsealBus(bus: BaseBus) => void
@@ -2008,7 +2007,7 @@ Your own hooks compose with the spread: `<Transition v-bind="modal"
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L319)
+**Function** - [src/chamber-vapor.ts:318](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L318)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; pending: (action: string, target?: unknown) => Readonly<Signal<boolean>>; dispose: () => void; }
@@ -2023,7 +2022,7 @@ gives `pending(action, target?)` (the bus's command state for that key,
 `commandState`), making it safe for `<script setup vapor>` components that
 await async operations. Error-boundary rendering and scheduler-flush
 behavior around async components are Vue runtime concerns (per-beta detail:
-CHANGELOG / whitepaper alignment log).
+whitepaper appendix B, and log section 37).
 
 The dispatch function returns a Promise<CommandResult>, matching the
 AsyncCommandBus interface. Use this when your commands hit async transports
@@ -2718,7 +2717,7 @@ export type AsyncHook = (cmd: Command, result: CommandResult) => void | Promise<
 
 ### AsyncSchemaCommandBus
 
-**Type alias** - [src/schema.ts:514](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L514)
+**Type alias** - [src/schema.ts:512](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L512)
 
 ```ts
 export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncCommandBus<M> & {
@@ -2732,7 +2731,7 @@ export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncComm
 
 ### AsyncSchemaCommandBusOptions
 
-**Type alias** - [src/schema.ts:504](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L504)
+**Type alias** - [src/schema.ts:502](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L502)
 
 ```ts
 export type AsyncSchemaCommandBusOptions = AsyncCommandBusOptions & { validate?: boolean };
@@ -2877,7 +2876,7 @@ if (result.error instanceof BusError) {
 
 ### BusInspection
 
-**Type alias** - [src/command-bus.ts:3852](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3852)
+**Type alias** - [src/command-bus.ts:3873](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3873)
 
 ```ts
 export type BusInspection = {
@@ -3487,7 +3486,7 @@ export type FieldType = 'string' | 'number' | 'boolean' | 'array' | 'object' | '
 
 ### FormBus
 
-**Type alias** - [src/form.ts:115](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L115)
+**Type alias** - [src/form.ts:116](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L116)
 
 ```ts
 export type FormBus<T extends Record<string, any>> = {
@@ -3552,7 +3551,7 @@ export type FormBus<T extends Record<string, any>> = {
 
 ### FormBusOptions
 
-**Type alias** - [src/form.ts:46](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L46)
+**Type alias** - [src/form.ts:47](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L47)
 
 ```ts
 export type FormBusOptions<T extends Record<string, any>> = {
@@ -3602,7 +3601,7 @@ export type FormBusOptions<T extends Record<string, any>> = {
 
 ### FormRules
 
-**Type alias** - [src/form.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L42)
+**Type alias** - [src/form.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/form.ts#L43)
 
 ```ts
 export type FormRules<T extends Record<string, any>> = {
@@ -4045,7 +4044,7 @@ Listener callback for on() subscriptions (wildcard-capable)
 
 ### LlmAdapter
 
-**Type alias** - [src/schema.ts:399](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L399)
+**Type alias** - [src/schema.ts:397](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L397)
 
 ```ts
 export type LlmAdapter = (
@@ -4211,7 +4210,7 @@ saved state when it lands, and a rejection warns as a throw does.
 
 ### PluginInspection
 
-**Type alias** - [src/command-bus.ts:3882](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3882)
+**Type alias** - [src/command-bus.ts:3903](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L3903)
 
 ```ts
 export type PluginInspection = {
@@ -4574,7 +4573,7 @@ What `saveTo` takes.
 
 ### SchemaCommandBus
 
-**Type alias** - [src/schema.ts:506](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L506)
+**Type alias** - [src/schema.ts:504](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L504)
 
 ```ts
 export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> & {
@@ -4588,7 +4587,7 @@ export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> 
 
 ### SchemaCommandBusOptions
 
-**Type alias** - [src/schema.ts:492](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L492)
+**Type alias** - [src/schema.ts:490](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L490)
 
 ```ts
 export type SchemaCommandBusOptions = CommandBusOptions & {
@@ -4724,7 +4723,7 @@ export type SupersedeOptions = {
 
 ### SynthesizeOptions
 
-**Type alias** - [src/schema.ts:405](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L405)
+**Type alias** - [src/schema.ts:403](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L403)
 
 ```ts
 export type SynthesizeOptions = {
@@ -4747,7 +4746,7 @@ Extract the target type for action A from a CommandMap. Used in typed bus interf
 
 ### ToolCallInput
 
-**Type alias** - [src/schema.ts:471](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L471)
+**Type alias** - [src/schema.ts:469](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L469)
 
 ```ts
 export type ToolCallInput = {
@@ -4881,7 +4880,7 @@ export type UseSharedCommandStateOptions<B extends BaseBus = BaseBus> = BusOptio
 
 ### VaporCommandOptions
 
-**Type alias** - [src/chamber-vapor.ts:218](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L218)
+**Type alias** - [src/chamber-vapor.ts:217](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L217)
 
 ```ts
 export type VaporCommandOptions<B extends BaseBus = BaseBus, D extends number | undefined = undefined, T extends number | undefined = undefined> = RegisterOptions & BusOption<B> & PaceOption<D, T>;

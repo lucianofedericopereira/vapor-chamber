@@ -1,4 +1,9 @@
-// examples/static-server.mjs, started for real and fetched with Node's fetch.
+/**
+ * examples/static-server.mjs started for real and fetched with Node's fetch.
+ * Why: the no-build pages and the browser project talk to this server, and a stub would only repeat the handler table.
+ * Shows: prototype names are unknown commands; an unreadable body is a 400; the catalog carries ETag and Cache-Groups (RFC 9875), a matching If-None-Match is a 304, its one write names the group; each beside a control.
+ * See: audit SSV-1, SSV-2.
+ */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,6 +14,7 @@ beforeAll(async () => { server = await startExampleServer('examples/static-serve
 afterAll(() => server.stop());
 
 describe('GET /favicon.ico', () => {
+  // A browser asks for it on each origin's first page, and a 404 is a console error there.
   it('answers 200 with the project icon (FAV)', async () => {
     const r = await fetch(`${server.origin}/favicon.ico`);
     expect([r.status, r.headers.get('content-type')]).toEqual([200, 'image/x-icon']);
@@ -88,6 +94,7 @@ describe('GET /api/items', () => {
   });
 });
 
+// The catalog is shared by the tests of one server, so each reads its stock before it writes.
 describe('POST /api/vc productStockAdd', () => {
   const stock = async (id: number) => ((await (await get(`/api/items/${id}`)).json()) as { stock: number }).stock;
 
@@ -134,21 +141,3 @@ describe('POST /api/vc productStockAdd', () => {
     expect(pre.headers.get('access-control-expose-headers')).toBe('Cache-Group-Invalidation');
   });
 });
-
-/*
- * Why these tests start the real script: the server is what the no-build
- * example pages and the browser project talk to, and a stub would only
- * repeat the handler table. Each test checks a request the fix must refuse
- * beside one it must still answer. Rows SSV-1 and SSV-2 of the 2026-10-12
- * release audit. FAV: a browser asks for `/favicon.ico` at the root on the
- * first page of each origin, and a 404 there is a console error on that
- * page (system Chrome, 2026-10-12; the headless shell never asks). The icon
- * lives in `assets/favicon/`.
- *
- * CAT-1 to CAT-6 pin the catalog half that examples/router-demo reads and
- * writes through: the list and the item carry an `ETag` and `Cache-Groups`
- * (RFC 9875), a matching `If-None-Match` is a 304, and the one write names the
- * group it changed. The cart commands that Batches 3, 4 and 7 run on name
- * none, which CAT-4 pins as its control. The catalog is shared by the tests of
- * one server, so each reads its stock before it writes.
- */

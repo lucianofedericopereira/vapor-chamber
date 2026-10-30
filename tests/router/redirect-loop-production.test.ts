@@ -1,18 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * The production half of the redirect-loop diagnostic (router/engine.ts `DEV`).
- *
- * A guard chain that never settles is bounded and reported as `router:exceeded:redirects`.
- * The CODE is unconditional - handlers switch on it, so it cannot be dev-only -
- * but the explanatory tail naming the hop count and the likely cause is gated,
- * because this module sits on the shared side of the Vapor outlet size guard
- * and prose that only helps a human reading a console is not worth shipping to
- * every consumer.
- *
- * Both arms refuse the navigation identically; they differ only in message
- * length. Only the dev one is reachable under vitest unless a test re-imports
- * the module with NODE_ENV stubbed, which is the same shape
- * hard-nav-production.test.ts uses for the other DEV branch in this router.
+ * A guard chain that never settles is bounded and reported as `router:exceeded:redirects`, in dev and in production.
+ * Why: handlers switch on the code, so it must survive production; only the hop-count explanation is dev-only, to keep it out of every consumer's bundle.
+ * Shows: in dev the message names the redirect loop and its hops; in production the code and the "redirect loop navigating to" message remain and the hops text is gone.
+ * See: tests/router/hard-nav-production.test.ts
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,9 +18,7 @@ const ROWS = [
   { name: 'b', path: '/b', component: 'Home' },
 ];
 
-/** A router whose guards redirect at each other. Both targets are away from
- *  the start, since a redirect onto the committed location is a duplicate and
- *  would end the chain before it could loop. */
+/** A router whose guards redirect at each other; both targets differ from the start, since a redirect onto the committed location is a duplicate and ends the chain. */
 async function bootLoopingRouter() {
   const { createRouter } = await import('@router/index');
   const { createMemoryHistory } = await import('@router/history');
@@ -68,8 +57,7 @@ describe('router:exceeded:redirects diagnostic', () => {
 
     const result = (await router.push('/a')) as { code?: string; message?: string };
 
-    // The bound and the code are the contract and are unchanged; only the
-    // human-facing tail is gone.
+    // The code is the contract; only the human-facing tail is dropped.
     expect(result?.code).toBe('router:exceeded:redirects');
     expect(result?.message).toContain('redirect loop navigating to');
     expect(result?.message).not.toContain('hops');

@@ -1,11 +1,16 @@
-// /vue and /vapor carry the root's whole surface, as the same functions; rationale at the end.
+/**
+ * `vapor-chamber/vue` and `vapor-chamber/vapor` carry the root's whole surface, as the same functions.
+ * Why: a Vue app imports one entry; if an entry lacks a root name or holds a copy, the app loses wiring or a codebase mixing root and entry gets two buses and two registries.
+ * Shows: the root has a surface to compare; `/vue` exports every root name with the identical value; `/vapor` does too except `defineVaporAsyncComponent`; `/vue` adds only `enableVueReactivity`.
+ * See: log s35.231.
+ */
 import { describe, expect } from 'vitest';
 import { it } from '../src/vitest';
 import * as root from '../src/index';
 import * as vue from '../src/vue';
 import * as vapor from '../src/vapor';
 
-/** /vapor's own wrapper, which calls Vue's directly instead of reading the registry (src/vapor.ts). */
+/** /vapor's own wrapper, which calls Vue's directly instead of reading the registry. */
 const VAPOR_OWN = ['defineVaporAsyncComponent'];
 
 describe('one entry per kind of app', () => {
@@ -27,14 +32,3 @@ describe('one entry per kind of app', () => {
     expect(Object.keys(vue).filter((k) => !(k in root))).toEqual(['enableVueReactivity']);
   });
 });
-
-/*
- * Why this file exists. A Vue app imports one entry: vapor-chamber/vue, or
- * vapor-chamber/vapor for Vapor. Both carry the root's surface (the bus,
- * plugins, transports, the HTTP client) as well as the composables, through
- * `export * from './index'` in src/vue.ts. Of four builds of an app that took
- * its composables from the root, three lost some wiring (log s35.231). The
- * values must be the root's own, never copies, so a codebase mixing the
- * root and an entry still has one shared bus and one registry. The last case
- * pins the other direction: the entry adds nothing but its wiring helper.
- */

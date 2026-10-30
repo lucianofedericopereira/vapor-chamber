@@ -1,7 +1,8 @@
 /**
- * `mcpClient` and the tool-result matchers from `vapor-chamber/vitest/pure`
- * (v1.21.0): test an MCP surface the way an agent reaches it, through a
- * real `createMcpHandler`, without writing JSON-RPC envelopes by hand.
+ * `mcpClient` and the toBeToolResult / toBeToolError matchers from `vapor-chamber/vitest/pure`, through a real `createMcpHandler`.
+ * Why: a user testing an MCP surface would get wrong pass/fail verdicts, or have to write JSON-RPC envelopes by hand.
+ * Shows: calls return parsed values and reach the bus as agent dispatches; listing follows the action filter; tool errors, protocol errors and notifications come back as specified; both matchers pass, fail and negate with readable messages; a non-result value is refused.
+ * See: src/vitest-pure.ts
  */
 import { describe, expect, it } from 'vitest';
 import { createActionFilter } from '../src/action-filter';
@@ -55,7 +56,7 @@ describe('mcpClient', () => {
   it('a failing tool is a tool error; a tool not listed is a protocol error', async () => {
     const mcp = mcpClient(createMcpHandler(shop(), { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
     expect(await mcp.call('cartClear', { target: { force: true } })).toBeToolError('cart is locked');
-    await expect(mcp.call('orderCreate')).rejects.toMatchObject({ code: -32602 }); // not listed: a protocol error
+    await expect(mcp.call('orderCreate')).rejects.toMatchObject({ code: -32602 });
     expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: 'bare' })).toBeToolError();
   });
 
@@ -65,7 +66,6 @@ describe('mcpClient', () => {
     expect(await mcp.request('ping')).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
     // request() hands back the raw reply, errors included: it is for testing the envelope.
     expect(await mcp.request('resources/list')).toMatchObject({ id: 3, error: { code: -32601 } });
-    // The typed calls throw on a protocol error, with its code.
     const broken = mcpClient(async () => ({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found: tools/list' } }));
     await expect(broken.tools()).rejects.toMatchObject({ message: 'MCP tools/list failed: -32601 Method not found: tools/list', code: -32601 });
     await expect(broken.call('a')).rejects.toMatchObject({ code: -32601 });

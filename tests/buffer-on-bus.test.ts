@@ -1,4 +1,9 @@
-/** `createBuffer` as a bus option: a dispatch before its handler answers an `Accepted` that settles with the handler's result. The long note is at the end. */
+/**
+ * `createBuffer` as a bus option: a dispatch before its handler answers an `Accepted` that settles with the handler's result.
+ * Why: a caller held in the buffer must hear the handler's result, as a held outbox command does, and every drop must reach it as a coded failure.
+ * Shows: done settles with the result; replay keeps order through hooks and listeners; maxSize, ttl and clear() settle done coded and onDrop hears; queries and transports never buffer.
+ * See: plan 1.32 step 4i, owner Q7.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { createBuffer } from '../src/buffer';
@@ -88,12 +93,3 @@ describe('a transport wins over buffering', () => {
     expect(buffer.pending.value).toBe(0);
   });
 });
-
-/*
- * Plan 1.32 step 4i, owner Q7 (the store owns the buffer queue; the outbox's shape) and the
- * owner's "both", 2026-10-20. Before, `onMissing: 'buffer'` queued inside the bus and answered
- * `{ ok: true, value: undefined }` at once, so the caller never heard the handler's result,
- * and a drop reached only `onBufferOverflow`. Now the queue is its own module given to the bus,
- * a held dispatch answers an `Accepted` like a held outbox command, and every drop settles the
- * caller's `done` with a coded failure; `onDrop` keeps one place to observe them.
- */

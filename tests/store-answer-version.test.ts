@@ -1,4 +1,9 @@
-/** A store orders server answers by the version the server sends; an answer with no state writes nothing (log s35.185). Rationale at the end. */
+/**
+ * A store orders server answers by the version the server sends; an answer with no state writes nothing.
+ * Why: two writes in flight can be applied and answered in either order, so applying the last reply to arrive would keep a stale state; only the server knows which state is newer (an ETag is for equality, not order), and an answer with no `state` must not make the store undefined.
+ * Shows: with `version`, an older answer arriving last is dropped and a newer one is applied; an equal or non-numeric version falls back to arrival order with one warning; without `version` the last reply wins; an answer with no state skips `answer` and keeps the state.
+ * See: log s35.185, RFC 9110
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
@@ -8,10 +13,7 @@ type Cart = { rev: number; items: string[] };
 // Sent: no local change, the answer is the state.
 const reducers = { add: null };
 
-/**
- * A client whose replies the test releases by hand, in any order. Each reply
- * carries the state the server reached for that request: `server[item]`.
- */
+// A client whose replies the test releases by hand, in any order; each carries `server[item]`.
 function heldClient(server: Record<string, Cart | undefined>) {
   const held = new Map<string, () => void>();
   const post = vi.fn((_url: string, body: { target: string }) =>
@@ -115,16 +117,3 @@ describe('an answer with no state writes nothing', () => {
     cart.$dispose();
   });
 });
-
-/*
- * Two writes in flight can be answered in any order: the server may apply them
- * in either order (two workers), and the replies may arrive in either order.
- * Only the server knows which state is newer, so it says so with a number that
- * grows with every write; the store applies an answer only when that number is
- * higher than the one it holds, the rule `share` applies between tabs. An
- * ETag cannot do this: RFC 9110 defines it for equality, not order. A client
- * order (newest dispatch wins) was rejected: when the server reorders, it keeps
- * the stale state. Without `version` the last reply wins. A handler that
- * returned nothing sends no `state`, and a store must not become `undefined`.
- * Log s35.185.
- */

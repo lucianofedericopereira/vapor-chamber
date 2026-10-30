@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * announce(): status messages without moving focus (WCAG 4.1.3), through ONE
- * shared pair of live regions per document - the pattern of Angular CDK's
- * LiveAnnouncer and React Aria's announce(), so no feature creates a region of
- * its own. The app can take the announcing over (its own status bar, its own
- * words): setAnnouncer. docs/accessibility.md.
+ * announce(): status messages through one shared pair of live regions per document.
+ * Why: WCAG 4.1.3 status messages must be heard without moving focus.
+ * Shows: polite by default, assertive on request, one reused pair, repeats re-spoken, setAnnouncer takes over.
+ * See: docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { announce, setAnnouncer } from '../src/a11y';

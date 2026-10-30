@@ -1,12 +1,7 @@
 /**
- * StreamParser - empty arrays.
- *
- * After `[` the parser is in S_VALUE, whose handler had no `]` case, so every
- * empty array failed: `[]`, `{"items":[]}`, `[1,[]]` all ended "Unexpected end:
- * unclosed structure". Empty objects worked, because S_KEY accepts `}`.
- *
- * `]` is accepted only directly after `[`: a trailing comma (`[1,]`) is still
- * malformed JSON and must still be refused.
+ * StreamParser on empty arrays, alone and nested, at any chunk split.
+ * Why: valid JSON containing `[]` would be reported as an unclosed structure, while a trailing comma (`[1,]`) must still be refused.
+ * Shows: ten empty-array shapes parse with no error; members around an empty array are reported with their paths; every chunk size parses; `[1,]` and `{"a":[1,]}` report an error.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';

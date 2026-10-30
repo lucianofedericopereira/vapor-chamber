@@ -1,4 +1,9 @@
-// `bindCommands` on a real page in Chromium: a press keeps focus, a role="button" answers the keyboard, typed text sends once; rationale at the end.
+/**
+ * `bindCommands` on a real page in Chromium: a press keeps focus, a role="button" answers the keyboard, typed text sends once.
+ * Why: these need an engine: aria-disabled (never disabled) keeps HTML's focus fixup off the button, and real typing fires one input per key.
+ * Shows: a click dispatches on the given bus and keeps focus, a role="button" gets tabindex 0 and Enter, a debounced input sends the whole text once.
+ * See: tests/bind-commands.test.ts.
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { createAsyncCommandBus } from 'vapor-chamber';
@@ -61,9 +66,3 @@ describe('bindCommands in Chromium', () => {
     expect(runs).toEqual(['usb']);
   });
 });
-
-// The happy-dom file (tests/bind-commands.test.ts) pins the rules. These three need an
-// engine: focus stays on a pressed button (aria-disabled, never disabled, so HTML's focus
-// fixup does not move it), a role="button" is made focusable and answers Enter, and real
-// typing fires one `input` per key, which the debounce collapses to one send of the whole
-// text. The bus is the one passed in; nothing sets the shared bus.

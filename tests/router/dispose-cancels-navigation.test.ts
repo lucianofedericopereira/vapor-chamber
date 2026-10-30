@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-/** router.dispose() during a held navigation cancels it. The long note is at the end. */
+/**
+ * router.dispose() during a held navigation cancels it.
+ * Why: a navigation held on a lazy component or loader that outlived dispose() would resolve, write the history and replace the snapshot of a router nobody holds; a dispose has no successor navigation, so it must also clear isLoading.
+ * Shows: a superseding push answers router:aborted:navigation (control); push, dispose, release answers router:aborted:navigation and leaves history and the snapshot at '/'; a loading navigation cancelled by dispose leaves isLoading false; a held popstate navigation cancelled by dispose calls history.go no further.
+ * See: log s35.41
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -89,19 +94,3 @@ describe('router.dispose() cancels the navigation in flight', () => {
     expect(history.location()).toBe('/');
   });
 });
-
-/*
- * External item 1 of the 1.26 evaluation (log s35.41). `dispose()` ran the
- * teardowns and `history.dispose()` and nothing else, while the engine checks
- * only its own navigation id (`cancelled()`) between the awaits of a
- * navigation. A navigation held on a lazy component therefore carried on after
- * the router was disposed: it resolved null, wrote the history and replaced
- * the snapshot of a router nobody held any more.
- *
- * The fix reuses the path supersession already takes: the engine's `cancel()`
- * bumps the navigation id and aborts both lanes' controllers, so the held
- * navigation answers `cancelled` at its next check, exactly as when a newer
- * push supersedes it (the control). Superseding never had to clear the
- * loading flag, because the successor sets it; a dispose has no successor, so
- * `cancel()` clears it too. The third test pins that.
- */

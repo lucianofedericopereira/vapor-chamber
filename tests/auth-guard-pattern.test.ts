@@ -1,4 +1,9 @@
-/** authGuard's `protected` reads patterns as every list in the library does: a name is that action, `'admin*'` a prefix, `'*'` every action. Rationale at the end. */
+/**
+ * authGuard's `protected` reads patterns as every list in the library does: a name is that action, `'admin*'` a prefix, `'*'` every action.
+ * Why: one pattern meaning everywhere (`matchesPattern`); a guard that reads a list differently protects the wrong actions.
+ * Shows: a prefix, `*` and an exact name each protect what they say, anything else runs, [] protects nothing, a signed-in user passes.
+ * See: audit B4, audit N2, log s35.165, log 36.104, tests/pattern-classifier.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { authGuard } from '../src/plugins-core';
@@ -39,13 +44,3 @@ describe('authGuard protected patterns', () => {
     expect(bus.dispatch('adminDelete', {}).ok).toBe(true);
   });
 });
-
-/*
- * Every action list in the library takes patterns (`matchesPattern`, one
- * classifier, tests/pattern-classifier.test.ts): an exact name, `prefix*`,
- * `*`. `protected` once compared each entry as a raw prefix, so `'admin*'`
- * matched only names holding a literal `*` (audit B4, N2, log s35.165), and
- * then read a bare name as a prefix while every other list read it as one
- * action. Plan 1.32 step 8 (log 36.104, owner 2026-10-21): one meaning
- * everywhere, so `'admin'` guards that action alone and `'admin*'` the prefix.
- */

@@ -1,4 +1,9 @@
-// A dispatch's own abort has one shape wherever it lands (log s35.154).
+/**
+ * A dispatch's own abort has one shape wherever it lands: before start, in a handler, in a plugin part.
+ * Why: a caller tells a cancel from a failure by one check; a second shape, like a raw DOMException, reads as a failure.
+ * Shows: every aborted:* BusError is named AbortError with the reason as cause; own-Error reasons, ignored signals and unrelated throws stay as they are.
+ * See: log s35.154.
+ */
 import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, BusError, conditionOf, failureCondition, type Command } from '../src/command-bus';
 import { _failures } from '../src/failure';

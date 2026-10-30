@@ -1,15 +1,9 @@
 /**
- * Typed `int` params beyond Number.MAX_SAFE_INTEGER.
- *
- * `/orders/:id` with `id: 'int'` matched any run of digits and cast it with
- * Number, so `/orders/9007199254740993` reached the loader as order
- * 9007199254740992 and `resolve()` built links to that other record. 64-bit
- * ids (snowflake ids, many backends' bigint keys) are past 2^53.
- *
- * An integer the cast cannot hold exactly does not fit `int`: a path param
- * falls through to the next row, as any value that does not fit its type
- * does, and a typed query param reads its declared default, as junk does.
- * Declare such a param `string` to receive it whole.
+ * Typed `int` params beyond Number.MAX_SAFE_INTEGER, in the route matcher and decodeQueryParam.
+ * Why: an id past 2^53 (64-bit ids) cast with Number would round to a different record, so the loader and resolve() would
+ * address the wrong one; an integer the cast cannot hold exactly does not fit `int`. Declare such a param `string` to receive it whole.
+ * Shows: a path param past 2^53 falls through to the next row and arrives as a string while 2^53-1 stays an int;
+ * a query param past 2^53 reads its default, or undefined without one.
  */
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory, createRouter, decodeQueryParam } from '../../src/router';

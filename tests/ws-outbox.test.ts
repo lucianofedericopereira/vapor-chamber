@@ -1,4 +1,9 @@
-/** A `wsTransport` holds a send while its socket is down in an outbox: its own in memory, or the app's. The long note is at the end. */
+/**
+ * `wsTransport` holding a send in an outbox while its socket is down: its own in-memory one, or the app's.
+ * Why: if a held command were lost, expired without a code, or held twice, a chat or realtime caller would never hear the outcome of a send made while offline.
+ * Shows: a send while down answers an `Accepted` whose `done` settles with the reply after the socket opens; the held queue is bounded at 100, expires at the reply timeout and settles on `disconnect()` with outbox codes; a command already sent then torn down hears `transport:lost:reply`; a replay into a closed socket is refused unsent as `transport:limited:socket`; an app outbox holds the action durably and flushes when the socket opens.
+ * See: log s36.74
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Accepted } from '../src/accepted';
 import { type CommandResult, createAsyncCommandBus } from '../src/command-bus';
@@ -194,14 +199,3 @@ describe("the app's outbox over a WS action", () => {
     expect(storage.rows()).toEqual([]);
   });
 });
-
-/*
- * Plan 1.32 step 4j and owner Q2 (2026-10-19): one offline queue, the outbox. Before, the
- * transport queued a send while its socket was down, inside its own array: the caller's
- * promise waited, `maxQueueSize` (100) dropped the oldest as `transport:lost:command`, a queued
- * command failed at the reply timeout, and `disconnect()` failed it. Now the transport's own
- * outbox, in memory, holds it and answers an `Accepted`; the bound, the expiry and the
- * teardown keep their released defaults with outbox codes. An app outbox declares its own
- * durability and holds a WS action itself. A replay is never held twice: a closed socket
- * refuses it as `transport:limited:socket`, which the outbox keeps.
- */

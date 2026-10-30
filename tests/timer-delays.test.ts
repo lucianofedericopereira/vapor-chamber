@@ -1,4 +1,9 @@
-/** Every timer delay in src is a Delay or a number literal, and only bounds.ts casts to Delay. Rationale at the end. */
+/**
+ * Every setTimeout and setInterval delay in src is a Delay or a number literal, and only bounds.ts casts to Delay.
+ * Why: a timer fires at once on a delay it cannot hold (NaN, a negative, Infinity, past 2^31-1), so an unchecked number at a call site would make it misfire.
+ * Shows: the TypeScript checker finds no violation in src; a control file added in memory has each bad case caught (a number, a cast, setInterval, globalThis.setTimeout) and a Delay, a literal and a missing delay pass.
+ * See: log s36.11
+ */
 import { join, relative } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +61,7 @@ describe('timer delays', () => {
   });
 
   it('control: a number delay, a cast and setInterval are each caught; a Delay and a literal pass', () => {
+    // Virtual: added to the program in memory, never written to src.
     const control = join(root, 'src', '__timer_delays_control__.ts');
     const source = [
       "import { delayOption, type Delay } from './bounds';",
@@ -76,21 +82,3 @@ describe('timer delays', () => {
     ]);
   });
 });
-
-/*
- * A timer fires AT ONCE on a delay it cannot hold: NaN, a negative, Infinity,
- * anything past 2^31-1. bounds.ts has the rule for a caller's number (NaN is
- * the default, a larger value the maximum), but each site applied it by hand,
- * and nothing checked that it did. Five sites missed it (audit D7, D8, D9 and
- * the debounce plugin, now `pace`, log 36.11), each found one at a time.
- *
- * So the rule is a type. `Delay` (src/bounds.ts) is a number only
- * `delayOption` and `isDelay` make, and this test reads every timer call in
- * src through the TypeScript checker: the delay must be a Delay, a number
- * literal, or a union of those. A cast to Delay anywhere but bounds.ts fails
- * too, so the type cannot be claimed without the check. The internal sleep
- * helpers take `ms: Delay`, so the compiler checks their callers.
- *
- * The control file is virtual: it is added to the program in memory, never
- * written to src.
- */

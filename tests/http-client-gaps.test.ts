@@ -1,19 +1,7 @@
 /**
- * Supplemental coverage for src/http.ts - createHttpClient regions the other
- * http test files leave open:
- *
- *  - download(): content-disposition filename parsing (quoted / unquoted /
- *    absent -> 'download'), the explicit-filename bypass, and the SSR guard
- *    (831 - node env has no document, so the anchor-click trigger is skipped).
- *  - safeRequest fallbacks: non-object error body -> { message, code },
- *    and the status chain down to 0 on a network error.
- *  - interceptor arms: request onFulfilled returning undefined, an
- *    onFulfilled throw with NO onRejected registered, response
- *    interceptor returning undefined, and a failing request with a
- *    fulfilled-only response interceptor (759 skip arm).
- *  - request() with no method -> GET default.
- *  - stale-while-revalidate: background refresh failure absorbed, and
- *    serveStaleOnError with no retained entry -> the error surfaces.
+ * createHttpClient edge cases: download(), safe fallbacks, interceptor arms, request() default method, stale cache arms.
+ * Why: a wrong filename, a thrown interceptor bug, a missing method or an unhandled background refresh failure would break a user's download, request or cached read. Also the only file reaching download()'s filename arms, the interceptor arms without a return or onRejected, request()'s default method and the stale-error arm with nothing retained, so the 100% floor needs it.
+ * Shows: download() reads a quoted, unquoted or absent content-disposition filename ('download') and prefers an explicit one; safe.get turns a non-problem body into { status, detail } and a network error into status 0 with transport:lost:reply; interceptors returning undefined keep the original config or response, a request-interceptor throw without onRejected is swallowed, and a response interceptor without onRejected is skipped on failure; request() defaults to GET; a failing background refresh is absorbed while stale data is served, and serveStaleOnError with nothing retained surfaces the error.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -48,10 +36,6 @@ afterEach(() => {
   vi.useRealTimers();
   invalidateCsrfCache();
 });
-
-// ---------------------------------------------------------------------------
-// download
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - download', () => {
   it('parses a quoted content-disposition filename', async () => {
@@ -94,10 +78,6 @@ describe('createHttpClient - download', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// safeRequest fallbacks
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - safe fallbacks', () => {
   it('a body that is not a problem reads as { status, detail: HTTP <status> }', async () => {
     (globalThis.fetch as any).mockResolvedValue(
@@ -123,10 +103,6 @@ describe('createHttpClient - safe fallbacks', () => {
     expect(problemOf(result.error)).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// interceptor arms
-// ---------------------------------------------------------------------------
 
 describe('createHttpClient - interceptor arms', () => {
   it('keeps the original config when a request interceptor returns undefined', async () => {
@@ -159,7 +135,7 @@ describe('createHttpClient - interceptor arms', () => {
   it('skips absent onRejected handlers on failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'x' }));
     const http = createHttpClient();
-    http.interceptors.response.use((r) => r); // fulfilled-only - no onRejected
+    http.interceptors.response.use((r) => r);
 
     await expect(http.get('/api/data', { retry: false })).rejects.toMatchObject({ context: { status: 500 } });
   });
@@ -173,10 +149,6 @@ describe('createHttpClient - interceptor arms', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// stale-while-revalidate + serveStaleOnError
-// ---------------------------------------------------------------------------
-
 describe('createHttpClient - stale cache arms', () => {
   it('serves stale data and absorbs the failing background refresh', async () => {
     vi.setSystemTime(5_000_000);
@@ -186,15 +158,14 @@ describe('createHttpClient - stale cache arms', () => {
     const first = await http.get('/api/data', { retry: false, cache: { ttl: 1000, staleTtl: 60_000 } });
     expect(first.data).toEqual({ v: 1 });
 
-    // Entry now stale (past ttl, within staleTtl); the revalidation fetch fails.
+    // Past ttl, within staleTtl: the entry is stale and the revalidation fetch fails.
     vi.setSystemTime(5_002_000);
     (globalThis.fetch as any).mockRejectedValue(new TypeError('network down'));
 
     const second = await http.get('/api/data', { retry: false, cache: { ttl: 1000, staleTtl: 60_000 } });
     expect(second.stale).toBe(true);
     expect(second.data).toEqual({ v: 1 });
-    // The background failure must not become an unhandled rejection;
-    // the revalidation promise itself still reports it to interested callers.
+    // The background failure is not an unhandled rejection; the revalidation promise still reports it.
     await expect(second.revalidation).rejects.toThrow();
   });
 

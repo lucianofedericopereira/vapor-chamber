@@ -1,4 +1,9 @@
-/** A reaction does not run on an undo, a redo or a mirrored ('sync') command. The long note is at the end. */
+/**
+ * A reaction does not run on an undo, a redo or a mirrored ('sync') command, on the sync and the async bus.
+ * Why: a redo already replays the recorded follow-up, so a reaction running again would apply it twice or record new work and empty the redo stack; a `cart*` pattern would also match `cartAdd$undo`.
+ * Shows: after undo and redo the counts and the history past/future hold the recorded follow-up once, with `history()` and `useCommandHistory`; a `cart*` reaction stays silent in an undo; a `__origin: 'sync'` command does not trigger it; a plain user dispatch still does.
+ * See: log s36.67
+ */
 import { describe, expect, it } from 'vitest';
 import { type BaseBus, type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { useCommandHistory } from '../src/chamber';
@@ -26,13 +31,13 @@ describe.each(BUSES)('a reaction and history on the %s bus', (_name, make) => {
     await bus.dispatch('cartAdd', {});
     await settle();
     expect(actions(h.getState().past)).toEqual(['cartAdd', 'statsBump']);
-    h.undo(); // one press takes the follow-up with its click (I2)
+    h.undo(); // one press takes the follow-up with its click
     await settle();
     expect(count).toEqual({ cart: 0, follow: 0 });
     h.redo();
     await settle();
     expect(count).toEqual({ cart: 1, follow: 1 });
-    // The recorded follow-up was replayed, not a new one (M3: the async bus recorded it and emptied the redo stack).
+    // The recorded follow-up is replayed, not recorded as new work.
     expect(actions(h.getState().past)).toEqual(['cartAdd', 'statsBump']);
     expect(h.getState().past[1].meta?.origin).toBeUndefined();
     expect(h.getState().future).toEqual([]);
@@ -77,14 +82,3 @@ describe.each(BUSES)('a reaction and history on the %s bus', (_name, make) => {
     expect(count).toEqual({ cart: 1, follow: 1 });
   });
 });
-
-/*
- * Interop plan B2 (probes M2, M3, M4 R2 and R3). A redo re-dispatches the recorded command, and
- * a reaction on it ran the follow-up again: on the sync bus the follow-up applied twice (the
- * history replays the follow-up it recorded too), on the async bus the reaction's dispatch ran
- * after the redo's origin scope ended, was recorded as new work and emptied the redo stack. A
- * `cart*` pattern matched `cartAdd$undo` and bumped inside the undo. The reaction now skips the
- * three origins history does not record, read through the ledger's one rule (`_unrecorded`).
- * The 'sync' case is an app's mirror: its payload's `__origin`. A derived store stays right per
- * press once one undo takes the follow-up with its click (I2, .probes/d12/b2-derived.test.ts).
- */

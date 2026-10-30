@@ -1,23 +1,9 @@
 /**
- * Tests for freeze.ts - the dev-only deep freeze the shared-object stores use:
- * http-cache.ts response entries, plugins-extra cache() results, and
- * plugins-extra idempotent() completed results.
- *
- * The last of those was NOT frozen, and the reason it stayed that way is worth
- * keeping in front of whoever reads this next: the contract was applied by hand
- * at each call site and recorded as prose listing "both caches", so the site
- * that was forgotten was also the site missing from the list. The final
- * describe block below therefore tests the STORES rather than the helper - a
- * fourth store added without freezing has somewhere obvious to fail.
- *
- * The walk rules under test, per the module header:
- *   - plain objects and arrays: frozen and descended into
- *   - class instances / Maps / anything with its own prototype: frozen
- *     SHALLOWLY, not descended - foreign object graphs are not our business
- *   - cycles terminate (WeakSet)
- *   - production: freezeCached is a pass-through no-op
+ * freezeDeep and freezeCached (the dev-only deep freeze), and the cache() and idempotent() stores that must use it.
+ * Why: a store hands the same object to later callers; if it is left unfrozen in dev, one caller's mutation silently rewrites what every later caller reads.
+ * Shows: plain objects and arrays freeze at every depth, class instances and Maps freeze shallowly without descent, cycles and shared references terminate, production leaves values unfrozen, and cache() and idempotent() results reject mutation.
+ * See: src/freeze.ts, tests/dev-flag.test.ts.
  */
-
 import { afterEach, describe, expect, vi } from 'vitest';
 import { FREEZE_IN_DEV, freezeCached, freezeDeep } from '../src/freeze';
 import { cache, idempotent } from '../src/plugins-extra';
@@ -43,7 +29,7 @@ describe('freezeDeep', () => {
   it('terminates on cyclic graphs', () => {
     const a: Record<string, unknown> = { name: 'a' };
     const b: Record<string, unknown> = { name: 'b', a };
-    a.b = b; // cycle
+    a.b = b;
     expect(() => freezeDeep(a)).not.toThrow();
     expect(Object.isFrozen(a)).toBe(true);
     expect(Object.isFrozen(b)).toBe(true);
@@ -57,10 +43,8 @@ describe('freezeDeep', () => {
     const value = { row };
     freezeDeep(value);
     expect(Object.isFrozen(value)).toBe(true);
-    expect(Object.isFrozen(row)).toBe(true); // shallow freeze applied
-    // NOT descended: the instance's own nested state stays mutable -
-    // deep-freezing a foreign graph could break types that rely on
-    // internal mutation.
+    expect(Object.isFrozen(row)).toBe(true);
+    // Foreign graphs may rely on internal mutation, so they are not descended.
     expect(Object.isFrozen(row.cells)).toBe(false);
     row.cells.a = 2;
     expect(row.cells.a).toBe(2);
@@ -71,8 +55,8 @@ describe('freezeDeep', () => {
     const m = new Map([['k', inner]]);
     freezeDeep({ m });
     expect(Object.isFrozen(m)).toBe(true);
-    expect(Object.isFrozen(inner)).toBe(false); // reachable only through the Map - not walked
-    m.set('k2', { n: 2 }); // Object.freeze does not seal Map internals - internal mutation still works
+    expect(Object.isFrozen(inner)).toBe(false);
+    m.set('k2', { n: 2 }); // Object.freeze does not seal Map internals
     expect(m.size).toBe(2);
   });
 
@@ -99,15 +83,9 @@ describe('freezeCached', () => {
   });
 
   it('freezes in this (dev) test environment - mutation of a cached value throws in strict mode', () => {
-    // The test env is not production, so FREEZE_IN_DEV must be on - this
-    // pins the gate itself, not just the walk.
     expect(FREEZE_IN_DEV).toBe(true);
     const value = freezeCached({ items: [1, 2, 3] });
-    // No `'use strict'` directive: this is an ES module, so the body is already
-    // strict and the directive was redundant (biome/noRedundantUseStrict). The
-    // assertion is unchanged - assigning to a frozen property still throws
-    // TypeError, which is precisely what strict mode buys and what is pinned
-    // here.
+    // ES module code is strict, so assigning to a frozen property throws.
     expect(() => {
       (value as { items: number[] }).items = [];
     }).toThrow(TypeError);
@@ -119,11 +97,6 @@ describe('freezeCached', () => {
     expect(freezeCached(null)).toBe(null);
   });
 });
-
-// ---------------------------------------------------------------------------
-// The stores themselves. Every one of these hands the SAME object to a later
-// caller, so every one has to freeze on insert.
-// ---------------------------------------------------------------------------
 
 describe('stores that hand back a shared object freeze it', () => {
   it('cache() - a later hit cannot be rewritten through an earlier one', async ({ asyncBus: bus }) => {
@@ -144,8 +117,6 @@ describe('stores that hand back a shared object freeze it', () => {
     bus.register('load', async () => ({ items: [1, 2, 3] }));
 
     const first = await bus.dispatch('load', { id: 1 });
-    // Unfrozen, this push silently rewrote what every later duplicate read -
-    // and unlike the other two stores it did so without throwing anywhere.
     expect(() => {
       (first.value as { items: number[] }).items.push(999);
     }).toThrow(TypeError);
@@ -159,18 +130,13 @@ describe('stores that hand back a shared object freeze it', () => {
     bus.register('load', async () => ({ items: [1] }));
 
     const [a, b] = await Promise.all([bus.dispatch('load', { id: 2 }), bus.dispatch('load', { id: 2 })]);
-    expect(b.value).toBe(a.value); // the collapse is the point of the plugin
+    expect(b.value).toBe(a.value);
     expect(Object.isFrozen(a.value)).toBe(true);
   });
 });
 
 describe('freezeCached in production', () => {
-  // The `if (FREEZE_IN_DEV)` FALSE arm. The module header and this file's own
-  // header both state "production: freezeCached is a pass-through no-op", but
-  // nothing exercised it: FREEZE_IN_DEV is `DEV`, which is module-scope and
-  // true under vitest, so the whole suite only ever took the freezing arm.
-  // Re-import after stubbing NODE_ENV, the same way tests/dev-flag.test.ts
-  // reaches DEV's other resolutions.
+  // FREEZE_IN_DEV is fixed at module load, so re-import after stubbing NODE_ENV (as tests/dev-flag.test.ts does).
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -184,13 +150,10 @@ describe('freezeCached in production', () => {
     expect(prod.FREEZE_IN_DEV).toBe(false);
 
     const value = { items: [1, 2, 3] };
-    // Chaining contract holds identically on both arms.
     expect(prod.freezeCached(value)).toBe(value);
-    // ...but nothing was frozen: production does not pay the walk's cost.
     expect(Object.isFrozen(value)).toBe(false);
     expect(Object.isFrozen(value.items)).toBe(false);
 
-    // The dev arm makes this exact assignment throw TypeError (see above).
     value.items = [];
     expect(value.items).toEqual([]);
   });

@@ -1,22 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - a store module edited under REAL Vue HMR (log s35.101).
- *
- * When a store module changes, Vite re-runs it and the modules that import it,
- * and plugin-vue reloads each importing component with
- * `__VUE_HMR_RUNTIME__.reload(id, component)`: the new setup calls the NEW
- * definition of the store. Two holders, two outcomes before s35.101:
- *
- * - a component (scoped holder): Vue disposes the old instance BEFORE the
- *   reloaded setup runs, so the store's last holder leaves, the store is
- *   disposed and the new definition builds fresh. This worked already, and the
- *   redefinition rule relies on it; pinned here.
- * - a store created at module load (pinned, no scope): nothing disposes it, so
- *   the re-run module's `useStore` got the FIRST definition's store - edited
- *   reducers never applied, a new action was missing. tests/store-redefine.test.ts.
- *
- * Dev-only by nature, like tests/vapor/vapor-outlet-hmr.test.ts, whose harness
- * this follows: the real runtime against a real `createVaporApp`.
+ * A store module edited under real Vue HMR (`__VUE_HMR_RUNTIME__.reload`) against a real `createVaporApp`.
+ * Why: when a store module changes, the reloaded component's setup must call the new definition of the store; a component holder is disposed before the reloaded setup runs, and a store created at module load has no scope to dispose it, so a stale first definition would apply old reducers and miss a new action. With the plugin's HOT mark set, the reloaded setup must keep the store's state.
+ * Shows: the old holder's store is disposed before the reloaded setup runs, and the edited reducer and a new action are present; a module-level store redefined takes the edited definition; a reload under the HOT mark keeps the earlier items and the edited reducer applies to the next add.
+ * See: log s35.101, tests/store-redefine.test.ts, tests/vapor/vapor-outlet-hmr.test.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -35,7 +22,6 @@ const edit = (factor: number) =>
 describe('a store module hot update', () => {
   it('a component holding the store: the reloaded setup gets the edited definition', async () => {
     const hmr = (globalThis as { __VUE_HMR_RUNTIME__?: Hmr }).__VUE_HMR_RUNTIME__!;
-    // Guard the harness: without the dev runtime this file would measure nothing.
     expect(hmr).toBeTruthy();
     const bus = createCommandBus();
     const order: string[] = [];
@@ -58,7 +44,7 @@ describe('a store module hot update', () => {
     const app = createVaporApp(C1 as never);
     app.mount(host);
 
-    const useV2 = edit(10); // the store module re-ran
+    const useV2 = edit(10);
     const C2 = defineVaporComponent({
       __hmrId: id,
       setup() {
@@ -83,8 +69,8 @@ describe('a store module hot update', () => {
   it('a store created at module load: the re-run module gets the edited definition', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    const before = edit(1)(bus); // module scope: no effect scope, pinned
-    const after = edit(10)(bus); // the module re-ran
+    const before = edit(1)(bus); // module scope: no effect scope
+    const after = edit(10)(bus);
     after.add(3);
     expect(after.state.value.items).toEqual([30]);
     expect(typeof (after as { bump?: unknown }).bump).toBe('function');

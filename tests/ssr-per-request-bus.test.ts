@@ -1,4 +1,9 @@
-// Concurrent SSR renders with a bus per request never cross; rationale at the end.
+/**
+ * Concurrent SSR renders with a bus per request never cross; a shared bus set per request loses the slower request.
+ * Why: a server that sets the shared bus per request and resets it after would lose the dispatch of whichever concurrent render finishes last; a bus provided to each request's app and passed to the composable as `{ bus }` is safe.
+ * Shows: two renders interleaved across an await each dispatch only their own id on their own bus; with the shared bus the slower request's dispatch is lost.
+ * See: log s35.221, log s35.224, docs/whitepaper.md 12.2, src/ssr.ts
+ */
 import { afterEach, describe, expect, vi } from 'vitest';
 import { createSSRApp, defineComponent, h, inject } from 'vue';
 import { renderToString } from 'vue/server-renderer';
@@ -23,8 +28,10 @@ function notes(bus: CommandBus): string[] {
 function page(id: string, wait: number, busOf: () => CommandBus | undefined) {
   return defineComponent({
     async setup() {
+      // Read the bus before the await: a plain async setup does not restore the component instance after it, so inject must run first.
       const bus = busOf();
       await tick(wait);
+      // Created after the await, when the shared bus may already have moved on.
       const { dispatch } = useCommand({ bus });
       dispatch('note', id);
       return () => h('p', id);
@@ -61,23 +68,7 @@ describe('concurrent SSR renders', () => {
       return ids;
     }
     const [a, b] = await Promise.all([render('a', 20), render('b', 5)]);
-    // b set the shared bus last and finished first; its reset left nothing for
-    // a, whose composable then got a fresh shared bus with no `note` handler.
+    // b sets the shared bus last and finishes first; its reset leaves a's composable a fresh shared bus with no `note` handler.
     expect({ a, b }).toEqual({ a: [], b: ['b'] });
   });
 });
-
-/*
- * Why this file exists. src/ssr.ts and whitepaper 12.2 showed a server entry
- * that sets the shared bus per request and resets it after. Their own warning
- * says that is unsafe under concurrent renders. The control measures it: two
- * renders interleaved across an `await` in setup, and the slower request's
- * dispatch is lost. The first test is the shape the docs now show: a bus per
- * request, provided to that request's app, read by the component and passed to
- * the composable as `{ bus }` (log s35.221, s35.224). No dispatch crosses.
- *
- * The bus is read before the `await`. A plain async setup does not restore the
- * component instance after an await, so `inject` must run first. A compiled
- * `<script setup>` restores it. The composable is created after the await, the
- * case where the shared bus has already moved on.
- */

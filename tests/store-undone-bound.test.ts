@@ -1,11 +1,7 @@
 /**
  * A store with `undo: true` keeps at most UNDO_RING (256) undone steps.
- *
- * A redo reads only the newest undone steps, and history drops its redo list
- * on a new action, so older undone steps can never be redone; kept, each held
- * two whole states for the store's lifetime (1,000 action-and-undo rounds of
- * 80 KB states: 89 MB, against 29 MB without the undos; the measurement is
- * a GC probe outside the suite). Past the bound, undo and redo still work.
+ * Why: a redo reads only the newest undone steps and history drops its redo list on a new action, so older undone steps can never be redone; if kept, each would hold two whole states for the store's lifetime.
+ * Shows: after 300 rounds of an action and its undo, which is past the bound, undo and redo still give the right state; the bound itself is not asserted.
  */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';

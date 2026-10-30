@@ -1,4 +1,9 @@
-/** History's steps are state: its stacks are handed out with no copy, the same array until a change, readonly in the type. Rationale at the end. */
+/**
+ * history().getState() stacks: handed out without a copy, replaced by new arrays on each change.
+ * Why: a copy per read or in-place mutation of a handed-out stack would make store state unreliable for subscribers; the type is readonly because a runtime freeze would cost a pass per recorded dispatch.
+ * Shows: same array identity between reads, new arrays after a dispatch and after an undo with old snapshots unchanged, and a write to past is a type error while the array is not frozen.
+ * See: audit M1.
+ */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
@@ -46,12 +51,3 @@ describe("history's stacks", () => {
     expect(Object.isFrozen(past)).toBe(false);
   });
 });
-
-// Rationale.
-// Plan 1.32 4.2: history's steps are store state. The 1-7 fix-up (audit M1,
-// coordinator 2026-10-21) puts the ledger's two stacks on a state half of their
-// own. Each change writes both as new arrays, so getState() and
-// useCommandHistory hand them out with no copy (before: a copy per read and
-// per change). They are `readonly` in the type, a build-time check: a
-// development freeze would run per recorded dispatch (coordinator order
-// 2026-10-21, step 8 e75a2c4 did the same for the command).

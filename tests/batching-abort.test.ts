@@ -1,4 +1,9 @@
-/** The batching bridge: a dispatch's abort settles that dispatch, before or after the flush (log s35.168). Rationale at the end. */
+/**
+ * The batching bridge: a dispatch's abort settles that dispatch, before or after the flush.
+ * Why: HTTP transports propagate `Command.signal`; an abort while waiting must not send and report ok, and a shared request is cancelled only once all its commands abort.
+ * Shows: aborted before the flush it is never sent; after, it settles at once and a batch of one is cancelled; siblings still land; also with the bridge's signal and without AbortSignal.any.
+ * See: audit B10, audit D1, log s35.168, log s35.202, log 36.13.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { httpTransport } from '../src/transports';
@@ -39,6 +44,7 @@ describe('an aborted dispatch', () => {
   });
 
   it('aborted after the flush: settles at once, and the request is cancelled when it was the only command', async () => {
+    // A 1 s backend, so "at once" holds even when a timer runs late under load.
     const posts = backend(1000);
     const bus = bridged('microtask');
     const ac = new AbortController();
@@ -124,21 +130,3 @@ describe('control', () => {
     expect(posts).toHaveLength(1);
   });
 });
-
-/*
- * `Command.signal` says HTTP transports "auto-propagate it", and README and
- * supersede's comment name the batching bridge. It checked the signal only
- * before queueing, so a dispatch aborted while waiting for its window went
- * out and reported `ok` (audit B10, D1). Now an abort before the flush
- * removes the command, never sent; after the flush the command settles
- * `core:aborted:dispatch` at once. The shared request is cancelled only once
- * every command in it has aborted, the HTTP client's dedupe rule ("cancelled
- * once every caller holding it has aborted"); the WebSocket bridge documents
- * the same per-command limit. Log s35.168.
- *
- * One block holds every test of the fix: all seven fail on the code before
- * it (log s35.202, which corrects s35.168's "green before" for the bridge's
- * own signal and the fallback without `AbortSignal.any`). The control is the
- * dispatch with no signal. "At once" reads against a backend answering in
- * 1 s, not 50 ms, so a timer late under load cannot fail it.
- */

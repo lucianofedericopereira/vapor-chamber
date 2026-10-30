@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// `VaporChamber.mount`: an island's stores on its own bus, its element bound, `unmount()` releases both. Rationale at the end.
+/**
+ * VaporChamber.mount: an island's stores on its own bus, its element bound, unmount() releasing both.
+ * Why: an island that does not create its declared stores, bind data-vc-command and the display attributes, or release them on unmount would leave the page inert or leaking.
+ * Shows: stores are created on the island bus and returned by name, a click writes the store and the text follows, unmount() stops binding and disposes the stores, a missing selector or missing document yields stores with no element, and a hand-wired island behaves the same.
+ * See: log 36.F38.
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import VaporChamber from '../src/iife';
 import { createApp } from '../src/iife-app';
@@ -87,6 +92,7 @@ describe('VaporChamber.mount', () => {
     island.unmount();
   });
 
+  // Control: if this fails the harness's click or text is at fault, not mount.
   it('control: the same island wired by hand', async () => {
     page();
     const { bus } = createApp();
@@ -101,10 +107,3 @@ describe('VaporChamber.mount', () => {
     analytics.$dispose();
   });
 });
-
-// Rationale. `mount` returned its `state` option as given and never bound its
-// element, from the v0.5 draft on (log 36.F38). On 1.32 the store holds every
-// state, so the island's state is its stores: the app declares each one, and
-// `mount` creates them on the island's bus, binds `data-vc-command` and the
-// display attributes, and hands back `unmount()`. The control wires the same
-// island by hand, so a red case is mount's, never the harness's click or text.

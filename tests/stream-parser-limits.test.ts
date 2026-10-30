@@ -1,19 +1,7 @@
 /**
- * StreamParser - buffer growth, depth limits, mismatched closers, post-end input.
- *
- * The malformed-input suite covers the handlers' error arms; what it never
- * exercises are the *structural* limits that sit outside any single handler:
- *
- *  - StringBuffer.push growth - every existing test string fits the
- *    initial 256-unit buffer, so the doubling path never ran.
- *  - openObject/openArray maxDepth guards - the parser's only
- *    protection against a hostile stream nesting until the process dies.
- *  - closeObject/closeArray parent mismatch - `[1}` / `{"a":1]`
- *    reach the closers with the *wrong* parent on the stack, which is a
- *    different path from the handler-level "unexpected character" rejects.
- *  - handleNumber's default arm - reachable only after end(), when the
- *    state is S_DONE and dispatch falls through to the number handler.
- *  - S_NUM_EXP_DIGIT digit accumulation - a multi-digit exponent.
+ * StreamParser structural limits: string buffer growth, maxDepth, mismatched closers, multi-digit exponents, input after end().
+ * Why: a hostile stream nesting past maxDepth would otherwise exhaust the process, and long strings would be truncated or reordered. Also the only file reaching the maxDepth error, the mismatched closers and multi-digit exponents, so the 100% floor needs it.
+ * Shows: 5000- and 9000-char strings come back intact; nesting past maxDepth errors and nesting at the limit parses; `[1}` and `{"a":1]` error; `1.5e123` parses; a write after end() errors; reset() allows a new parse.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -33,7 +21,7 @@ function collect(options?: { maxDepth?: number }) {
 
 describe('StreamParser - string buffer growth', () => {
   it('grows past the initial buffer for a long string value', () => {
-    // 5000 > the 256-unit initial buffer, so push() doubles several times.
+    // 5000 exceeds the 256-unit initial buffer.
     const long = 'x'.repeat(5000);
     const { parser, values, errors } = collect();
     parser.write(`{"a":"${long}"}`);
@@ -43,8 +31,7 @@ describe('StreamParser - string buffer growth', () => {
   });
 
   it('grows past the chunked-flush size', () => {
-    // > FLUSH_CHUNK: flush() must stitch the segments back together in
-    // order, not just survive the growth.
+    // Longer than FLUSH_CHUNK: the segments must be rejoined in order.
     const long = `${'a'.repeat(9000)}TAIL`;
     const { parser, values, errors } = collect();
     parser.write(`{"a":"${long}"}`);

@@ -1,90 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * ACCEPTANCE CRITERIA for `revalidateRoutes`, written against pattern C of
- * the composition plan, which has since been deleted into docs/router.md and
- * docs/whitepaper.md 8.2. git has it.
- *
- * Committed BEFORE the implementation, deliberately - and it earned that order
- * immediately: writing the criteria against today's exports falsified one plan
- * claim (decision 2) and writing the implementation against them overturned the
- * placement the criteria had assumed (decision 1). Both are recorded here as
- * revisions rather than quietly rewritten, because the reasoning is the part
- * worth keeping.
- *
- * WHAT IT IS. A bus plugin. After a command that changed server state, the
- * data behind the current route is stale; the plugin re-runs the affected
- * loaders and patches the snapshot. The router already owns every piece -
- * `runLoaders` is exported, `setRouteData` is public API - so this composes two
- * public surfaces and adds no router capability.
- *
- * ============================================================================
- * DECISION 1 - PLACEMENT: router-side, on the existing entry (revised twice).
- * ============================================================================
- *
- * The choice was between (a) living with the bus plugins and taking the router
- * as a structurally-typed argument, and (b) a router-adjacent subpath.
- *
- * Neither, in the end - router-side, but on the EXISTING entry rather than a
- * subpath. Both revisions are below, and they are the useful half.
- *
- * Stage 1 chose (a) by counting edges: `src/router/**` imports nothing from the
- * bus, `src/index.ts` imports nothing from the router, so hosting the plugin on
- * the router would create an edge that does not exist. True, and not decisive,
- * because it weighed the two edges as if they were equal. They are not.
- *
- * Writing the implementation settled it in one step. The plugin's core move is
- * `runLoaders(...)`, and there is NO public substitute - `reload()` reloads the
- * TABLE, not data, and nothing else on the `Router` type re-runs a loader. So
- * bus-side would have had to import a router module into the root barrel, which
- * is precisely what the constraint forbids. What it needs from the BUS, by
- * contrast, is two shapes - the plugin function and `on(pattern, listener)` -
- * declared inline in the implementation, importing nothing. Since 1.32 (step
- * 3g) it listens through `on` (PluginParts.attach) and holds no `next`.
- *
- * Deep one way, shallow the other. The edge exists in one direction and it is
- * the cheap one, so it ships router-side - from the EXISTING
- * `vapor-chamber/router` entry, not a subpath of its own. Minting one added a
- * Vite build entry, which re-chunked shared code and dropped the outlet size
- * guard from 20.02 to 19.90 with the outlet itself untouched. A subpath exists
- * to isolate cost; this module imports nothing the router core lacks, so there
- * was none to isolate - and it tree-shakes for anyone who never calls it.
- *
- * ============================================================================
- * DECISION 3 - `loaders` is an argument, and the plan's example could not work.
- * ============================================================================
- *
- * Section 4C sketches `revalidateRoutes(router, MAP)`. `createRouter` closes
- * over its `LoaderHandlers` and exposes them nowhere, so a two-argument form
- * would have to construct a SECOND preset - a second HTTP client, a second
- * cache - silently diverging from the one the router actually uses. Passing the
- * same instance is the composition's one wiring cost, and it is honest.
- *
- * ============================================================================
- * DECISION 2 - `isRevalidating` does NOT flip, and this corrects a plan claim.
- * ============================================================================
- *
- * Section 4C claims "**`isRevalidating` drives the UI for free**". It does not,
- * and cannot, for a plugin restricted to the public surface:
- *
- *   - `router.isRevalidating` is typed `Readonly<ShallowRef<boolean>>`.
- *   - the only writer is the engine's `trackRevalidation`, which is returned by
- *     `createEngine` but is NOT on the `router` object literal and NOT on the
- *     `Router` type - it is wired solely into `runLoaders`' `onRevalidate`.
- *
- * So the flag is reachable only by casting away `Readonly` and writing another
- * module's signal, or by adding router surface. The brief forbids both, and it
- * is right to: a plugin that reaches into the engine stops being a composition
- * of public surfaces and becomes a second writer to the router's own state.
- *
- * The decision is therefore to expose the plugin's OWN `isRevalidating` signal,
- * and for `router.isRevalidating` to stay exactly what it documents: true while
- * a LOADER hands the engine a refresh through `ctx.revalidate`. Two independent
- * refresh sources get two flags rather than one flag with two writers, and a
- * consumer that wants a single spinner ORs them - which is a line of app code,
- * not a router change.
- *
- * The pinned consequence is asserted below: the plan's phrasing is wrong, and
- * the acceptance file records that rather than quietly building around it.
+ * revalidateRoutes: a bus plugin that re-runs the affected loaders and patches the route snapshot after a command that changed server state.
+ * Why: the data behind the current route would stay stale after a successful command. The plugin composes two public surfaces (`runLoaders`, `setRouteData`) and adds no router capability. It ships router-side on the existing `vapor-chamber/router` entry, because nothing public re-runs a loader (`reload()` reloads the table, not data) and a subpath would isolate no cost. `loaders` is an argument, because the router exposes its LoaderHandlers nowhere and a second preset would diverge from the router's own. The plugin owns its `isRevalidating` flag, because `router.isRevalidating` is read-only, its only writer (the engine's `trackRevalidation`) is not public, and a second writer to the router's state would break the composition; a consumer wanting one spinner ORs the two flags.
+ * Shows: the public surface the plugin composes; the map refreshes matching commands only and never after a failure; 'affected' resolves to the current load chain; wiring mistakes and failed refreshes are reported (onError, else console.error) without failing the command; dispose and superseded navigations drop refreshes; the plugin's own flag stays up until the last overlapping refresh settles; a refresh aborts only an overlapping refresh of the same record.
+ * See: docs/router.md, docs/whitepaper.md 8.2
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -131,11 +50,7 @@ function makeRouter(onLoad: () => unknown) {
   });
 }
 
-/**
- * The surface the plugin will compose. These are real assertions today: if any
- * of them changes, the plugin's design premise changed with it, and this file
- * says so before the implementation is written rather than after it breaks.
- */
+// If any of these changes, the plugin's design premise changed with it.
 describe('composition surface - the plugin depends on exactly this', () => {
   it('exports runLoaders from the router entry', () => {
     expect(typeof runLoaders).toBe('function');
@@ -155,8 +70,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
 
     const matched = router.currentRoute.value.location.matched;
     expect(matched.map((r) => r.name)).toContain('shop.cart');
-    // The load chain is precomputed on the record - the plugin re-runs this,
-    // it does not rediscover it.
+    // The load chain is precomputed on the record; the plugin re-runs it.
     expect(matched[matched.length - 1]?.loadChain.map((r) => r.name)).toEqual(['shop.cart']);
     router.dispose();
   });
@@ -170,8 +84,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
   it('does NOT expose trackRevalidation - the constraint behind decision 2', async () => {
     const router = makeRouter(() => ({ items: [] }));
     await router.isReady();
-    // If this ever becomes public, decision 2 is worth revisiting: the plugin
-    // could then drive router.isRevalidating without reaching into internals.
+    // If this becomes public, the plugin could drive router.isRevalidating itself.
     expect((router as unknown as Record<string, unknown>).trackRevalidation).toBeUndefined();
     router.dispose();
   });
@@ -179,8 +92,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
   it('types isRevalidating as read-only, which is why the plugin owns its own flag', async () => {
     const router = makeRouter(() => ({ items: [] }));
     await router.isReady();
-    // Runtime shape only - the Readonly<> is compile-time. Asserting the value
-    // exists and starts false pins what the plugin must NOT try to drive.
+    // Runtime shape only: the Readonly<> is compile-time, so this pins only that the flag exists and starts false.
     const typed: Router = router;
     expect(typed.isRevalidating.value).toBe(false);
     router.dispose();
@@ -366,8 +278,7 @@ describe('revalidateRoutes - behaviour', () => {
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), {});
-    // `constructor` is on Object.prototype; a `map[action]` lookup would find
-    // it and treat it as a configured target.
+    // `constructor` is on Object.prototype; a `map[action]` lookup would treat it as a configured target.
     fire(plugin, 'constructor');
     fire(plugin, 'toString');
     await settle();
@@ -397,8 +308,7 @@ describe('revalidateRoutes - edges', () => {
   it('is a no-op before the first navigation, when nothing is matched', async () => {
     let n = 0;
     const router = makeRouter(() => ({ n: ++n }));
-    // Deliberately NOT ready: START_LOCATION matches nothing, so there is no
-    // leaf to resolve a chain against.
+    // Not ready on purpose: START_LOCATION matches nothing, so no leaf resolves a chain.
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { '*': 'affected' });
     expect(() => fire(plugin, 'cartAdd')).not.toThrow();
     await settle();
@@ -410,7 +320,7 @@ describe('revalidateRoutes - edges', () => {
   it("is a no-op for 'affected' on a route with no loaders", async () => {
     let n = 0;
     const router = makeRouter(() => ({ n: ++n }));
-    await router.isReady();   // '/' -> shop, which declares no `load`
+    await router.isReady(); // '/' is shop, which declares no `load`
     const before = n;
 
     const plugin = revalidateRoutes(router, LOADERS(() => ({ n: ++n })), { '*': 'affected' });
@@ -424,7 +334,7 @@ describe('revalidateRoutes - edges', () => {
 
   it("names an empty chain as 'none' in the unknown-record error", async () => {
     const router = makeRouter(() => ({ v: 1 }));
-    await router.isReady();   // on '/', no loader-bearing records at all
+    await router.isReady(); // on '/', no loader-bearing records at all
 
     const onError = vi.fn();
     const plugin = revalidateRoutes(router, LOADERS(() => ({ v: 1 })), { '*': ['shop.cart'] }, { onError });
@@ -449,7 +359,7 @@ describe('revalidateRoutes - edges', () => {
     fire(plugin, 'cartAdd');
     await settle();
 
-    await router.push('/');          // navigate away while the refresh is open
+    await router.push('/'); // navigate away while the refresh is open
     release();
     await settle();
 
@@ -521,9 +431,7 @@ describe('revalidateRoutes - edges', () => {
   });
 
   it('stays silent when an aborted refresh rejects rather than resolves', async () => {
-    // The other half of the abort story: dispose() aborts, and runLoaders maps
-    // an aborted signal to a coded `router:aborted:navigation` rejection. That is a refusal we
-    // caused, so it must not reach onError or the console.
+    // dispose() aborts and runLoaders maps the aborted signal to a `router:aborted:navigation` rejection; a refusal the plugin caused must not reach onError or the console.
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     const seen: unknown[] = [];
@@ -569,16 +477,7 @@ describe('revalidateRoutes - edges', () => {
   });
 });
 
-/**
- * One controller per refresh, aborted only by a refresh that overlaps it.
- *
- * A single shared AbortController made every revalidation cancel every other
- * one whatever it was refreshing. Two commands in a row mapped to different
- * records meant the second aborted the first, the first record's fresh data was
- * discarded, and nothing retried it. The command had succeeded, so the page
- * kept stale data with no error anywhere - the exact outcome this plugin exists
- * to prevent.
- */
+// One controller per refresh, aborted only by a refresh that overlaps it: a shared controller would let a refresh of one record discard another's fresh data, leaving stale data with no error.
 describe('revalidateRoutes - overlapping refreshes only', () => {
   const TWO_ROWS = [
     { name: 'shop', path: '/', component: 'Shell' },
@@ -634,8 +533,7 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     fire(plugin, 'wishAdd');
     await settle();
 
-    // Both landed: the wishlist's refresh does not abort the cart's (which
-    // would leave its value exactly as it was before the command).
+    // Both landed: an aborted cart refresh would leave its value as it was before the command.
     expect(router.currentRoute.value.data.get('shop.cart')).not.toEqual(cartBefore);
     expect((router.currentRoute.value.data.get('shop.wish') as { ref: string }).ref).toBe('wish');
 
@@ -663,8 +561,7 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     fire(plugin, 'cartAdd');
     await settle();
 
-    // The first was superseded, not merged: the committed value is the later
-    // run's, and the flag is back down.
+    // The first was superseded, not merged: the committed value is the later run's.
     expect((router.currentRoute.value.data.get('shop.cart') as { n: number }).n).toBe(counts.cart);
     expect(plugin.isRevalidating.value).toBe(false);
 

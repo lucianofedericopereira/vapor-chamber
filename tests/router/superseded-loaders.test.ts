@@ -1,4 +1,9 @@
-/** Three navigations back to back: what each loader's signal says, and how each navigation settles. The long note is at the end. */
+/**
+ * Three navigations fired back to back: what each loader's abort signal says, how each navigation settles, and which abort listeners remain on a signal.
+ * Why: if a superseded navigation did not abort its loader or answer `router:aborted:navigation`, a stale page could commit or hang; an abort listener left on every settled signal would leak.
+ * Shows: the two older loaders see an abort at once, the older navigations answer aborted:navigation and the last commits its data; a loader that ignores its signal settles when it returns, and one that never returns holds its navigation open, as a bus handler under `supersede` does; after a real fetch, one abort listener was added and none is left, on the router's signal and on the bus's `supersede` signal.
+ * See: log s35.207
+ */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -185,30 +190,3 @@ describe('abort listeners left on a signal after its navigation settles', () => 
     });
   });
 });
-
-/*
- * Plan 1.28 item 5 (log s35.207). Superseded navigations use their own
- * AbortController (src/router/engine.ts `navController`, `supersede()`), and
- * the core has the `supersede` plugin with `core:aborted:dispatch`. The probe
- * fires three navigations back to back, each with a loader, and records which
- * loaders see `signal.aborted`, the failure each navigation settles with, and
- * the abort listeners left on a signal once its navigation settled.
- *
- * The two older navigations' loaders see the abort at once. Each older
- * navigation answers `router:aborted:navigation`, whether its loader read the
- * signal or not, and the last one commits with its data. A loader that never
- * reads its signal settles its navigation when it returns (the positive
- * control). One that never returns holds its navigation's promise open, and a
- * bus handler under `supersede` that ignores `cmd.signal` does the same:
- * cancellation inside a started piece of work is cooperative on both sides.
- *
- * Listener counts: the counter wraps EventTarget's add and remove for abort
- * listeners on AbortSignals, and its control sees the one a loader leaves.
- * On the committed navigation's signal and on the bus's `supersede` signal
- * alike, one abort listener is added during the request and none is left
- * once it settled.
- *
- * The router's failure code is its own namespace (`router:aborted:navigation`,
- * src/schema.ts), the bus's is `core:aborted:dispatch`. Different owners by
- * the error model, the same condition (`aborted`).
- */

@@ -1,4 +1,9 @@
-/** A Back or Forward whose guard redirects, and whose redirect then fails, walks the address bar back to the page on screen (log 36.13). Rationale at the end. */
+/**
+ * A Back or Forward whose guard redirects, and whose redirect then fails, walks the address bar back to the page on screen.
+ * Why: only the popstate frame holds the history delta, so a failed redirect would leave the address bar on the entry Back moved to while the page stays on the one before it.
+ * Shows: when the redirect is refused by a guard, matches no route, leads back to the page on screen or fails its component, history ends on the page on screen; a refused Back walks back and a redirect that commits stays put.
+ * See: log 36.13
+ */
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { isRouterError } from '@router/errors';
@@ -76,15 +81,3 @@ describe('control', () => {
     router.dispose();
   });
 });
-
-/*
- * engine.ts `revert`: "A REFUSED or failed popstate navigation walks the
- * history back, so the address bar returns to the page still on screen." Only
- * the popstate frame holds the history delta; a guard's redirect runs as an
- * inner navigation with none. The outer frame compensated only when the inner
- * one ended `router:exceeded:redirects`. A redirect that a guard refused, that
- * matched no route, or whose component failed returned its error through the
- * outer frame with no walk back: the browser stayed on the entry Back moved
- * to, the page stayed on the one before it. The control is a Back refused
- * outright (router.test.ts pins it too) and a redirect that commits.
- */

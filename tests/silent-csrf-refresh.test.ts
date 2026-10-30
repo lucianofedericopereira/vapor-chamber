@@ -1,4 +1,9 @@
-/** A `silent` request whose 419 refresh finds no token says so on its failure, as every other failure does (log 36.13). Rationale at the end. */
+/**
+ * A `silent` request whose 419 refresh finds no token marks its transport:missing:csrf failure silent, as every other failure is.
+ * Why: `silent` stamps context.silent so a global error handler can skip the failure; an unstamped refresh failure would reach that handler, and a shared refresh must not stamp a loud request silent.
+ * Shows: postCommand and the client both mark the 419 failure silent, two requests sharing one refresh each keep their own mark, and the controls (a silent 500, a 419 without silent) are marked or left unmarked accordingly.
+ * See: log s36.13, src/http.ts
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
 
@@ -62,15 +67,3 @@ describe('control', () => {
     expect(await failure(postCommand('/api/cmd', {}, { csrf: true }))).toEqual(['transport:missing:csrf', undefined]);
   });
 });
-
-/*
- * HttpConfig.silent: "Stamps `context.silent` on a thrown error so a
- * caller-provided global error handler can skip it." runWithRetry stamps
- * every failure it builds with asSilent, and its catch rethrows a BusError
- * as it is ("already judged by the rule there"). The 419 refresh's own
- * failure, `transport:missing:csrf` from refreshCsrfOnce, is a BusError built
- * outside the loop, so it left unstamped. The client re-stamps every BusError
- * on its way out (createHttpClient's request), so only postCommand, and what
- * calls it with `silent`, showed it. The controls: a silent 500, the client's
- * same 419, and the 419 without `silent`.
- */

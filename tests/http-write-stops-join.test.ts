@@ -1,4 +1,9 @@
-/** A write's invalidation stops new reads joining an older read still on the wire (log s35.169). Rationale at the end. */
+/**
+ * A write's invalidation stops new reads joining an older read still on the wire.
+ * Why: a GET made after a write that joined a read already in flight would answer from before the write (RFC 9111 4.4 makes invalidating the target URI a MUST); request headers are part of the dedupe key, so the invalidation must match the read's URL, not parse the key.
+ * Shows: after a POST or a PUT to the URL the next GET sends its own request (2 GETs, second answer 2); with nothing between, or a write to another URL, the GETs share one request; reads with different headers stay apart.
+ * See: RFC 9111 4.4, audit B11, audit D8, log s35.169
+ */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 
@@ -62,15 +67,3 @@ describe('controls', () => {
     expect(gets()).toBe(2);
   });
 });
-
-/*
- * http-cache: "A read made after this must not join one already on the
- * wire, which may answer from before"; RFC 9111 4.4 makes the target URI's
- * invalidation a MUST. The dedupe key became
- * `method:responseType:[304:]JSON(headers):fullUrl` (request headers change
- * the answer), but the invalidation still parsed the URL after the key's
- * second `:`, the old format, so a write's exact-URL match never found the
- * read in flight and a GET made after the write joined it (audit B11, D8).
- * The in-flight entry now records its URL beside the promise, and the
- * invalidation matches that URL. Log s35.169.
- */

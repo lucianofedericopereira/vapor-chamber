@@ -1,4 +1,9 @@
-/** The form's state is one store: one write per command, per-slice cells, the duplicate id from the registry. Rationale at the end. */
+/**
+ * createFormBus state as one store: a throwing subscriber leaves no stale cells, isValid re-runs only when it flips, duplicate ids are rejected.
+ * Why: a Vue effect runs inside the write that triggers it; if the form wrote its cells one by one, a subscriber that throws would leave isDirty or isValid stale, and an invalid value would read as valid.
+ * Shows: with a throwing subscriber on errors or isDirty the other cells are still current, an isValid reader runs twice over four sets, a second form with the same id on a bus throws and the bus gets no claim field, dispose frees the id, isDirty and isValid follow set and reset.
+ * See: tests/form-throwing-subscriber.test.ts, log 36.63.
+ */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { effect } from 'vue';
 import { waitForVueDetection } from '../src/chamber';
@@ -71,17 +76,3 @@ describe('a form on a store', () => {
     void f;
   });
 });
-
-/*
- * Plan 1.32 4f. The form held eight signals and wrote them one by one: a Vue
- * effect runs inside the write that triggers it, so a subscriber that threw on
- * `errors` or `isDirty` skipped the writes after it (pinned as "today, not
- * fixed" in tests/form-throwing-subscriber.test.ts). The form's state is now
- * one store, written once per command; its public cells are each a signal over
- * the store's field events, the shape `fieldRef` uses, so a reader of `isValid`
- * still re-runs only when it flips (coordinator 2026-10-19, B: per-slice
- * re-runs are released behaviour). A subscriber's throw lands in the field
- * lane's log line and the other cells are written. The duplicate-id check
- * reads the bus's store registry; the `__vcFormIds` field on the bus is gone.
- * `values` and the other state cells are read-only by type.
- */

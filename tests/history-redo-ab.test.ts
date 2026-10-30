@@ -1,27 +1,8 @@
 /**
- * Real-path A/B for history()'s async-redo fix, in the house three-arm shape
- * (tests/plugin-throw-ab.test.ts): a baseline DERIVED from the shipped
- * src/plugins-core.ts with the fix reverted, a byte-identical second copy of
- * that baseline as the self-control, and the shipped source - every timed arm
- * a derived copy, loaded the same way.
- *
- * WHAT IS MEASURED: the recorder's `cmd.meta?.origin !== 'redo'` test, read on
- * every dispatch the plugin sees, and redo()'s dispatch through
- * `_withOrigin('redo', ...)`. The buses are the shipped src/command-bus.ts in
- * every arm; only the plugin differs.
- *
- * READ EVERY ROW AGAINST ITS SELF-CONTROL ROW: two byte-identical arms give
- * this machine's noise band in this run, and a shipped ratio inside it is not
- * claimed in either direction.
- *
- * NO TIMING THRESHOLD IS ASSERTED; the printed table is the evidence. What IS
- * asserted is equivalence where the arms must agree (the sync bus, the island
- * cart's wiring) and the one intended difference (a redo on an async bus is
- * recorded once, not twice). Numbers quoted anywhere come from three runs of:
- *
- *   NODE_ENV=production NODE_OPTIONS=--expose-gc npx vitest run tests/history-redo-ab.test.ts --silent=false
- *
- * Ratios are TIME ratios: above 1.00 is slower than the denominator arm.
+ * history() async redo, shipped source against a derived copy with the origin check reverted, plus a byte-identical self-control copy.
+ * Why: a redo on an async bus must be recorded once; if the recorder tracked replay with a flag alone, the redo would be recorded twice and leave a duplicate step in the history.
+ * Shows: the shipped and reverted arms agree on the sync bus (island cart wiring), an async redo leaves 2 steps in the reverted arm and 1 in the shipped one; under test:timing it prints median time ratios against the reverted arm and asserts only that they are finite, with no timing threshold.
+ * See: src/ledger.ts, src/plugins-core.ts, tests/under-coverage.ts, log s35.114.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -36,17 +17,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REF_DIR = resolve(HERE, '__ref', 'history-redo');
 
 /**
- * [shipped text, replacement]: the fix, reverted - the recorder back on a
- * `_replaying` flag alone, no origin check, the undo handler and the redo
- * dispatch bracketed by the flag. Since undo/1 the shipped code has no flag
- * at all (a scoped origin covers both windows on both buses), so the baseline
- * re-creates it: the pre-q4 code, text for text.
+ * [shipped text, replacement]: the fix reverted - the recorder on a `_replaying` flag alone, no origin
+ * check, the undo handler and the redo dispatch bracketed by the flag. The shipped code has no flag,
+ * so the baseline re-creates it.
  *
- * The recording rule and undo/redo live in src/ledger.ts, shared by the
- * history() plugin and useCommandHistory, so the transforms apply to the
- * ledger, and each arm
- * gets its OWN derived ledger that its plugins-core copy imports. Loading the
- * shipped ledger from a reverted arm would time the same code twice.
+ * The recording rule and undo/redo live in src/ledger.ts, shared by history() and useCommandHistory,
+ * so the transforms apply to the ledger and each arm gets its own derived ledger. Loading the shipped
+ * ledger from a reverted arm would time the same code twice.
  */
 // biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/ledger.ts byte for byte, not templates
 const REVERT_FIX: Array<[string, string]> = [
@@ -154,21 +131,21 @@ describe('history() async-redo fix - real path A/B', () => {
     await load('self', true);
     await load('shipped', false);
 
-    // --- equivalence: the island cart's wiring, sync bus ---------------------
+    // The island cart's wiring on the sync bus: the arms must agree.
     const cartRun = (m: Mod) => {
       const bus = createCommandBus();
       const cart = { count: 0 };
       const h = m.history({ maxSize: 50, bus, actions: ['cartAdd'], undoAction: 'cartUndo', redoAction: 'cartRedo' });
       bus.register('cartAdd', () => { cart.count += 1; }, { undo: () => { cart.count -= 1; } });
       const seen: unknown[] = [];
-      // `$undo` commands (s35.114) are not this A/B's subject; the arms differ there on purpose.
+      // `$undo` commands are not this A/B's subject; the arms differ there on purpose.
       bus.on('cart*', (cmd) => { if (cmd.action.endsWith('$undo')) return; const s = h.getState(); seen.push([cmd.action, cart.count, s.canUndo, s.canRedo]); });
       for (const a of ['cartAdd', 'cartAdd', 'cartUndo', 'cartRedo', 'cartUndo', 'cartUndo', 'cartRedo']) bus.dispatch(a, {});
       return seen;
     };
     expect(cartRun(arms.shipped)).toEqual(cartRun(arms.pre));
 
-    // --- intended difference: an async redo is recorded once -----------------
+    // The intended difference: an async redo is recorded once.
     for (const [m, expected] of [[arms.pre, 2], [arms.shipped, 1]] as const) {
       const bus = createAsyncCommandBus();
       bus.register('add', async () => 'ok');
@@ -183,7 +160,6 @@ describe('history() async-redo fix - real path A/B', () => {
     // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
     if (!runTiming) return;
 
-    // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);
     const lines: string[] = [];
     for (const [label, row] of ROWS) {

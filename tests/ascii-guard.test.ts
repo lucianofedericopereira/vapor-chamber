@@ -1,6 +1,7 @@
 /**
- * scripts/check-ascii.mjs - the guard's two alphabets, tested from outside.
- * See the note at the end of this file.
+ * scripts/check-ascii.mjs: its two lists, the file extensions and the banned characters, tested from outside.
+ * Why: a list cannot audit itself; an extension never scanned, or a regex that matches nothing, both report a clean sweep.
+ * Shows: every text file on disk has its extension listed and no binary one is; root files and top dirs are covered; each banned class fires, plain ASCII passes.
  */
 import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,15 +22,7 @@ import {
 
 const root = process.cwd();
 
-/**
- * Every character this file needs to talk about, BUILT FROM ITS CODEPOINT.
- *
- * Same rule check-ascii.mjs applies to itself, for the same reason: this is a
- * file about forbidden characters, and typing one would put it in the tree the
- * guard scans. `tests/` is held to the alphabet, so a literal em dash here
- * would fail the very check this suite exists to keep honest - and U+FFFD
- * would make the file read as binary to its own `isText` below.
- */
+/** Built from codepoints: a literal would fail the guard here, and U+FFFD would make this file read as binary. */
 const CH = {
   emDash: String.fromCodePoint(0x2014),
   enDash: String.fromCodePoint(0x2013),
@@ -43,10 +36,7 @@ const CH = {
   replacement: String.fromCodePoint(0xfffd),
 };
 
-/**
- * An UNFILTERED walk. The guard's own `walk` selects by EXTENSIONS, so reusing
- * it here would ask the list to confirm itself and agree every time.
- */
+/** An unfiltered walk: the guard's own filters by EXTENSIONS, so it would agree with itself. */
 function walkAll(dir: string, out: string[] = []): string[] {
   let entries: string[];
   try {
@@ -81,8 +71,7 @@ describe('check-ascii: the FILE alphabet matches what is actually on disk', () =
   const all = ROOTS.flatMap((r: string) => walkAll(join(root, r)));
 
   it('finds files to classify', () => {
-    // Guards the walker itself: an empty sweep would make every assertion below
-    // vacuously true, which is the exact shape this suite exists to reject.
+    // Guards the walker: an empty sweep makes every assertion below vacuously true.
     expect(all.length).toBeGreaterThan(100);
   });
 
@@ -101,8 +90,7 @@ describe('check-ascii: the FILE alphabet matches what is actually on disk', () =
   });
 
   it('does not claim extensions that are binary', () => {
-    // The inverse mistake: listing .png would make the guard "scan" 6 files of
-    // compressed bytes and report codepoints found inside them.
+    // The inverse mistake: a listed binary extension is read as text and reports noise.
     const binaryListed = new Set<string>();
     for (const file of all) {
       const ext = extensionOf(file);
@@ -124,15 +112,7 @@ function gitRootFiles(): string[] | null {
 }
 
 describe('check-ascii: the ROOT is covered by the tree, not by a list', () => {
-  // Asks git what is in the root, the way the suite above asks the filesystem
-  // what is under the roots. See the note at the end of this file.
-  //
-  // OUTSIDE A GIT CHECKOUT (a release copy, an extracted tarball) there is
-  // nothing to ask, and `git ls-files` failing took the whole file down with
-  // it - the other 14 tests never ran. The fallback is every regular file in
-  // the root: a SUPERSET of what git tracks, so the check is never weaker
-  // there, only possibly stricter (an untracked text file must be scanned or
-  // exempt too). Directories and symlinks are not files to read.
+  // Outside a git checkout, every regular file in the root: a superset of what git tracks, never weaker.
   const tracked = gitRootFiles() ?? readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isFile())
     .map((d) => d.name);
@@ -220,8 +200,7 @@ describe('check-ascii: the CHARACTER alphabet actually fires', () => {
   });
 
   it('passes a file that is plain ASCII', () => {
-    // A guard that fires on everything is as useless as one that fires on
-    // nothing, and this line is the half that is easy to forget.
+    // A guard that fires on everything is as useless as one that fires on nothing.
     expect(scan([write('clean.md', 'plain - ascii ... x -> y\n')])).toEqual([]);
   });
 
@@ -233,47 +212,3 @@ describe('check-ascii: the CHARACTER alphabet actually fires', () => {
     expect(bannedFor(`src${sep}x.ts`).test(CH.emoji)).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Why this file exists
-// ---------------------------------------------------------------------------
-//
-// scripts/check-ascii.mjs had no test at all, and it is a guard whose entire
-// behaviour is two lists. Its own header records three times a list was wrong:
-// the arrows (48 of them, in 15 files, after a sweep reported "complete"), four
-// console glyphs sitting in shipped strings, and a census that turned up 9,300
-// characters it had no opinion about. Each time the fix was to widen the
-// CHARACTER alphabet, and each time the method was for a person to notice.
-//
-// The fourth failure was the other list. `.astro`, `.sh` and `.tsx` were not in
-// EXTENSIONS, so 28 lines across three files carried em dashes, an ellipsis and
-// a times sign while the guard printed `ascii: OK (425 files, no typographic
-// non-ASCII)`. Nobody had questioned the file list because the character list
-// was where the bugs had always been.
-//
-// A list cannot audit itself. Both suites here get their answer from somewhere
-// the guard does not control:
-//
-//   - the FILE alphabet is checked against the TREE. Walk everything, decode
-//     it, and any file that is text but whose extension is unlisted is a gap.
-//     This is what would have caught `.astro` the day it was added, and what
-//     will catch `.svelte` or `.mdx` on the day someone adds one. The walker
-//     here is deliberately NOT the guard's own, which filters by EXTENSIONS and
-//     would therefore agree with it unconditionally.
-//
-//   - the CHARACTER alphabet is checked by FEEDING IT OFFENDERS. A regex that
-//     matches nothing reports a clean sweep, which is indistinguishable from
-//     success by every other means. So each banned class is handed a file
-//     containing exactly it, and a clean file is handed over too.
-//
-// The binary assertion is the inverse mistake and is cheap to hold: listing
-// `.png` would have the guard read 6 files of compressed bytes and report
-// codepoints found inside them. That is not hypothetical - it is what the first
-// draft of the sweep that found this bug did, and the noise buried the three
-// real files.
-//
-// Every character above is built with String.fromCodePoint. Writing them as
-// literals would have put an em dash into `tests/`, which the guard scans, and
-// a U+FFFD into a file whose own `isText` treats that character as proof of
-// binary - the file would have excluded itself from the sweep it defines. Both
-// happened in the first draft.

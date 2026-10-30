@@ -1,4 +1,9 @@
-/** `outbox.clear()` while a record is being sent: its caller hears the send, and a record held after stays. The long note is at the end. */
+/**
+ * `outbox.clear()` while a record is being sent.
+ * Why: if clear() settled the in-flight record as aborted, its caller would hear a drop for a command that went out, and the landing send would shift away a record held after the clear, so it is never sent.
+ * Shows: the in-flight record settles with its send's answer, the record held after the clear stays pending and is sent by the next flush.
+ * See: log s36.74
+ */
 import { describe, expect, it } from 'vitest';
 import type { Accepted } from '../src/accepted';
 import { createAsyncCommandBus } from '../src/command-bus';
@@ -40,13 +45,3 @@ describe('outbox.clear() during a flush', () => {
     expect(await (b.value as Accepted).done).toMatchObject({ ok: true, value: 'sent b' });
   });
 });
-
-/*
- * Found in step 4j (log 36.74), probed on c3f28d2 (the released shape since 9d835c3). The
- * flush shifted the queue's head after each send without checking it was still the record it
- * sent. A `clear()` during the send settled that caller with `outbox:aborted:clear`, though
- * the command had gone out, and the record held after the clear was then shifted away by the
- * landing send: never sent, its `done` never settled, `pending` 0. Now the record in flight is
- * not settled by `clear()` or its ttl; the flush settles it with its send's answer and leaves
- * the queue's new head alone.
- */

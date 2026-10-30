@@ -1,42 +1,8 @@
 /**
- * vaporChamberWire against Vite's REAL pipelines - the build, and the dev server.
- *
- * BUILD. The consumer below is the H1 shape: composables and the bus from the
- * package ROOT, nothing from `vapor-chamber/vue`. Built for production, the root
- * cannot reach Vue (its runtime lookup is a bare dynamic `import()` held in a
- * variable), so without wiring the bundle imports NOTHING from `vue` and the
- * composables ship as plain `{ value }` objects. The plugin must change that
- * with no import changed: the same entry, built with it, must import the
- * `@vue/reactivity` tracking pair and the eight names `vapor-chamber/vue` hands
- * to `configureVue()`.
- *
- * `vue` and `@vue/reactivity` are external so the wiring is visible as import
- * statements rather than inlined runtime code. The composable is CALLED on a
- * live path: Vite app builds drop entry exports, so an imported-but-unused
- * composable would be shaken along with everything it reaches, and the
- * assertion would measure the tree-shaker instead of the plugin.
- *
- * The build project lives under this repo's `node_modules/.cache` so
- * `vapor-chamber` resolves the way it does for a consumer - through
- * `node_modules` and the package's own exports map, to the built `dist/` - with
- * no alias standing in.
- *
- * DEV SERVER. The redirect does not run there, and the reason is measured here
- * rather than argued: with the package installed the way npm leaves it, Vite's
- * dependency optimizer pre-bundles it, and a dev-time redirect puts TWO chamber
- * modules in the browser graph. The wired root's `export *` reaches the
- * pre-bundled root, while its `import 'vapor-chamber/vue'` - made from a module
- * Vite files under node_modules, which the optimizer never pre-bundles for - is
- * served unbundled, so the wiring lands on a registry the app never reads. The
- * documented pattern (bus from the root, composables from /vue) stays at one:
- * both are pre-bundled together and share a chunk. Under serve the plugin
- * defines `__VC_WIRED__` instead, and the last block checks the DEV probe-path
- * hint against it.
- *
- * The dev project lives in the OS temp dir, NOT under node_modules/.cache:
- * Vite skips optimizing any import made from a file inside node_modules, so an
- * app root there never exercises the optimizer, and measured one chamber module
- * in every arm for exactly that reason.
+ * `vaporChamberWire` (src/vite-hmr.ts) against Vite's real production build and a real dev server, plus the plugin object's own hooks.
+ * Why: a production bundle of a root-only consumer imports nothing from `vue` without wiring, so composables would ship as plain `{ value }` objects; under the dev server a redirect would put two chamber modules in the page, so wiring would land on a registry the app never reads.
+ * Shows: built with the plugin, the same entry imports the `@vue/reactivity` tracking pair and the eight `configureVue()` names (Vapor names only for `entry: 'vapor'`); the plugin redirects in builds only, defines `__VC_WIRED__` under serve, and the DEV probe-path hint stays quiet once it is defined.
+ * See: log s16.7, log s18.1, tests/vapor-async-wire.test.ts, tests/root-probe-builds.test.ts, tests/isloading-profile.test.ts, tests/root-only-prod-fixture.test.ts
  */
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -50,7 +16,7 @@ import { requireDist } from './require-dist';
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
 requireDist(existsSync(dist('index.js')) && existsSync(dist('vue.js')) && existsSync(dist('vapor.js')));
 
-/** What src/vue.ts passes to configureVue() - the list that must reach a built app. */
+// What src/vue.ts passes to configureVue(): the list that must reach a built app.
 const VUE_NAMES = [
   'ref',
   'shallowRef',
@@ -79,6 +45,7 @@ document.getElementById('go').addEventListener('click', () => {
 let dir: string;
 
 beforeAll(() => {
+  // Under node_modules/.cache so `vapor-chamber` resolves as for a consumer, through node_modules and the exports map to dist/, with no alias.
   const cache = resolve(process.cwd(), 'node_modules', '.cache');
   mkdirSync(cache, { recursive: true });
   dir = mkdtempSync(join(cache, 'vc-wire-'));
@@ -89,7 +56,7 @@ afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A production app build of the consumer, every chunk's code joined. */
+// A production app build of the consumer, every chunk's code joined; `vue` and `@vue/reactivity` are external so the wiring shows as import statements.
 async function bundle(plugins: unknown[]): Promise<string> {
   const result = await build({
     configFile: false,
@@ -115,7 +82,7 @@ async function bundle(plugins: unknown[]): Promise<string> {
     .join('\n');
 }
 
-/** Names a bundle imports statically from `spec` - `import { a, b as c } from "spec"`. */
+// Names a bundle imports statically from `spec`: `import { a, b as c } from "spec"`.
 function importsFrom(code: string, spec: string): string[] {
   const names: string[] = [];
   for (const m of code.matchAll(new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*["']${spec}["']`, 'g'))) {
@@ -133,7 +100,7 @@ const br = (s: string) =>
 describe('vaporChamberWire in a real Vite production build', () => {
   it('control: without it, a root-only consumer imports nothing from vue', async () => {
     const code = await bundle([]);
-    // The composable is on a live path - this is a real consumer, not dead code.
+    // The composable must be called on a live path: app builds drop entry exports, so an unused one would be tree-shaken and the assertion would measure the shaker.
     expect(code).toContain('function useCommand(');
     expect(importsFrom(code, 'vue')).toEqual([]);
     expect(importsFrom(code, '@vue/reactivity')).toEqual([]);
@@ -144,9 +111,9 @@ describe('vaporChamberWire in a real Vite production build', () => {
     expect(wired).toContain('function useCommand(');
     expect(importsFrom(wired, '@vue/reactivity')).toEqual(expect.arrayContaining(TRACKING));
     expect(importsFrom(wired, 'vue')).toEqual(expect.arrayContaining(VUE_NAMES));
-    // The default entry is the 3.5-safe one: no Vapor name reaches a vDOM app.
+    // The default entry sends no Vapor name to a vDOM app.
     for (const name of VAPOR_NAMES) expect(importsFrom(wired, 'vue')).not.toContain(name);
-    // And the static wiring actually runs, rather than merely being imported.
+    // The wiring call is present in the bundle, not only imported.
     expect(wired).toMatch(/configureVue\(\{/);
     expect(wired).toMatch(/_wireUntrack\(pauseTracking, resetTracking, true\)/);
 
@@ -160,8 +127,7 @@ describe('vaporChamberWire in a real Vite production build', () => {
     const wired = await bundle([vaporChamberWire({ entry: 'vapor' })]);
     expect(importsFrom(wired, '@vue/reactivity')).toEqual(expect.arrayContaining(TRACKING));
     expect(importsFrom(wired, 'vue')).toEqual(expect.arrayContaining([...VUE_NAMES, 'createVaporApp', 'defineVaporComponent']));
-    // This consumer defines no async component, so Vue's stays out (decision 6,
-    // tests/vapor-async-wire.test.ts, which also runs one that does).
+    // This consumer defines no async component, so Vue's stays out (tests/vapor-async-wire.test.ts runs one that does).
     expect(importsFrom(wired, 'vue')).not.toContain('defineVaporAsyncComponent');
   });
 });
@@ -172,14 +138,10 @@ describe('vaporChamberWire - the plugin object', () => {
     const plugin = vaporChamberWire();
     expect(plugin.name).toBe('vapor-chamber-wire');
     expect(plugin.enforce).toBe('pre');
-    // No `apply`: Vite drops a plugin before its `config` hook runs, and the
-    // dev-server half lives in that hook.
+    // No `apply`: Vite drops a plugin before its `config` hook runs, and the dev-server half lives in that hook.
     expect(plugin.apply).toBeUndefined();
 
-    // In a build it defines __VC_WIRED_BUILD__, which folds the root's probe
-    // (tests/root-probe-builds.test.ts).
-    // Both carry the build profile, performance by default
-    // (tests/isloading-profile.test.ts).
+    // __VC_WIRED_BUILD__ folds the root's probe (tests/root-probe-builds.test.ts); both defines carry the build profile (tests/isloading-profile.test.ts).
     expect(plugin.config({}, { command: 'build', mode: 'production' })).toEqual({ define: { __VC_WIRED_BUILD__: 'true', __VC_LEAN__: 'false' } });
     expect(await plugin.resolveId.call(ctx, 'vapor-chamber', '/app/main.js')).toMatch(/^\0/);
 
@@ -238,12 +200,12 @@ describe('vaporChamberWire - the plugin object', () => {
   });
 });
 
-/** chamber.ts's DEV probe-path text: in every module that IS a chamber, pre-bundled or not. */
+// chamber.ts's DEV probe-path text: present in every module that is a chamber, pre-bundled or not.
 const CHAMBER_MARK = 'Vue detected at runtime rather than at build time';
 
 let devRoot: string;
 
-/** An app root outside node_modules, the package installed in it as npm leaves it. */
+// An app root in the OS temp dir with the package installed as npm leaves it: Vite skips optimizing imports made from files inside node_modules.
 function makeDevProject(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'vc-wire-dev-')));
   writeFileSync(join(root, 'package.json'), '{"name":"vc-wire-dev","private":true,"type":"module"}\n');
@@ -256,20 +218,18 @@ function makeDevProject(): string {
   const pkg = join(root, 'node_modules', 'vapor-chamber');
   mkdirSync(pkg, { recursive: true });
   cpSync(resolve(process.cwd(), 'package.json'), join(pkg, 'package.json'));
-  // A copy, not a link: Vite follows a symlink to its real path, and a package
-  // whose real path is outside node_modules is treated as source, not a dep.
-  // Maps and declarations are left behind - no browser graph reads them.
+  // A copy, not a link: Vite follows a symlink to its real path, and a package whose real path is outside node_modules is treated as source, not a dep.
   cpSync(resolve(process.cwd(), 'dist'), join(pkg, 'dist'), {
     recursive: true,
     filter: (src) => !/\.(map|d\.ts)$/.test(src),
   });
-  // Links are right for Vue: its real path IS inside node_modules.
+  // Links suit Vue: its real path is inside node_modules.
   symlinkSync(resolve(process.cwd(), 'node_modules', 'vue'), join(root, 'node_modules', 'vue'));
   symlinkSync(resolve(process.cwd(), 'node_modules', '@vue'), join(root, 'node_modules', '@vue'));
   return root;
 }
 
-/** Middleware-mode dev server on the project; each arm gets its own optimizer cache. */
+// Middleware-mode dev server on the project; each arm gets its own optimizer cache.
 async function devServer(plugins: unknown[], arm: string): Promise<ViteDevServer> {
   return createServer({
     configFile: false,
@@ -277,20 +237,19 @@ async function devServer(plugins: unknown[], arm: string): Promise<ViteDevServer
     cacheDir: join(devRoot, 'node_modules', `.vite-${arm}`),
     logLevel: 'silent',
     appType: 'custom',
-    // `watch: null` keeps close() from waiting on a watcher (see vite-hmr-pipeline).
+    // `watch: null` keeps close() from waiting on a watcher.
     server: { middlewareMode: true, hmr: false, watch: null },
     plugins: plugins as never,
   });
 }
 
-/** Every module a browser would load from `entry`, keyed by URL, as served. */
+// Every module a browser would load from `entry`, keyed by URL, as served.
 async function crawl(server: ViteDevServer, entry: string): Promise<Map<string, string>> {
   const unwrap = (u: string) => (u.startsWith('/@id/__x00__') ? `\0${u.slice(12)}` : u.startsWith('/@id/') ? u.slice(5) : u);
   const seen = new Map<string, string>();
   const queue = [entry];
   while (queue.length > 0) {
-    // Sources before pre-bundled deps: the optimizer holds its first run until
-    // the static crawl ends, so asking for a dep early would race it.
+    // Sources before pre-bundled deps: the optimizer holds its first run until the static crawl ends.
     queue.sort((a, b) => Number(a.includes('/deps/')) - Number(b.includes('/deps/')));
     const url = queue.shift() as string;
     if (seen.has(url)) continue;
@@ -314,8 +273,7 @@ describe('vaporChamberWire under a real Vite dev server, package pre-bundled', (
   });
 
   it('the measurement: a dev-time redirect puts TWO chamber modules in the page', async () => {
-    // The redirect forced to run under serve: no `apply`, and no `config` hook
-    // to tell it the command, so resolveId behaves exactly as in a build.
+    // The redirect forced to run under serve: with no `config` hook to tell it the command, resolveId behaves as in a build.
     const server = await devServer([{ ...vaporChamberWire(), apply: undefined, config: undefined }], 'redirect');
     try {
       const chambers = chamberModules(await crawl(server, '/root-only.js'));
@@ -344,9 +302,7 @@ describe('vaporChamberWire under a real Vite dev server, package pre-bundled', (
     const server = await devServer([vaporChamberWire()], 'shipped');
     try {
       expect(chamberModules(await crawl(server, '/root-only.js'))).toHaveLength(1);
-      // Vite leaves dependency code untouched in dev, so the define is not
-      // substituted into chamber.ts; its client env module assigns every define
-      // to globalThis before the app runs, which is where chamber.ts reads it.
+      // Vite leaves dependency code untouched in dev; its client env module assigns every define to globalThis, where chamber.ts reads it.
       const env = (await server.transformRequest('/@vite/env'))?.code ?? '';
       expect(env).toContain('"__VC_WIRED__": true');
     } finally {
@@ -366,14 +322,8 @@ describe('the DEV probe-path hint reads __VC_WIRED__', () => {
     vi.resetModules();
   });
 
-  /**
-   * A root-only consumer on the probe path in a PAGE: vitest resolves `vue` as
-   * a dev server does, nothing imports src/vue, and `window` is stubbed because
-   * the hint is a page's - a server resolves the probe in production too and
-   * gets none (tests/root-only-prod-fixture.test.ts). The global is set the
-   * way the define arrives - vitest assigns every define to globalThis in its
-   * test runtime, Vite's client env module does the same in a browser.
-   */
+  // A root-only consumer on the probe path in a page: `window` is stubbed because the hint is a page's (a server gets none, tests/root-only-prod-fixture.test.ts).
+  // The global is set as the define arrives: vitest and Vite's client env module both assign defines to globalThis.
   async function probeHints(wired: boolean): Promise<string[]> {
     vi.stubGlobal('window', globalThis);
     if (wired) g.__VC_WIRED__ = true;

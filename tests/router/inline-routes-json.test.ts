@@ -1,5 +1,11 @@
 // @vitest-environment happy-dom
-/** An inline routes element that is not JSON fails start() with a coded router error. The long note is at the end. */
+/**
+ * An inline routes element whose text is not JSON, or has no routes array, fails start() with a coded router error.
+ * Why: a plain SyntaxError out of start() would reach onError with no code, so handlers that switch on the code would miss it.
+ * Shows: start() rejects with router:unexpected:routes carrying the selector in the message and the SyntaxError as cause,
+ * onError receives that same error, and JSON without a routes array gets the same code.
+ * See: log s35.93
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import { isRouterError } from '@router/errors';
 import { makeRouter } from './fixture';
@@ -47,16 +53,3 @@ describe('inline routes that are not JSON', () => {
     router.dispose();
   });
 });
-
-/*
- * Router re-review, 1.26 (log 35.93). `readInlinePayload` (the constructor's
- * synchronous read, for `base`) is total by design and says why: "a missing
- * element, malformed JSON or a non-DOM environment all return null and leave
- * the real diagnosis to `loadInlineTable()` during start(), which throws a
- * coded router error". For malformed JSON it did not: `JSON.parse` threw a
- * plain SyntaxError out of start() and into onError, the one inline failure
- * with no code (a missing element is `inline_routes_missing`, JSON without a
- * routes array `invalid_routes_payload`). The parse is the router reading its
- * own input, not someone else's error passing through (shape rule 2), so it is
- * coded as the payload being invalid, with the SyntaxError as its cause.
- */

@@ -1,4 +1,8 @@
-/** A store's `optimistic` and `exclusive`: a sent action shows at once, rolls back on a failure, is replaced by the answer; its server commands go one at a time. The long note is at the end. */
+/**
+ * A store's `optimistic` and `exclusive`: a sent action shows at once, rolls back on a failure, is replaced by the answer; its server commands go one at a time.
+ * Why: without optimistic a user waits on the server to see their own change, a failed send would leave a change the server refused, and unordered sends could be applied out of order; a local action queued behind a server command would wait on itself.
+ * Shows: the change shows at dispatch; a failure rolls it back and rebases a later step; the answer replaces it; a plugin-refused command never shows; history does not undo it without `undo`; exclusive sends one at a time in order while the change still shows, and a local action does not wait; optimistic with coalesce throws store:invalid:coalesce; a store with neither waits for the answer.
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Accepted } from '../src/accepted';
 import { type CommandResult, createAsyncCommandBus } from '../src/command-bus';
@@ -140,14 +144,3 @@ describe('control: a store with neither', () => {
     expect((await r).ok).toBe(true);
   });
 });
-
-/*
- * Plan 1.32 4.2 and step 4k, owner 2026-10-20: "the same two words on the store". With
- * `optimistic`, a store action a transport sends applies its reducer when the plugins hand
- * on, before any turn is waited for, so the change shows at dispatch (plan-architecture row
- * 112). A failure rolls it back through the store's ring, rebasing the later steps; the
- * answer replaces it; a plugin's refusal never shows it (row 5). With `exclusive`, the
- * store's sent commands share one key, the store's id, so the server applies and answers
- * them in order (the `serialize` lane docs/store.md described). A local action keys to null:
- * a reducer queued behind a server command would wait on itself.
- */

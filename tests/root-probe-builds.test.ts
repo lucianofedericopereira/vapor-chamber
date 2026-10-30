@@ -1,4 +1,9 @@
-/** The root's Vue probe in consumer builds: folded when wired, absent for getCommandBus. The long note is at the end. */
+/**
+ * The root's runtime Vue probe in consumer builds (esbuild, Vite, the shipped dist files, the source guard).
+ * Why: an app that wires Vue at build time, or never uses Vue, would ship all of Vue or load a Vue chunk at start; the probe specifier must stay a runtime name so no bundler resolves it.
+ * Shows: with __VC_WIRED_BUILD__ defined (esbuild define or vaporChamberWire) the probe and Vue are gone; getCommandBus imports nothing at load; a root-only app emits one file with no dynamic import and still finds Vue in Node; the guard also works as a global.
+ * See: log s35.41, log 36.F26
+ */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -176,36 +181,3 @@ describe('the source guard, read as a global (as vitest and a dev server deliver
     expect(warn.mock.calls.filter((c) => String(c[0]).includes('without reactivity'))).toEqual([]);
   });
 });
-
-/*
- * Bugs B1, B2 and B11 of the 1.26 evaluation (log s35.41).
- *
- * The root reaches Vue through a runtime probe, `import(vuePkg)` with the
- * specifier in a variable. Vite leaves that import alone; esbuild and webpack
- * resolve it, to the whole Vue namespace. So an esbuild or webpack app that
- * imports its composables the documented way (bus from the root, composables
- * from `vapor-chamber/vue`) still carried all of Vue, because `vue.js`
- * reaches `chamber.js` and `chamber.js` holds the probe (B1), and every
- * webpack build of the root warned "Critical dependency" (B11).
- *
- * B1. A wired build needs no probe: `vapor-chamber/vue` wires Vue at build
- * time. The probe's body and the unwired warning now sit inside a condition on
- * `__VC_WIRED_BUILD__`, which `vaporChamberWire()` defines in a Vite build and
- * which an esbuild or webpack app defines with one line. Conditions, never an
- * early return: Vite's minifier kept a function's body after a folded
- * `if (true) return` (measured in the evaluation). The IIFE builds define it
- * false, so the guard costs them nothing. The last block runs the guard in
- * vitest, where a define arrives as a global.
- *
- * 36.F26 (owner, 2026-10-22). The probe's specifier stays a name in dist
- * (VUE_PKG in chamber.ts), so no bundler resolves it: a literal gave a
- * Vue-less app a 500 under the Vite dev server. esbuild and webpack no longer
- * bundle Vue for the probe, define or not, and a root-only Vue app gets no Vue
- * from the probe in a browser. It is warned (`vue:missing:wiring`) and wires
- * through `vapor-chamber/vue`. The fourth block pins the esbuild output, and
- * its control shows Node, which resolves the name at runtime, still finds Vue.
- *
- * B2. `getCommandBus` lived in `chamber.ts`, so a Vue-less app that used the
- * shared bus kept the probe module and loaded a Vue chunk at start. The shared
- * bus now lives in a probe-free module, re-exported from `chamber.ts`.
- */

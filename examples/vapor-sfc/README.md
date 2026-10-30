@@ -54,7 +54,7 @@ the library and runs `npm run check:example`, which builds every example.
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->, vite@^8
+├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vite/client types
 ├── index.html            # mount point + minimal styles
@@ -78,9 +78,9 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber through
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.34.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.35.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
-  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.13<!-- /vc:vueAligned -->`, and
+  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->`, and
   the root `devDependencies.vue` owns that pin. `npm run docs:stamp`
   rewrites it, and `lint:check` fails when the two disagree. When Vue 3.6 ships
   stable, bump the root and re-stamp. Nothing here is retyped by hand.

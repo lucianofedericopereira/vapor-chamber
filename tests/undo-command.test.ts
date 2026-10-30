@@ -1,4 +1,11 @@
-/** Every undo is a command, `<action>$undo`: from history, and the rollbacks after a failure. Log s35.114. */
+/**
+ * Every undo is a command, <action>$undo, dispatched by history and by the rollbacks after a failure.
+ * Why: an undo that bypassed the bus would skip rules and listeners; as a command it is authorized, heard and
+ * linked to the command it reverses.
+ * Shows: history dispatches <action>$undo with origin undo and the recorded command as cause; a rule can refuse it;
+ * unregistering the action removes its $undo; and an optimistic action, a transactional batch and the async bus dispatch it the same way.
+ * See: docs/rc-alignment-log.md s35.114
+ */
 import { describe, expect } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';

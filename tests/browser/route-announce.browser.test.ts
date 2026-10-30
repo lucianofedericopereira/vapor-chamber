@@ -1,6 +1,8 @@
 /**
- * The route announcer and focusOnNavigate in a real engine: happy-dom's focus
- * and rendering are not evidence for a browser. src/router/announce.ts.
+ * The route announcer and focusOnNavigate in a real engine.
+ * Why: happy-dom's focus and rendering are not evidence for a browser.
+ * Shows: a navigation is announced by title in a hidden but rendered region and focus moves to the heading; an editable target stays in the tab order.
+ * See: src/router/announce.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { frame, makeRouter } from '../router/fixture';
@@ -48,7 +50,7 @@ describe('route announcer (real Chromium)', () => {
     const heading = document.createElement('h1');
     heading.id = 'page-title';
     document.body.append(editor, heading);
-    expect(editor.tabIndex).toBe(-1); // the engine's own reading, which the old check trusted
+    expect(editor.tabIndex).toBe(-1); // the engine's reading, though the element is focusable
 
     for (const [target, attr] of [['#editor', null], ['#page-title', '-1']] as const) {
       const router = makeRouter({ focusOnNavigate: target });

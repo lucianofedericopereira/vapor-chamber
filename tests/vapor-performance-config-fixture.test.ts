@@ -1,5 +1,10 @@
 // @vitest-environment happy-dom
-// FIXTURE - app.config.performance on a Vapor app with a v-if and a v-for renders and reports no error. The note is at the end.
+/**
+ * `app.config.performance = true` on a Vapor app whose component has a `v-if` and a `v-for`.
+ * Why: a render effect that creates a nested one (a branch) would measure a performance mark that is already gone, throw into the app's error handler and leave the first render empty. The library sets no such flag, but a page that turns it on while developing renders the same component.
+ * Shows: the first render shows both branches, a push, a hide and a show leave the right text, and the app's error handler receives nothing.
+ * See: vuejs/core#15993, log s36.F43
+ */
 
 import { beforeAll, expect, it } from 'vitest';
 import { type VaporApi, compileVapor } from './compile-vapor';
@@ -32,18 +37,3 @@ it('branch effects nest inside the component effect, and the render stays whole'
   expect({ text: root.textContent, errors }).toEqual({ text: '212', errors: [] });
   app.unmount();
 });
-
-/*
- * WHY THIS FILE EXISTS. On Vue 3.6.0-rc.12 a render effect that created a
- * nested one (a v-if or v-for branch) ended the component's `renderEffect`
- * performance mark in the inner run. The outer run then measured a mark that
- * was gone and threw `The "vue-renderEffect-N" performance mark has not been
- * set`, which the app's error handler received, and the first render came out
- * empty. Vue 3.6.0-rc.13 (#15993) measures the outermost run only. This file
- * fails on rc.12 and passes on rc.13 (docs/rc-alignment-log.md, section
- * 36.F43).
- *
- * The library measures nothing through this flag. A page that turns it on
- * while it develops (app.config.performance is a documented Vue switch) hits
- * the same render, so the shape here is a component with both branches.
- */

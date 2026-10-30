@@ -1,4 +1,9 @@
-/** `history({ bus })` records on its own, the same wherever plugins sit. The long note is at the end. */
+/**
+ * history({ bus }) recording on the sync and async bus, and with the outbox.
+ * Why: history records through its own bus hook; if recording depended on bus.use or plugin order, a plugin that answers in place of the handler could hide a step, and a command held in the outbox would get an undo for a write never sent.
+ * Shows: a dispatch is recorded without bus.use, a step that answers in place of the handler still records one entry, a refused dispatch is not recorded, dispose() stops recording, a sealed bus stays sealed, and an outbox-held command is not recorded.
+ * See: src/ledger.ts, tests/composables-sealed-bus.test.ts, tests/same-in-any-order.test.ts.
+ */
 import { describe, expect, it } from 'vitest';
 import { type BaseBus, createAsyncCommandBus, createCommandBus, history } from '../src/index';
 import { createOutbox } from '../src/outbox';
@@ -56,7 +61,6 @@ describe.each(BUSES)('history({ bus }) on the %s bus', (_name, make) => {
 });
 
 describe('history with the outbox', () => {
-  // Plan 1.32 row 7.
   it('a held command is not recorded', async () => {
     const outbox = createOutbox({ storage: null, isOnline: () => false, autoFlush: false });
     const bus = createAsyncCommandBus({ retry: false, transport: defineTransport(async () => ({ ok: true, value: 'sent', error: undefined })), outbox });
@@ -66,18 +70,3 @@ describe('history with the outbox', () => {
     expect(h.getState().past).toEqual([]);
   });
 });
-
-/*
- * Before 4h, history() was a chain plugin: it recorded nothing until `bus.use`, and a plugin
- * outside it that answered without `next()` was never seen, so its position decided what the
- * history held. It now records in an after-hook, as useCommandHistory did, through the one
- * recorder in src/ledger.ts. The sealed case follows useCommandHistory's: the observer goes in
- * past the seal (tests/composables-sealed-bus.test.ts). The dispose case records once first,
- * so it fails if nothing records at all.
- *
- * The outbox row came from tests/same-in-any-order.test.ts. As a plugin, history recorded the
- * outbox's `{ queued }` answer in one install order only (.probes/same-in-any-order.json, B
- * then A: 1). Since 4i the outbox is a bus option and a held command answers an `Accepted`,
- * which is not the end: the ledger records no step for it, and an undo cannot run the inverse
- * of a write that was never sent.
- */

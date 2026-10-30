@@ -1,4 +1,9 @@
-// examples/sprinkled-blade/mock-server.mjs, started for real and fetched with Node's fetch.
+/**
+ * examples/sprinkled-blade/mock-server.mjs started for real and fetched with Node's fetch.
+ * Why: these failures live in the order of `res.writeHead` calls and in how a raw request line reaches the handler, and neither shows through a stub.
+ * Shows: a missing dist file is a 404 and the server lives; paths outside dist/ are refused; prototype names are unknown commands; an unreadable body is a 400; the page renders the cart; each beside a control.
+ * See: audit SBL-1, SBL-2, SBL-7, SBL-8.
+ */
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { resolve } from 'node:path';
@@ -43,6 +48,7 @@ describe('GET /dist/', () => {
 });
 
 describe('GET /favicon.ico', () => {
+  // A browser asks for it on each origin's first page, and a 404 is a console error there.
   it('answers 200 with the project icon (FAV)', async () => {
     const r = await fetch(`${server.origin}/favicon.ico`);
     expect([r.status, r.headers.get('content-type')]).toEqual([200, 'image/x-icon']);
@@ -101,15 +107,3 @@ describe('GET / (the Blade half: the cart rendered into the page)', () => {
     expect(page).toContain('vapor-chamber-core.iife.min.js');
   });
 });
-
-/*
- * Why these tests start the real script: the bugs live in the order of
- * Node's `res.writeHead` calls and in how a raw request line reaches the
- * handler, and neither shows through a stub. Each test checks a request the
- * fix must refuse beside one it must still answer, so a server that refuses
- * everything fails as well. Rows SBL-1, SBL-2, SBL-7 and SBL-8 of the
- * 2026-10-12 release audit. FAV: a browser asks for `/favicon.ico` at the
- * root on the first page of each origin, and a 404 there is a console error
- * on that page (system Chrome, 2026-10-12; the headless shell never asks).
- * The icon lives in `assets/favicon/`.
- */

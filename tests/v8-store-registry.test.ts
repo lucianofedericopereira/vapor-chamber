@@ -1,4 +1,9 @@
-/** A bus's stores record and its registry entries each have one hidden class, whoever made them. Rationale at the end. */
+/**
+ * A bus's stores record and its registry entries each have one hidden class, whoever made them.
+ * Why: a read-many object must come from one literal or factory; two literals with the same field order are a copy that a later edit could break, silently splitting the map.
+ * Shows: the record from createAsyncCommandBus and from _storesOf on first use share a map; a store's entry and a seeded id's placeholder share a map; the control tells two field orders apart.
+ * See: docs/V8-RULES.md, log s36.F3, tests/v8.ts
+ */
 import { describe, expect, it } from 'vitest';
 import { _busStores, _storesOf, type RegistryEntry } from '../src/applied-remotely';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
@@ -31,16 +36,3 @@ describe("a bus's stores", () => {
     expect(sameMap(placeholder, live)).toBe(true);
   });
 });
-
-// Rationale.
-// docs/V8-RULES.md rule 1: a read-many object comes from one literal or one
-// factory. The V8 audit of the 1-7 fix-up (2026-10-21) found the stores
-// record built by two literals (createAsyncCommandBus, _storesOf) and the
-// registry entry by two (useStore, seedStores). Their keys were in one order,
-// so V8 gave each pair one map already (this test is green at 1d065eb too):
-// the second literal was a copy of the field order a later edit could break.
-// The entry now has one factory (src/applied-remotely.ts). The record keeps
-// its two literals: a factory cost the Blade consumer 13 B brotli (log 36.F3),
-// and this test catches a drift in the field order.
-// The control shows the check tells two orders apart. `sameMap` is V8's own
-// %HaveSameMap (tests/v8.ts).

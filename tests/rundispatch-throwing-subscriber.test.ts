@@ -1,9 +1,9 @@
 /**
- * FIXTURE - a synchronous subscriber that THROWS on `runDispatch`'s opening
- * write must not leave `loading` stuck on true. Real Vue `effect`s on the real
- * `useCommandQuery` signal. The long note is at the end.
+ * A synchronous subscriber that throws on the opening write of `useCommandQuery`'s `loading` signal.
+ * Why: a throw there must become a failed result with `loading` back to false, never escape the call and leave every reader seeing `loading` stuck on true.
+ * Shows: with a real Vue `effect` that throws when `loading` turns true, the query returns the subscriber's error as a failed result, the handler does not run, `loading` ends false and nothing escapes.
+ * See: log s35.17, tests/usecommand-pending.test.ts
  */
-
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { effect, isRef } from 'vue';
 import { resetCommandBus, setCommandBus, useCommandQuery, waitForVueDetection } from '../src/chamber';
@@ -35,7 +35,7 @@ describe('runDispatch: a throwing sync subscriber on its opening write', () => {
       return 'read';
     });
     const { query, loading } = useCommandQuery();
-    // Control: the signal is Vue's, so the effect below is a real subscriber.
+    // Control: `loading` is a Vue ref, so the effect below is a real subscriber.
     expect(isRef(loading)).toBe(true);
 
     const boom = new Error('subscriber threw');
@@ -56,14 +56,3 @@ describe('runDispatch: a throwing sync subscriber on its opening write', () => {
     runner.effect.stop();
   });
 });
-
-/*
- * Why this file exists. runDispatch wrote `loading` before its try. A
- * synchronous subscriber that threw on that write escaped the call as a throw
- * and left `loading` true for every reader. The write is inside the try now:
- * the throw is a failed result, the handler does not run, and the count
- * returns to 0. useCommand once had the same writes (its own `loading` and
- * `lastError`); its busy state is the bus's `pending` now
- * (tests/usecommand-pending.test.ts), so the query composable is the one
- * writer left.
- */

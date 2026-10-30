@@ -1,21 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * Route changes for assistive technology.
- *
- * A full page load tells a screen reader a new page arrived and resets focus;
- * a client-side navigation does neither unless the router does it. Two
- * sources set the rules pinned here:
- *
- *   - Next.js announces every client-side navigation in an assertive live
- *     region, reading `document.title`, then the first `<h1>`, then the path.
- *   - Gatsby's user testing with disabled users (Marcy Sutton, Fable Tech
- *     Labs, 2019): focusing a small element (a heading or a skip link) served
- *     best; focus on a large wrapper broke magnification, and a live region
- *     alone did not help magnification users. So: announce by default, and
- *     move focus to an element THE APP names, as an option.
- *
- * The initial load is not announced (the browser already read the page), and
- * neither is a query-only change (sorting or paging is not a new page).
+ * The route announcer and focusOnNavigate: what a client-side navigation tells assistive technology.
+ * Why: a client-side navigation gives a screen reader no new-page signal and resets no focus unless the router does both; the initial load and a query-only change must stay silent.
+ * Shows: a commit is announced in a visually hidden assertive live region (title, then first h1, then path); the initial load, a refused initial load and a query-only change say nothing; announce can be off or custom; focus moves only to an app-named element and sets tabindex -1 only on a non-focusable one; nothing is announced after dispose().
+ * See: log 36.11 (RA-3), tests/browser/route-announce.browser.test.ts
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { frame, makeRouter } from './fixture';
@@ -43,7 +31,7 @@ describe('route announcer', () => {
     expect(r.textContent).toBe('Orders list');
     expect(r.getAttribute('aria-live')).toBe('assertive');
     expect(r.getAttribute('aria-atomic')).toBe('true');
-    // Hidden visually, NOT from the accessibility tree (display:none would silence it).
+    // display:none would hide the region from the accessibility tree.
     expect((r as HTMLElement).style.display).not.toBe('none');
     router.dispose();
   });
@@ -192,11 +180,3 @@ describe('route announcer', () => {
     expect(region()!.textContent).toBe('');
   });
 });
-
-/*
- * RA-3 (audit, 2026-10-12). The announcer skipped the first commit it saw,
- * taking it for the initial load. When the initial navigation did not commit
- * (a guard refused it), the user's first real navigation was that commit, and
- * it was not announced. The router now installs the announcer once the
- * initial navigation has settled, so the skip is the initial load itself.
- */

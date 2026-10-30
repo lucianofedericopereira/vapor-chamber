@@ -1,69 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE - what KeepAlive does to a custom directive's scope, on both renderers.
- *
- * MOSTLY UPSTREAM CONTRACT, and the file is precise about which parts. The
- * property being asserted is Vue's, not this library's: that deactivating a
- * kept-alive component does NOT dispose a custom directive's scope, and that
- * reactivating it reuses the same element with the same directive state. What
- * it guards is an ASSUMPTION this library rests on, which can change under us
- * without anyone changing a line here.
- *
- * MEASURED against a mutation matrix of src/directives.ts, which is the only
- * way to know rather than assert:
- *
- *   - the vDOM test is a PURE upstream contract: no mutation of
- *     src/directives.ts makes it fail.
- *   - every other test here DOES exercise our cleanup, so M5 (the directive
- *     returns no cleanup function at all) turns them red. The Vapor
- *     round-trip test is in that group, through its balanced-at-unmount
- *     assertion - which an earlier version of this header denied, on the
- *     strength of having run only M1-M4. That was a claim about a mutation
- *     set stated as a claim about the test.
- *
- * So M1-M4 leaving the file green means those mutations do not change WHETHER
- * cleanup is invoked, only what it does - not that the file is untouchable.
- *
- * WHY IT IS WORTH A TEST. `vcCommandVapor` returns `() => unmountCommand(el)`
- * and Vue registers it with `onScopeDispose`. On the scope this file exercises:
- * the target here is a compiled `<button v-vc-command.delegate>`, an ELEMENT,
- * so `withVaporDirectives` takes its `node instanceof Element` path and applies
- * synchronously in the CURRENT scope - the component's setup scope. (A
- * non-element target - a component root or fragment - gets the detached
- * `EffectScope` instead.) If a future RC started
- * disposing that scope on deactivation, one of two things would follow, and
- * both are silent:
- *
- *   - disposed and NOT re-run on reactivation -> the control comes back dead,
- *   - re-run with no disposal in between      -> the delegated refcount drifts
- *     upward, held honest only by `mountCommand` calling `unmountCommand`
- *     first.
- *
- * Neither prints anything. rc.9 reworked KeepAlive substantially (#15525,
- * #15526, #15560), which is precisely why the assumption is pinned now rather
- * than assumed again next cycle.
- *
- * MEASURED on 3.6.0-rc.9: Vapor matches vDOM exactly - scope kept, element
- * reused, directive run once, counts balanced at unmount.
- *
- * THESE ASSERTIONS CAN FAIL, which is the answer to the obvious charge against
- * a test that no mutation of our source can break. They have already been seen
- * red: the first draft of this measurement put a `v-if` INSIDE the KeepAlive
- * instead of swapping a cached component, and a v-if disposes its branch
- * outright - one remove, the directive re-run, a new element. That result
- * fails all three assertions here. So they do tell scope RETENTION apart from
- * scope DISPOSAL, and if a future RC made deactivation behave like removal,
- * this file goes red rather than quiet.
- *
- * `.delegate` is used because it makes the accounting observable: the shared
- * document listener is added once and removed once, so a spy on
- * add/removeEventListener reports what deactivation did.
- *
- * Deactivation here is a CACHED COMPONENT swapped out of the KeepAlive slot,
- * not a `v-if` inside it. Those are different mechanisms and only the first is
- * deactivation - a v-if inside a KeepAlive disposes the branch outright, which
- * tests/directives-vapor-fixture.test.ts already covers. Measuring one against
- * the other produces a comparison that looks meaningful and is not.
+ * What KeepAlive does to a custom directive's scope, on vDOM and on Vapor.
+ * Why: `vcCommandVapor` returns a cleanup that Vue registers with `onScopeDispose`; if deactivating a kept-alive component disposed that scope, the control would come back dead, and if the directive re-ran without a disposal the delegated refcount would drift upward. Neither prints anything. Real unmounts (include/exclude, `max` eviction, a nested branch torn down) must still run the cleanup exactly once.
+ * Shows: deactivation keeps the element, runs no cleanup and leaves the document click listener in place; reactivation reuses the same element without re-running the directive; unmount removes the listener once; each unmount route runs the cleanup exactly once.
+ * See: vuejs/core#15525, vuejs/core#15526
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -92,7 +32,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     });
   });
 
-  /** Count click add/remove on the document, which is where `.delegate` registers. */
+  /** Count click add/remove on the document, where `.delegate` registers its one shared listener. */
   function listenerSpies() {
     const add = vi.spyOn(document, 'addEventListener');
     const remove = vi.spyOn(document, 'removeEventListener');
@@ -123,8 +63,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
 
     show.value = false;
     await v.nextTick();
-    // Deactivated: out of the DOM, but beforeUnmount did NOT run, so the
-    // delegated count is untouched and the listener stays.
+    // Deactivated: out of the DOM, beforeUnmount did not run, the listener stays.
     expect(host.querySelector('button')).toBeNull();
     expect(removes()).toBe(0);
 
@@ -138,7 +77,6 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     await settle();
     expect(seen).toEqual(['cartAdd']);
 
-    // Balanced at teardown, which is the only place the count should move.
     app.unmount();
     expect(removes()).toBe(1);
 
@@ -181,16 +119,13 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     outer.cur = Other;
     await v.nextTick();
     expect(host.querySelector('button')).toBeNull();
-    // THE ASSERTION THIS FILE EXISTS FOR: the owning scope (the component's
-    // setup scope - see the header) is PAUSED and not stopped on deactivation,
-    // so the cleanup did not run and the count did not move.
+    // The target is an element, so the directive runs in the component's setup scope, which deactivation pauses and does not stop.
     expect(removes()).toBe(0);
 
     outer.cur = Inner;
     await v.nextTick();
     const second = host.querySelector('button') as HTMLButtonElement;
     expect(second).toBe(first);
-    // Not re-run: the directive function ran once, for one mount.
     expect(runs).toBe(1);
     expect(adds()).toBe(1);
 
@@ -207,27 +142,10 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     host.remove();
   });
 
-  // ---------------------------------------------------------------------------
-  // TEARDOWN ROUTES. The two tests above cover ONE route - a cached component
-  // swapped out of the slot and back. KeepAlive has others, and unlike
-  // deactivation they are real unmounts where our cleanup MUST run:
-  // include/exclude dropping a cached instance, `max` evicting one, and a
-  // nested branch being torn down while a cached component is live in it.
-  // rc.9 changed the machinery behind all three (#15525, #15526), so they are
-  // pinned rather than assumed.
-  //
-  // Each counts CLEANUP INVOCATIONS directly instead of watching the document
-  // listener. With a single delegated element the two are indistinguishable: a
-  // second teardown hits `unmountCommand`'s early return and leaves no trace,
-  // so "the listener came off" reads the same whether cleanup ran once or
-  // twice. #15526 re-registers a cached component's unmount against whichever
-  // scope re-enters it, which is exactly the shape that could run teardown
-  // twice - and upstream's own test for it asserts `unmounted` exactly once.
-  // A second delegated element OUTSIDE the KeepAlive holds the shared count
-  // above zero, so the listener transitions stay honest too.
-  // ---------------------------------------------------------------------------
-
-  /** Wraps the directive so both it and its cleanup are counted. */
+  /**
+   * Wraps the directive so both it and its cleanup are counted.
+   * The teardown-route tests below count cleanup calls, not listener removals: a second teardown hits `unmountCommand`'s early return and leaves no trace on the listener.
+   */
   function counted() {
     const n = { runs: 0, cleanups: 0 };
     const dir: typeof vcCommandVapor = (...args) => {
@@ -257,7 +175,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     return { n, st, host, app };
   }
 
-  /** The outside button keeps the shared document listener installed throughout. */
+  /** A second delegated element outside the KeepAlive keeps the shared document listener installed throughout. */
   const OUTSIDE = '<button v-vc-command.delegate="y">outside</button>';
 
   it('include/exclude dropping a cached instance runs the cleanup exactly once', async () => {
@@ -291,8 +209,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     await v.nextTick();
     expect(n.cleanups).toBe(0);
 
-    // A second component becomes current; with max=1 the cached one is pruned,
-    // which is a real unmount rather than a deactivation.
+    // With max=1 a second current component prunes the cached one: a real unmount.
     st.cur = v.defineVaporComponent({ name: 'Other', setup: () => other.render({}) });
     await v.nextTick();
     await settle();
@@ -319,7 +236,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     await v.nextTick();
     expect(n.cleanups).toBe(0);
 
-    // Reactivated from cache: same element, directive NOT run again.
+    // Reactivated from cache: the directive does not run again.
     st.view = 'child';
     await v.nextTick();
     expect(n.runs).toBe(mountRuns);
@@ -330,9 +247,7 @@ describe('KeepAlive keeps a custom directive scope (upstream contract)', () => {
     await settle();
     expect(seen).toContain('cartAdd');
 
-    // The branch goes: a real unmount of the reactivated component. #15526
-    // hands unmount ownership to the scope that re-entered the cache, so this
-    // is the route where a surviving old registration would tear down twice.
+    // Unmount ownership passes to the scope that re-entered the cache (vuejs/core#15526); a surviving old registration would tear down twice.
     st.show = false;
     await v.nextTick();
     await settle();
