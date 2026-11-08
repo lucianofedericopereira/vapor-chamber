@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli. Its graph reaches `vue`, and never the bus or the Vue probe (see "The bus is always an argument" below).
+<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB brotli. Its graph reaches `vue`, and never the bus or the Vue probe (see "The bus is always an argument" below).
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';
@@ -106,12 +106,16 @@ rebases:[^rebase]
   re-applied by its reducer.
 - A later `$reset`, a state a tab answered or a server's answer (below) keeps the state it set.
 - An undo for a step the store does not hold, or for one already undone, changes nothing.
+- An optimistic change the ring moved past cannot be rolled back. Its `$undo` fails with
+  `store:lost:rollback`, and the change stays.[^lost]
 - A reducer that throws during the replay leaves the state as it was, and the `$undo` command
   fails.
 - A reducer that computes only from its arguments rebases exactly. A reducer that mints a value,
   such as an id or a time, mints it again for each later step it replays.
 
 [^rebase]: `tests/store-rollback-rebase.test.ts`.
+
+[^lost]: `tests/store-lost-rollback.test.ts`.
 
 **In development a store with `undo: true` runs each reducer twice**, as React's StrictMode
 does, and warns once per action when the two results differ. Mint ids and times in the call,
@@ -131,7 +135,8 @@ server, since the write may have landed.[^unidentified]
 
 [^unidentified]: `tests/retry-unidentified.test.ts`.
 
-- The store keeps its last 256 steps. An older one reads `canUndo` false. `history` keeps 50 by
+- The store keeps its last 256 steps. An older one reads `canUndo` false, and an optimistic
+  failure that needs one fails its `$undo` with `store:lost:rollback`. `history` keeps 50 by
   default.
 - A store's id and action keys cannot carry a `$`, because names with `$` are the library's
   (`store:invalid:name`).
@@ -284,7 +289,8 @@ const useCart = defineChamberStore('cart', { state, reducers, answer, exclusive:
 **`optimistic: true` shows a sent action at once.** Its reducer applies before the server
 answers.
 
-- A failure rolls it back, with the later steps rebased.
+- A failure rolls it back, with the later steps rebased. Once the ring has moved past it, it
+  cannot, and says so (`store:lost:rollback`).
 - The answer replaces it.
 - A plugin's refusal never shows it.
 - The dispatch answers an `Accepted`, whose `done` settles with the server's answer.
@@ -308,8 +314,8 @@ with no handler.
   module global is the one thing that cannot give that, so defaulting to it would hand every
   request the same state.
 
-With the bus a mandatory argument, the store is <!-- vc:sizeStoreRaw -->15.6<!-- /vc:sizeStoreRaw --> KB minified
-(<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB brotli), the `./store` row of
+With the bus a mandatory argument, the store is <!-- vc:sizeStoreRaw -->16.0<!-- /vc:sizeStoreRaw --> KB minified
+(<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB brotli), the `./store` row of
 [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).[^first-draft] Its built entry's one external is `vue`, and
 no chunk in it is `chamber.js`, the bus or the root barrel.[^graph] What it holds:
 

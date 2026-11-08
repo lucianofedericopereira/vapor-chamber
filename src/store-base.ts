@@ -224,6 +224,8 @@ const MEMBERS = new Set(['$id', 'state', 'url', '$reset', '$dispose', '$onField'
 
 /** How many steps a store with `undo: true` keeps (a power of two); history's default is 50. */
 const UNDO_RING = 256;
+/** @internal The ring's size, for the tests that cross it. */
+export const _UNDO_RING = UNDO_RING;
 
 /** Marks an undone step in the ring: no command equals it, and a replay skips it. */
 const UNDONE = {};
@@ -640,6 +642,10 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     let credited: (() => Command) | undefined;
     let stepOf: (id: string) => Command | undefined = () => undefined;
     let takeUndone: (id: string) => Command | undefined = () => undefined;
+    // `optimistic`: the command whose reducer is running, and the ones whose
+    // reducer threw. A throw showed nothing, so its undo is not a lost rollback.
+    let running: object | null = null;
+    const threw = options.optimistic ? new WeakSet<object>() : null;
     if (options.undo || options.optimistic) {
       // One flat array, three slots a step: [cmd, before, after].
       const ring: unknown[] = new Array(UNDO_RING * 3).fill(undefined);
@@ -677,6 +683,11 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
           }
         }
         return s;
+      };
+      // The undo path only.
+      const wasUndone = (cmd: unknown): boolean => {
+        for (let k = 0; k < undone.length; k += 3) if (undone[k] === cmd) return true;
+        return false;
       };
       // The newest step holding `cmd` (its first slot), or -1.
       const find = (cmd: unknown): number => {
@@ -726,8 +737,14 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         undo: (cmd) => {
           const i = find(cmd);
           // A step the ring does not hold, or one already undone, changed
-          // nothing to take back: the identity, never slot 0.
-          if (i === -1) return state.value;
+          // nothing to take back: the identity, never slot 0. Once the ring
+          // has wrapped, a shown change it moved past is still in the state.
+          if (i === -1) {
+            if (threw !== null && ring[next * 3] !== undefined && cmd !== running && !threw.has(cmd) && !wasUndone(cmd)) {
+              throw storeFail('lost:rollback', `Store "${id}": the rollback of "${cmd.action}" is lost, the ring moved past it.${DEV ? ' Its change stays in the state. The ring keeps ' + UNDO_RING + ' steps: keep fewer writes pending behind a sent action.' : ''}`, { context: { id, action: cmd.action, ring: UNDO_RING } });
+            }
+            return state.value;
+          }
           // Each later step as [slot, before, after], computed first and written
           // after, so a reducer that throws leaves the ring and the state as
           // they were. A reducer runs again; `$reset`, a tab's state and a
@@ -889,13 +906,23 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         return r;
       };
     };
+    // `optimistic`: each handler brackets its reducer with `running`; one left
+    // set by a throw is kept in `threw` by the next. Its own literal per shape,
+    // calling the step directly (V8-RULES rule 5).
+    const kept = (f: (cmd: any) => S) => (cmd: any): S => {
+      if (running !== null) (threw as WeakSet<object>).add(running);
+      running = cmd;
+      const s = f(cmd);
+      running = null;
+      return s;
+    };
     for (let i = 0; i < keys.length; i++) {
       const reducer = reducers[keys[i] as string] as StoreReducer<S> | null;
       if (reducer === null) {
         offs.push(bus.register(names[i] as string, null, sent));
         continue;
       }
-      const h = keep !== null
+      const plain = keep !== null
         ? keep(reducer)
         : step
         ? (cmd: { target: any; payload?: any }) =>
@@ -905,6 +932,17 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
             (pend as (cmd: any, f: StoreReducer<S>) => S)(cmd, reducer)
         : (cmd: { target: any; payload?: any }) => {
             return (state.value = reducer(state.value, cmd.target, cmd.payload));
+          };
+      const h = threw === null
+        ? plain
+        : keep !== null
+        ? kept(plain)
+        : (cmd: { target: any; payload?: any }) => {
+            if (running !== null) (threw as WeakSet<object>).add(running);
+            running = cmd;
+            const s = (step as (cmd: any, prev: S, f: StoreReducer<S>) => S)(cmd, state.value, reducer);
+            running = null;
+            return s;
           };
       offs.push(bus.register(names[i] as string, shared ? crossing(names[i] as string, h) : h, registered));
     }

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.35.1 - 2026-11-08
+
+A patch: an optimistic store's lost rollback is reported, and the router guide catches up with the Vapor outlet's `view` slot.
+
+- Fixed an optimistic store answering a rollback it did not do: after 256 later writes the change stayed and `$undo` answered ok. It now fails with `store:lost:rollback`.
+- Changed an optimistic store's actions to note a reducer that throws, at no counted cost (Intel i7-8650U, Node 24.22.2).
+- Fixed the router guide denying `<KeepAlive>` and `<Transition>` in the Vapor outlet's `view` slot. Both work there, and a cached page's `useCommand().on()` listeners stay live (ROADMAP, "`KeepAlive` listeners").
+- Changed the size budgets of the IIFE variants to 98,512 / 30,623, 71,473 / 22,356 and 73,922 / 23,111 raw / brotli. Performance decides over size.
+
 ## v1.35.0 - 2026-10-30
 
 Aligned with Vue 3.6.0-rc.14, which needed no change here. Reading each module against that release found two fixes and a few simplifications.

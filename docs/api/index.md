@@ -1019,7 +1019,7 @@ variant, and it produces a vnode, the vDOM shape Vapor replaced. Pinned by
 
 ### describeErrorCodes
 
-**Function** - [src/error-registry.ts:239](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L239)
+**Function** - [src/error-registry.ts:240](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L240)
 
 ```ts
 describeErrorCodes() => string
@@ -1137,7 +1137,7 @@ to override per call site (`getCommandBus<CommandMap>()` opts back out).
 
 ### getErrorEntry
 
-**Function** - [src/error-registry.ts:212](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L212)
+**Function** - [src/error-registry.ts:213](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L213)
 
 ```ts
 getErrorEntry(code: string) => ErrorCodeEntry | undefined
@@ -1322,7 +1322,7 @@ Invalidate the CSRF token cache (e.g. after logout).
 
 ### isRetryableCode
 
-**Function** - [src/error-registry.ts:229](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L229)
+**Function** - [src/error-registry.ts:230](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/error-registry.ts#L230)
 
 ```ts
 isRetryableCode(code: string) => boolean | undefined

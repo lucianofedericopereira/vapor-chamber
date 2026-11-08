@@ -938,7 +938,8 @@ const BUDGETS = {
   // Then log 36.F56 (one command map on both buses, the signal slot): raw 97,866. Raised to measured.
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 98,063/30,471. Raised to measured.
   // Then a plain store action's result, the state it wrote (tests/store-result-own-write.test.ts): raw -10, brotli +3, 98,053/30,474. Brotli raised to measured. Core and elements moved down and stay under.
-  'vapor-chamber.iife.min.js':          { rawMax: 98_063, brotliMax: 30_474 },
+  // Then an optimistic store's lost rollback, coded (store:lost:rollback; each handler brackets its reducer and calls the step directly, a throw kept): 98,512/30,623. Raised to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 98_512, brotliMax: 30_623 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
@@ -1081,7 +1082,8 @@ const BUDGETS = {
   // Then log 36.F55: 70,742/22,147. Raised to measured.
   // Then log 36.F56: raw 70,826. Raised to measured.
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 71,020/22,207. Raised to measured.
-  'vapor-chamber-core.iife.min.js':     { rawMax: 71_020, brotliMax: 22_207 },
+  // Then an optimistic store's lost rollback (see the full IIFE's note): 71,473/22,356. Raised to measured.
+  'vapor-chamber-core.iife.min.js':     { rawMax: 71_473, brotliMax: 22_356 },
   // Then the bundler alone (rolldown 1.2.12 -> 1.2.15 with vite 8.3.5, no source changed): elements brotli 22,542 -> 22,581 (+39), raw 72,256 -> 72,208. Raised to measured. Full and core moved down and stay under.
   // Then log 36.F41, `store.$ready` (see the full IIFE's note): 72,321/22,634. Raised to measured.
   // Then log 36.F42 (B4, see the full IIFE's note): 72,636/22,719. Raised to measured.
@@ -1093,7 +1095,8 @@ const BUDGETS = {
   // Then log 36.F55: raw 73,190. Raised to measured.
   // Then log 36.F56: raw 73,274. Raised to measured.
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 73,469/22,892. Raised to measured.
-  'vapor-chamber-elements.iife.min.js': { rawMax: 73_469, brotliMax: 22_932 },
+  // Then an optimistic store's lost rollback (see the full IIFE's note): 73,922/23,111. Raised to measured.
+  'vapor-chamber-elements.iife.min.js': { rawMax: 73_922, brotliMax: 23_111 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

@@ -2,7 +2,7 @@
 /**
  * The Vapor outlet's `view` slot, `<RouterOutlet v-slot:view="{ Component }"><Component /></RouterOutlet>`, compiled on the installed Vue and mounted with a real router.
  * Why: an app wraps the routed component in the slot, so a slot that stayed on the old component would show the old page and leave its commands answering.
- * Shows: navigation swaps the component, the replaced component's `useCommand().on()` listener is released, a `<Transition>` around it runs on each swap, the default slot is still the no-match fallback, and with no match and no default the slot holds nothing.
+ * Shows: navigation swaps the component, the replaced component's `useCommand().on()` listener is released, a `<Transition>` around it runs on each swap, a `<KeepAlive>` around it keeps a page left and come back to (one setup, the same element, its listener still answering while deactivated), the default slot is still the no-match fallback, and with no match and no default the slot holds nothing.
  * See: src/router/vapor.ts, docs/router.md
  */
 import * as Vue from 'vue';
@@ -29,12 +29,14 @@ afterEach(() => { done(); resetCommandBus(); });
 
 async function mount(source: string, ctx: Record<string, unknown> = {}) {
   const heard: string[] = [];
+  const setups: string[] = [];
   const bus = createCommandBus({ onMissing: 'ignore' });
   setCommandBus(bus);
   const page = (text: string) => {
     const { template, defineVaporComponent } = v;
     return defineVaporComponent({
       setup() {
+        setups.push(text);
         useCommand().on('ping', () => { heard.push(text); });
         return template(`<p>${text}</p>`, 1)();
       },
@@ -53,7 +55,7 @@ async function mount(source: string, ctx: Record<string, unknown> = {}) {
   app.mount(host);
   done = () => { app.unmount(); host.remove(); router.dispose(); done = () => {}; };
   const push = async (to: string) => { await router.push(to); await v.nextTick(); };
-  return { host, bus, heard, push };
+  return { host, bus, heard, setups, push };
 }
 
 describe('the Vapor outlet: the view slot', () => {
@@ -87,6 +89,28 @@ describe('the Vapor outlet: the view slot', () => {
     expect(host.textContent).toBe('B');
     expect(seen).toContain('leave:A');
     expect(seen).toContain('enter:B');
+  });
+
+  it('works around a KeepAlive: a page left and come back to is the same instance, and its listener stays live while deactivated', async () => {
+    const { host, bus, heard, setups, push } = await mount('<RouterOutlet v-slot:view="{ Component }"><KeepAlive><Component /></KeepAlive></RouterOutlet>');
+    const first = host.querySelector('p');
+    expect(first?.textContent).toBe('A');
+
+    await push('/app/b');
+    expect(host.textContent).toBe('B');
+    bus.dispatch('ping', {});
+    expect(heard).toEqual(['A', 'B']);
+
+    await push('/app/a');
+    expect(host.querySelector('p')).toBe(first);
+    expect(setups).toEqual(['A', 'B']);
+  });
+
+  it('without a KeepAlive, a page come back to is set up again', async () => {
+    const { setups, push } = await mount('<RouterOutlet v-slot:view="{ Component }"><Component /></RouterOutlet>');
+    await push('/app/b');
+    await push('/app/a');
+    expect(setups).toEqual(['A', 'B', 'A']);
   });
 
   it('with a default slot, no match shows the fallback, and a match comes back through the view slot', async () => {

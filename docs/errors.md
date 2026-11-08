@@ -190,6 +190,7 @@ Re-sent by the async bus by default: only when the command is idempotent or keye
 |---|---|---|---|---|
 | `transport:lost:result` | error | no | A batch answered without this command's result: it may have run | The backend must answer every batched command by the id it was sent. The outcome is unknown, so it is re-sent only with an idempotency key. |
 | `transport:lost:reply` | error | no | The socket closed or was torn down before the reply arrived | Reconnect and dispatch again. The outcome is unknown, so the async bus re-sends it only for an idempotent action or a keyed command. |
+| `store:lost:rollback` | error | no | An optimistic change outlived the undo ring and was not rolled back | Keep fewer writes pending behind a sent action. context.ring is the ring's size. |
 
 <a id="aborted"></a>
 

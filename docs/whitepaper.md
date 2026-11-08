@@ -231,7 +231,7 @@ none.[^stateless-history]
 every mutation of it arrives as a dispatch. So the plugin catalogue (undo,
 optimistic updates, per-key ordering) applies to state with no code of the
 store's own. Undo takes one option, `undo: true`, and saving takes one,
-`persist`. The store is <!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB.[^store-options]
+`persist`. The store is <!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB.[^store-options]
 
 [^store-options]: An inverse belongs to the action, and only the store knows the state it replaced, so undo is the store's option. Only the store sees all its writes, so saving is too. Appendix A.3 says which half of the original "no state" argument this reversed, and why.
 
@@ -1222,9 +1222,9 @@ shape**:
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.7<!-- /vc:sizeIifeCore --> KB |
-| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->29.8<!-- /vc:sizeIifeFull --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> KB |
+| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->29.9<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1887,7 +1887,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->472<!-- /vc:testFiles --> files, <!-- vc:tests -->4867<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->473<!-- /vc:testFiles --> files, <!-- vc:tests -->4875<!-- /vc:tests --> tests)
 ```
 
 | current numbers | where |
@@ -1967,7 +1967,7 @@ lines inside itself (4.0.3, read 2026-10-06: `action()` 44 lines, its
 `$onAction` subscriptions 15). It gives actions the observability that
 plugins, undo, cross-tab sync and a devtools timeline need, because no bus
 existed underneath it. Here one does, so the store is
-<!-- vc:sizeStore -->5.8<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
+<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
 catalogue applied to state, with every capability in it already written and
 tested. A fourth source of truth would be a store that rebuilds persistence,
 history and sync. This one cannot, because it has none of its own.

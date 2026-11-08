@@ -13,9 +13,9 @@ native. An older browser is not a target.[^iife-floor]
 
 | Variant | Audience | Min | Brotli |
 |---|---|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.3<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.7<!-- /vc:sizeIifeCore --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->71.7<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.4<!-- /vc:sizeIifeElements --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->95.8<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.8<!-- /vc:sizeIifeFull --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.8<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->72.2<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->96.2<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.9<!-- /vc:sizeIifeFull --> KB |
 
 ## Drop a variant into a page
 

@@ -483,16 +483,18 @@ What it costs, and what it needs:
   disappointing result from this subpath.
 - **A scoped slot hands out the changing component.**
   `<RouterOutlet v-slot:view="{ Component }"><Transition><Component /></Transition></RouterOutlet>`
-  wraps the routed component, and `<Component />` follows the route. The slot is `view` because
-  `default` is the no-match fallback. With a `default` slot, no match shows that slot. Without one,
-  the `view` slot stays mounted and `Component` is null. A `view` slot is read once, when the outlet
-  is created. `./vdom` has no such slot.[^view-slot]
+  wraps the routed component, and `<Component />` follows the route.
+  `<KeepAlive><Component /></KeepAlive>` keeps each page (KeepAlive, below). The slot is `view`
+  because `default` is the no-match fallback. With a `default` slot, no match shows that slot.
+  Without one, the `view` slot stays mounted and `Component` is null. A `view` slot is read once,
+  when the outlet is created. `./vdom` has no such slot.[^view-slot]
 - **Parity with the vDOM outlet on everything else.**
   - It is keyless, so the same record at a depth keeps its instance across param and query
     changes.
   - Nested depth uses the same `Symbol.for` key, so the two outlets share one depth contract and
     can coexist.
-  - Neither has `<Transition>`/`<KeepAlive>` integration or SSR/hydration.
+  - Neither integrates `<Transition>`/`<KeepAlive>` on its own, and neither has SSR/hydration.
+    The Vapor outlet's `view` slot is where an app adds either (above). `./vdom` has no such slot.
   - Both reuse on resolved-component identity: two records that resolve to the same component
     reuse the instance.
 
@@ -519,10 +521,11 @@ Roadmap items this router does **not** depend on, by design:
 | Async Component | lazy routes use the router's own `import()` + cache, resolved before the snapshot commits - never `defineAsyncComponent` |
 | Suspense | the two-phase commit means a pending state is never rendered, so there is no boundary to need |
 
-Still not usable here, for different reasons:
+Usable through the `view` slot:
 
-- **KeepAlive.** Nothing caches an inactive route's state here yet, so neither of KeepAlive's
-  closed correctness issues reaches this router today.[^keepalive-issues]
+- **KeepAlive.** It caches inactive pages. Its two correctness issues are closed
+  upstream.[^keepalive-issues] A cached page's `useCommand().on()` listeners stay live while it is
+  deactivated.[^view-slot] Pausing them is open work (ROADMAP, "`KeepAlive` listeners").
 
   **`tryKeepAliveHooks` in `chamber.ts` stays**, with #15237 landed. It is not
   double-suppression.[^keepalive-pause] Vue's pausing suppresses reactive effects owned by the
@@ -550,7 +553,11 @@ Still not usable here, for different reasons:
     buffered `bus.onAfter` entries, never from Vue's component tree. So the Commands timeline and
     inspector panel do not depend on Vapor's component events, which Vue sends to the devtools
     hook, or on a component tree, which it does not build for Vapor.
-- **Transition:** route transitions. The View Transitions API is the DOM-native way around it.
+- **Transition.** A `<Transition>` in the slot runs its hooks on each swap.[^view-slot] The View
+  Transitions API stays a DOM-native alternative.
+
+Still not usable here:
+
 - **SSR/hydration** for blade rows: no server-side render path exists.
   - `fetchBlade` is caller-supplied everywhere. A blade row without one throws
     `router:missing:fetchBlade`, in a browser or not.
