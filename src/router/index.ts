@@ -342,6 +342,10 @@ export function createRouter<TName extends string = string>(options: RouterOptio
   const lastError = shallowRef<unknown>(null);
 
   function dispatchError(error: unknown, to: RouteLocation): void {
+    // After dispose() a late failure (a remote table, a refresh) reaches no
+    // one: no subscriber, no options.onError, no hard navigation, no lastError.
+    // Called only after start(), so `disposed` below is initialized by then.
+    if (disposed) return;
     lastError.value = error;
     for (const subscriber of errorSubscribers) subscriber(error, to);
     if (options.onError) {

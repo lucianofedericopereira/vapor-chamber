@@ -97,7 +97,7 @@ export const EXTENSIONS = [
  * Generated and vendor trees. Nothing here is written by hand, so there is no
  * character in it for anyone to have chosen.
  *
- * `.astro` is Astro's generated cache under examples/exo-astro, gitignored and
+ * `.astro` is Astro's generated cache under examples/apps/exo-astro, gitignored and
  * rebuilt by `astro build`; scanning it made the file count in the OK line
  * depend on whether the example had been built.
  *
@@ -114,8 +114,12 @@ export const EXTENSIONS = [
  * Deliberately NOT fixed by catching ENOENT in the reader. That would make the
  * guard able to skip a real file silently, which is the one failure mode a guard
  * must not have.
+ *
+ * `demo-app` is examples/laravel/app/setup.sh's scaffold, gitignored: Laravel's
+ * vendor/, and a Composer path link back to this repo, so a walk into it never
+ * ends (ENAMETOOLONG; log 36.F58).
  */
-export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro', '__ref']);
+export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro', '__ref', 'demo-app']);
 
 /**
  * file-path substring -> reason. Earn every entry.

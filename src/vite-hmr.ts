@@ -57,7 +57,7 @@
  *   - Vite >= 7.0.0 (programmatic build API + library mode)
  *   - @vitejs/plugin-vue >= 5.0.0 (Vue 3.6 Vapor SFC support - earlier
  *     plugin-vue versions only handle 3.5 VDOM and silently skip vapor blocks)
- *   - Vue >= 3.5.0 (composables) or >= 3.6.0-beta.14 (full Vapor surface)
+ *   - Vue >= 3.5.45 (composables) or >= 3.6.0-beta.14 (full Vapor surface)
  *
  * If you're on plugin-vue v4 the HMR plugin still works for VDOM SFCs but
  * you'll miss Vapor support entirely - Vapor `<script setup vapor>` blocks
@@ -308,7 +308,7 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       // breakpoint and overlay location down by one. A hand-built line-shift
       // map is no fix: it can only say "output line N came from source line
       // N-1, column 0", and Vite CHAINS maps, so every downstream map's column
-      // detail collapses onto column 0. Measured on examples/vapor-sfc,
+      // detail collapses onto column 0. Measured on examples/apps/vapor-sfc,
       // mappings length:
       //
       //                          src/main.ts     src/CartPanel.vue

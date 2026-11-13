@@ -1,7 +1,7 @@
 /**
- * A request that JSON cannot encode (a BigInt, a cycle) fails as transport:invalid:json, alone, with nothing sent and no re-send.
+ * A request that JSON cannot encode (a BigInt, a cycle), or that has no JSON text at all (undefined, a function, a toJSON answering undefined), fails as transport:invalid:json, alone, with nothing sent and no re-send.
  * Why: such a request never leaves, so reporting it as a lost reply or a plugin fault would re-send an idempotent action for nothing, fail an encodable batch neighbour, or point the developer at the wrong cause.
- * Shows: the http client, safe.post, postCommand, httpTransport (with and without an httpClient, batched or not) and wsTransport all report transport:invalid:json with the TypeError as cause, no extra POST, no attempts context, and no console error; the encodable control request still succeeds.
+ * Shows: the http client, safe.post, postCommand, httpTransport (with and without an httpClient, batched or not) and wsTransport all report transport:invalid:json with the TypeError as cause, no extra POST, no attempts context, and no console error; the encodable control request still succeeds. A body with no JSON text gives the same failure with no cause, postCommand's included, and `silent: true` still rejects rather than throwing.
  * See: audit D11.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +49,32 @@ describe('the http client', () => {
   it('postCommand rejects the same way', async () => {
     const seen = backend();
     await expect(postCommand('/x', { n: 1n })).rejects.toMatchObject({ code: 'transport:invalid:json' });
+    expect(seen.posts).toBe(0);
+  });
+
+  // JSON.stringify answers undefined for these instead of throwing: no TypeError, so no cause.
+  it('a body with no JSON text: postCommand rejects with transport:invalid:json, nothing sent', async () => {
+    const seen = backend();
+    for (const body of [undefined, () => 1, { toJSON: () => undefined }]) {
+      const error = await postCommand('/x', body).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BusError);
+      expect(error).toMatchObject({ code: 'transport:invalid:json', context: { url: '/x' } });
+    }
+    expect(seen.posts).toBe(0);
+  });
+
+  it('with silent: true, postCommand still rejects (no synchronous throw), marked silent', async () => {
+    backend();
+    let error: unknown;
+    const pending = postCommand('/x', undefined, { silent: true });
+    await pending.catch((e: unknown) => { error = e; });
+    expect(error).toMatchObject({ code: 'transport:invalid:json', context: { silent: true } });
+  });
+
+  it('post() of an object whose toJSON answers undefined rejects too: no POST with an empty JSON body', async () => {
+    const seen = backend();
+    const error = await createHttpClient().post('/x', { toJSON: () => undefined }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'transport:invalid:json' });
     expect(seen.posts).toBe(0);
   });
 });

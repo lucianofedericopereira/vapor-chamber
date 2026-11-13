@@ -86,9 +86,11 @@ function bindQueryParam<T>(router: Router, key: string, def: QueryParamDef | und
     },
   })) as QueryParamHandle<T>;
 
+  // biome-ignore-start lint/correctness/noVueRefAsOperand: QueryParamHandle is the ref plus these three methods; they are set on it, its value is never read without `.value`
   handle.push = (next) => write(next, 'push');
   handle.replace = (next) => write(next, 'replace');
   handle.clear = () => write(null, 'replace');
+  // biome-ignore-end lint/correctness/noVueRefAsOperand: end of the handle's methods
   return handle;
 }
 

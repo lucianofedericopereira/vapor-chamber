@@ -1228,6 +1228,10 @@ export function createEchoBridge(options: EchoBridgeOptions): {
   const joined: string[] = [];
 
   function install(bus: BaseBus): void {
+    // A second install replaces the first, as the SSE bridge's does: Echo
+    // hands back one cached channel per name until it is left, and listen()
+    // adds a callback, so without this every broadcast reached both buses.
+    dispose();
     for (const sub of channels) {
       const type = sub.type ?? 'public';
       const ch = type === 'private' ? echo.private(sub.name)

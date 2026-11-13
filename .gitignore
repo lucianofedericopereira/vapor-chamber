@@ -43,7 +43,7 @@ Thumbs.db
 # npm pack output
 *.tgz
 
-# Astro generated artifacts (examples/exo-astro)
+# Astro generated artifacts (examples/apps/exo-astro)
 .astro/
 
 # Incremental / temp build state
@@ -55,8 +55,9 @@ vite.config.*.timestamp-*
 .env.*
 !.env.example
 
-# Machine-local editor/agent settings
+# Machine-local editor/agent settings (launch.json: a desktop preview's dev servers)
 .claude/settings.local.json
+.claude/launch.json
 
 # Local scratch notes (not part of the project)
 rc1.txt
@@ -66,8 +67,18 @@ resume.txt
 HANDOFF.md
 TODO.md
 
-# Laravel example scaffold output (examples/laravel-app/setup.sh)
+# Laravel example scaffold output (examples/laravel/app/setup.sh): a whole
+# Laravel app with its vendor/, which links back to this repo through Composer's
+# path repository. Git ignoring it is not enough: the repo's own tree walkers
+# skip it by name too (check-ascii, stamp-docs, the example tests, biome.json,
+# the examples runner's watcher), or a walk into it never ends. Add a new
+# walker to that list.
 demo-app/
+
+# The Composer package's install, if run at the root (composer.json is the
+# package manifest; a library commits no lock).
+/vendor/
+/composer.lock
 
 # Throwaway measurement scripts and probe tests. Every alignment cycle writes a
 # few; they are evidence for a commit message, not part of the suite, and one

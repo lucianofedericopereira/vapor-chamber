@@ -3,7 +3,7 @@
 *Luciano Federico Pereira - ORCID 0009-0002-4591-6568 - luciano-pereira.pages.dev*
 
 This paper describes the library as it stands, aligned with Vue
-<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
+<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
 carry the reasons, the evidence and the history. The appendix, Notes and
 history, keeps the original header and abstract, the per-release Vue alignment
 log, this paper's corrections to itself and the performance findings.
@@ -100,8 +100,8 @@ plugin.
 - **Out of scope:** React, Svelte, Angular and other frontend frameworks. Any
   TypeScript project can still use the core.
 
-Vue is an optional peer. The composables need `>=3.5.0`. The full Vapor
-surface needs <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
+Vue is an optional peer. The composables need `>=3.5.45`. The full Vapor
+surface needs <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
 in `package.json`). The core bus runs with no Vue at all.
 
 ### 2.2 Against Vue's own router and store
@@ -231,7 +231,7 @@ none.[^stateless-history]
 every mutation of it arrives as a dispatch. So the plugin catalogue (undo,
 optimistic updates, per-key ordering) applies to state with no code of the
 store's own. Undo takes one option, `undo: true`, and saving takes one,
-`persist`. The store is <!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB.[^store-options]
+`persist`. The store is <!-- vc:sizeStore -->6.0<!-- /vc:sizeStore --> KB.[^store-options]
 
 [^store-options]: An inverse belongs to the action, and only the store knows the state it replaced, so undo is the store's option. Only the store sees all its writes, so saving is too. Appendix A.3 says which half of the original "no state" argument this reversed, and why.
 
@@ -771,7 +771,7 @@ static entry that hands Vue to the library at build time.
 
 [^root-only]: The root can only look for Vue at runtime, through a bare `import('vue')`. That resolves under a dev server and fails in a production bundle. Composables imported from the root then get plain `{ value }` state with no reactivity, arm no automatic cleanup and skip the KeepAlive guard (`tests/root-only-prod-fixture.test.ts`). The library warns once, in production too, when it sees Vue running with nothing wired.
 
-[^vapor-entry]: Sizes from BUNDLE-SIZES' Vapor wiring table. The entry leaves out `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw) and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->73.0<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import stays in the bundle whether the app calls it or not. `configureVue({ ... })` adds either, and merges with what the entry wired.
+[^vapor-entry]: Sizes from BUNDLE-SIZES' Vapor wiring table. The entry leaves out `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw) and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import stays in the bundle whether the app calls it or not. `configureVue({ ... })` adds either, and merges with what the entry wired.
 
 [^wire]: `tests/vite-wire-plugin.test.ts`. On esbuild or webpack an app imports from the subpath and adds `define: { __VC_WIRED_BUILD__: 'true' }` (`tests/root-probe-builds.test.ts`).
 
@@ -826,7 +826,7 @@ app.use(vaporInteropPlugin)
 ```
 
 A pure Vapor app does not carry the vDOM interop renderer that a mixed tree
-installs: +<!-- vc:sizeVaporInteropRaw -->73.0<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build (BUNDLE-SIZES' Vapor
+installs: +<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build (BUNDLE-SIZES' Vapor
 wiring table).
 
 ### 7.5 Lifecycle cleanup
@@ -1054,7 +1054,7 @@ module. **The bus owns writes (commands), and the router owns reads
 
 A pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, with no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->18.16<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->18.43<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop.[^outlet] There, a non-Vapor route component throws
 `router:invalid:component`, and blade rows still need the vDOM outlet. The full
 guide is [docs/router.md](./router.md).
@@ -1224,7 +1224,7 @@ shape**:
 |-----------|-----------------------------------------------------------|--------|
 | core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->29.9<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1493,7 +1493,7 @@ createVaporChamberApp(App).mount('#app')
 ```
 
 Dropping `vaporInteropPlugin` drops the vDOM interop renderer,
-+<!-- vc:sizeVaporInteropRaw -->73.0<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build. Routes then render
++<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build. Routes then render
 through the Vapor outlet (8.1).
 
 ---
@@ -1570,7 +1570,10 @@ no `cache` option never stores anything.
 the page and hands it to the client's stores. Nothing replays. So a reducer
 that mints an id or reads a clock ends on the server's state in the browser
 too, and nothing on the client has side effects to suppress. It works above
-Vue's DOM hydration and holds no DOM references.
+Vue's DOM hydration and holds no DOM references. A store a component creates
+during the render is the request's, so it is still there when `storeStates`
+reads it after the render: Vue 3.6 stops every component's scope when the
+render ends (docs/store.md, Lifecycle).
 
 ```ts
 // server-entry.ts, per request
@@ -1750,9 +1753,6 @@ yet rules:
   dispatch there does not suspend tracking (9.6).
 - **The HMR shim misses an app served from a backend template** whose entry
   script never names the package (7.8).
-- **A vDOM `<Transition mode="out-in">` with the transition bridge needs an
-  async bus.** On a sync bus `done()` runs at once, and Vue's vDOM `out-in` then
-  throws and renders nothing (10.3).[^out-in]
 - **A dispatch an async undo handler makes after an `await` is recorded** in
   history. Only what it dispatches synchronously is a rollback step (7.6).
 - **The A/B tool times synchronous functions only**, so it does not measure the
@@ -1760,8 +1760,6 @@ yet rules:
 - **The naming evidence rests on two tokenizer vocabularies.** The Claude
   column of the cited study is a proxy, and the CDCC result comes from one 3B
   model (3.5).
-
-[^out-in]: Vue's defect, vuejs/core#15727, with a fix proposed in vuejs/core#11824. Vapor's `<Transition>` and the default mode are not affected (`tests/transition-done-timing-fixture.test.ts`).
 
 ---
 
@@ -1887,7 +1885,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->473<!-- /vc:testFiles --> files, <!-- vc:tests -->4875<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->482<!-- /vc:testFiles --> files, <!-- vc:tests -->4952<!-- /vc:tests --> tests)
 ```
 
 | current numbers | where |
@@ -1967,7 +1965,7 @@ lines inside itself (4.0.3, read 2026-10-06: `action()` 44 lines, its
 `$onAction` subscriptions 15). It gives actions the observability that
 plugins, undo, cross-tab sync and a devtools timeline need, because no bus
 existed underneath it. Here one does, so the store is
-<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
+<!-- vc:sizeStore -->6.0<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
 catalogue applied to state, with every capability in it already written and
 tested. A fourth source of truth would be a store that rebuilds persistence,
 history and sync. This one cannot, because it has none of its own.
@@ -1997,7 +1995,7 @@ the bus, normalized entity storage. The wall held every time.
 That wall still holds with `vapor-chamber/store` shipped: the store owns state,
 the bus does not, and a store's actions reach it only as dispatches.
 
-### B. The Vue 3.6 alignment log, beta.8 to rc.14 (was section 9.2)
+### B. The Vue 3.6 alignment log, beta.8 to rc.15 (was section 9.2)
 
 
 Every Vue 3.6 release gets an alignment cycle. Read each commit at source and
@@ -2045,6 +2043,7 @@ assumptions is what surfaced them.
 | rc.12 (Oct 16) | 62 commits, 62 in full | no code change, one test rc.12 makes pass | 4164 + 40 | 16.0 / 11.4 / 11.8 |
 | rc.13 (Oct 23) | 43 commits, 43 in full | no code change, four tests rc.13 makes pass | 4827 + 43 | 29.5 / 21.5 / 22.2 |
 | rc.14 (Oct 30) | 30 commits, 30 in full | no code change needed, eight tests rc.14 makes pass, a module-by-module reading found two defects of ours | 4850 + 45 | 29.8 / 21.7 / 22.4 |
+| rc.15 (Nov 12) | 104 commits, 104 in full | two regressions of ours from #16108 fixed, four tests rc.15 moves, a module-by-module reading found fifteen defects of ours, and five more proved by failing tests | <!-- vc:testsAll -->4952 + 55<!-- /vc:testsAll --> | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> / <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> / <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> |
 
 Coverage has been 100% on all four axes since rc.6. The two test numbers are the
 two vitest projects. "Pass-through" means Vue's change lands below this
@@ -2296,7 +2295,7 @@ descendant. It also mirrors the incompatibility with `.capture` / `.once` /
 assumption, and it is the reason `.delegate` is opt-in here rather than the
 default. Its real payoff is standing listener count, 1 rather than N, for large
 mostly-static lists. So it is documented as a memory trade and not a speed one.
-`examples/vapor-island-cart`'s 3-item product list stays plain `@click`, since
+`examples/apps/vapor-island-cart`'s 3-item product list stays plain `@click`, since
 there is nothing to win at that size. A comment there explains when to reach for
 `.delegate` instead.
 
@@ -2967,10 +2966,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->18.16<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->18.43<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.03<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.07<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -3298,7 +3297,7 @@ said so. **A literal records a compiler release and then agrees with it forever.
 `tests/compile-vapor.ts` is the fix. One helper compiles the consumer's template
 on the INSTALLED Vue, and reads the generated module's imports rather than
 listing them. Every Vapor test that matters now runs compiler output. And
-`examples/vapor-sfc` had no `v-vc:command` anywhere. So rebuilding all three
+`examples/apps/vapor-sfc` had no `v-vc:command` anywhere. So rebuilding all three
 examples, which this ritual does every cycle, passed while the feature was dead.
 `npm run check:example` now builds that example and drives the button in a real
 page.
@@ -3368,7 +3367,7 @@ nothing to mis-check. A/B in the example's own project, with a control:
 argument. Our usage no longer has the shape that triggers it. **If an
 argument-based notation is ever proposed again, this is part of its cost.**
 
-So `examples/vapor-sfc` no longer registers the directive app-wide. That
+So `examples/apps/vapor-sfc` no longer registers the directive app-wide. That
 registration was never a style choice. It existed only to give `vue-tsc` no
 declaration to check, which is opting out of checking rather than satisfying it.
 The example now imports the binding, the way the documentation recommends, and its
@@ -3464,7 +3463,7 @@ reactive state, the Blade or sprinkled shape this library exists to serve. There
 is no next patch, and it never works at all.
 
 **What it cost beyond the payload.** One public spelling meant two things:
-order-independent on Vapor, dead on vDOM. `examples/vapor-sfc` writes
+order-independent on Vapor, dead on vDOM. `examples/apps/vapor-sfc` writes
 payload-before-command and states that the order does not matter, which holds only
 because that file is `<script setup vapor>`. A reader copying that markup into a
 vDOM component got a silent no-op.
@@ -3562,7 +3561,7 @@ is always an import rather than a workaround.
 
 **Scope: only an element carrying BOTH a template `@click` and `v-vc-command`.**
 Nothing else changes. No example or documented recipe pairs them.
-`examples/feature-directives.html` says in as many words that there is no click
+`examples/pages/feature-directives.html` says in as many words that there is no click
 handler anywhere in it, because the directive owns the whole interaction.
 
 `80b3a046` moved compiled custom directives to the END of a block, after the
@@ -3722,7 +3721,7 @@ That is a sync plugin at `R = CommandResult` and an async one at the union. So
 a plugin that settles through `onSettled` (generic in `R`, and exported) fits
 both buses with no cast. One that reads `.ok` off `next()` does not compile.
 `SyncPlugin` is the sync-only shape. The async bus has one `use(AsyncPlugin)`.
-The change found two example plugins with the defect (`examples/custom-plugins.ts`)
+The change found two example plugins with the defect (`examples/snippets/custom-plugins.ts`)
 and the README's timing example.
 
 **The prototype-key rule is a sweep too, before it needs to be.** `src/dict.ts` is
@@ -4246,11 +4245,99 @@ brotli:
   resolve to CJS (a test runner's `vue` alias to that file) throws at load.
   `vue.runtime-with-vapor.esm-browser.js` is self-contained and does not.
 - vuejs/core#15727 is not fixed in rc.14, and PR #11824 is still open.
-- The `vue35` test copy is at 3.5.43.
+- The `vue35` test copy is at 3.5.44 (corrected in the rc.15 cycle, see
+  appendix C).
 - Native `<Suspense>` inside a Vapor component is still unimplemented upstream
   (#13687, the VaporSuspense box).
 
 The cycle record is docs/rc-alignment-log.md, section 36.F57.
+
+#### rc.15 (Nov 12): a scope rule that moved, and defects of ours a module reading found
+
+**Landed.** 104 commits in `v3.6.0-rc.14..v3.6.0-rc.15`, one of them a merge
+that brings in Vue 3.5.45's line. Each diff was read at source, the merge's
+`pnpm-lock.yaml` hunk included: Vue's own lock resolves the published
+packages' runtime dependencies to the versions this repository installs,
+with `@babel/parser` and `@babel/types` one patch older there. The
+reactivity sources changed (`system.ts`, `computed.ts`, `effect.ts`,
+`effectScope.ts`, `dep.ts`, `ref.ts`). The peer range narrows to
+`>=3.5.45 || >=3.6.0-rc.15`: the 3.5 floor rises too (owner), so every admitted
+Vue carries the `out-in` fix below. The cycle also moved development and CI to
+Node 26 (V8 14.6), with `engines` admitting Node 24 and 26.
+
+**Decided: two regressions of ours, fixed narrowly.** `onScopeDispose` in a
+scope already stopped now runs the cleanup at once (#16108). An async
+`<script setup>` resumed after its component unmounted runs in that stopped
+scope:
+
+- `useCommand`, `useCommandGroup` and `useVaporAsyncCommand` were disposed at
+  creation, so the next line's `on()` or `register()` stayed on the bus. They
+  now keep nothing there.
+- `routerFacts` was left half subscribed: its two watchers stay live in a
+  stopped scope, since the merge kept an effect there linked. It now arms one
+  cleanup after all four subscriptions.
+
+What a composable does after its own `dispose()`, called by hand, is defined by
+no doc or test. A first fix that changed it was undone: that contract is the
+owner's.
+
+**Four tests rc.15 moves.**
+
+- The vDOM `out-in` with the bridge on a sync bus settles as the default mode
+  does: vuejs/core#15727 is fixed by #11824, in rc.15 and in 3.5.45.
+- The bundler entry loads under Vitest, but a Vapor app still cannot mount
+  through it, so manual chapter 10's warning stays, with that reason.
+- `__multiRoot` is gone (#16088): a Vapor component claims the `<!--{-->`
+  range its server build wraps a multi-root render in.
+- The async setup fixture, red until the fix above.
+
+**A second question, of every module.** As in rc.14, five readings of `src`
+against each commit. The defects they found are older than rc.15, each pinned
+by a test that was red first:
+
+- External names read off `Object.prototype`: `storeStates` with a store id
+  `__proto__`, router param and placeholder names, a hot update's
+  `__proto__` entry.
+- A one-shot slot cleared before it was set: the 419 refresh with no cookie
+  URL stayed stored for every later request.
+- A cached answer missing one of its inputs: the router's anchor parse memo
+  ignored the base.
+- Work a disposed owner still did: the outbox flushed on its own, and a
+  shared store left without a `bye`, so the lead kept posting to no one.
+- A bound that did not hold: MCP's `maxInFlight` within one chunk, and a
+  re-set cache key evicting a live entry.
+- Plus: the test bus ignoring `{ signal }`, MCP splitting a UTF-8 character and
+  sending a function result with no `text`, a second Echo install doubling
+  every broadcast, a workflow running steps it does not list, and
+  `StreamParser.stream()` leaving the body locked after a throw.
+
+Five more, each first proved by a test that failed through the public API:
+
+- A store a component creates during a server render was gone before
+  `storeStates` read it: Vue 3.6 stops every component's scope when the
+  render ends. The request now owns it.
+- A composable made before an `await` kept what the setup registered after
+  it, when the component unmounted during the await.
+- `postCommand(url, undefined)` rejected with `undefined`, and with
+  `silent: true` threw synchronously.
+- `vc-vitest-mcp` died when a coverage run could not start, and its dispose
+  left a coverage run running.
+
+**Measured.** The fixes run composable creation, not dispatch. Ten A/B rows
+on example-shaped components: none counted, none slower. `ab:vue` against
+rc.14: an effect scope's create and dispose the same, a `shallowRef` write
+1.093x (0.1 ns), under the size at which it moves a dispatch. Bytes per change
+are in the log. The Blade consumer's brotli moved with no code change: rolldown
+1.2.19 orders `dist`'s imports differently.
+
+**Still watching.**
+
+- What a composable does after a `dispose()` by hand. Open for the owner.
+- The `vue35` test copy is at 3.5.45.
+- Native `<Suspense>` inside a Vapor component is still unimplemented upstream
+  (#13687, the VaporSuspense box).
+
+The cycle record is docs/rc-alignment-log.md, section 36.F58.
 
 ---
 
@@ -4410,7 +4497,7 @@ A page that parked Vue there moves it to `__VAPOR_CHAMBER_VUE__`, or calls
 **Correction - the scope is wider than this section first claimed.** It said
 "under a bundler the async fallback resolves and the bug is invisible". That is
 true in `vite dev` and **false in `vite build`**, and the flagship
-`examples/vapor-sfc` was shipping broken because of it: the built page rendered
+`examples/apps/vapor-sfc` was shipping broken because of it: the built page rendered
 nothing and threw *"Vue 3.6+ with Vapor mode required. No Vue detected."* while
 the with-vapor runtime sat bundled in the very same 94 KB file. This was found by
 loading the built `dist/` over plain HTTP and capturing the throw, not by
@@ -4433,7 +4520,7 @@ directly and the examples were only ever opened via `vite dev`.
 The fix is `configureVue(Vue)`, and it is **required** rather than advisory for
 bundled Vapor apps: it seeds the registry synchronously from the same aliased
 `vue` instance the compiled SFCs use, so there is no channel to race.
-`examples/vapor-sfc/src/main.ts` now does this and its built output renders;
+`examples/apps/vapor-sfc/src/main.ts` now does this and its built output renders;
 pinned by `tests/vapor-sfc-prod-detection.test.ts`. The alternative - `await
 waitForVueDetection()` before the first call - cannot help here, because the
 async channel it waits on is the one that rejects.
@@ -4750,6 +4837,14 @@ tracking is its cost, one effect per mounted control. As it stood:
 > `vcCommandVapor`, `v-vc:command` for Vapor components, reading its binding
 > getter at dispatch. The `renderEffect` a tracked port needs would break the
 > subpath on Vue 3.5.
+
+#### From B. The Vue 3.6 alignment log (the rc.14 entry, corrected in the rc.15 cycle)
+
+package-lock.json as the rc.14 cycle left it resolves `vue35`
+(`npm:vue@^3.5.43`) to 3.5.44, and `node_modules/vue35` reads 3.5.44. As it
+stood, under "Still watching":
+
+> - The `vue35` test copy is at 3.5.43.
 
 #### From 5.2 Dispatch flow (the plugin chain and `onBefore`, removed in v1.32.0)
 

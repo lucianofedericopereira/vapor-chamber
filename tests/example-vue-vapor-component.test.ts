@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * examples/vue-vapor-component.vue compiled and mounted as a VDOM component, the form its header names; this project has no Vapor Vue.
+ * examples/snippets/vue-vapor-component.vue compiled and mounted as a VDOM component, the form its header names; this project has no Vapor Vue.
  * Why: the example is what a reader copies; its package imports point at the source, so composables, store and root share one bus, as in an app.
  * Shows: it renders, adds, undoes and redoes through the store; the validator refuses an empty todo and shows why; unmount takes the validator off, so mounts do not stack.
  * See: log s35.125.
@@ -17,7 +17,7 @@ const root = resolve(import.meta.dirname, '..');
 const src = (p: string) => resolve(root, 'src', p);
 
 async function mountExample() {
-  const vapor = readFileSync(resolve(root, 'examples/vue-vapor-component.vue'), 'utf8');
+  const vapor = readFileSync(resolve(root, 'examples/snippets/vue-vapor-component.vue'), 'utf8');
   const sfc = vapor.replace('<script setup vapor lang', '<script setup lang');
   expect(sfc).not.toBe(vapor); // the example is a Vapor component, and the attribute is all that differs
   const { descriptor } = parse(sfc, { filename: 'vue-vapor-component.vue' });
@@ -47,7 +47,7 @@ const items = (el: HTMLElement) => [...el.querySelectorAll('.todo-list li label'
 const button = (el: HTMLElement, text: string) =>
   [...el.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith(text)) as HTMLButtonElement;
 
-describe('examples/vue-vapor-component.vue', () => {
+describe('examples/snippets/vue-vapor-component.vue', () => {
   it('renders, adds, and undoes and redoes through the store', async () => {
     resetCommandBus();
     const { el, app } = await mountExample();

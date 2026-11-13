@@ -15,7 +15,7 @@ native. An older browser is not a target.[^iife-floor]
 |---|---|--:|--:|
 | **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->69.8<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> KB |
 | **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->72.2<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->96.2<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->29.9<!-- /vc:sizeIifeFull --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->96.6<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> KB |
 
 ## Drop a variant into a page
 
@@ -108,6 +108,6 @@ library's tag, and use the full or the elements variant (the core one has no Vue
 `VaporChamber.mount(selector, { stores })`, in the **full** variant, gives an island its own bus
 and creates its stores on it. It binds the element's `data-vc-command` and display attributes,
 and `unmount()` releases both. A Filament example is in the whitepaper, section 9.8, and in
-[`examples/pattern-5-filament.ts`](../../examples/pattern-5-filament.ts).
+[`examples/snippets/pattern-5-filament.ts`](../../examples/snippets/pattern-5-filament.ts).
 
 Next: [9. Server rendering](./09-ssr.md).

@@ -1,7 +1,7 @@
 /**
- * examples/sprinkled-blade/mock-server.mjs started for real and fetched with Node's fetch.
+ * examples/pages/sprinkled-blade/mock-server.mjs started for real and fetched with Node's fetch.
  * Why: these failures live in the order of `res.writeHead` calls and in how a raw request line reaches the handler, and neither shows through a stub.
- * Shows: a missing dist file is a 404 and the server lives; paths outside dist/ are refused; prototype names are unknown commands; an unreadable body is a 400; the page renders the cart; each beside a control.
+ * Shows: a missing dist file is a 404 and the server lives; paths outside dist/ are refused; the shared sheet the page links answers; prototype names are unknown commands; an unreadable body is a 400; the page renders the cart; each beside a control.
  * See: audit SBL-1, SBL-2, SBL-7, SBL-8.
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { startExampleServer, type ExampleServer } from './start-server';
 requireDist(existsSync(resolve(process.cwd(), 'dist/vapor-chamber-core.iife.min.js')));
 
 let server: ExampleServer;
-beforeAll(async () => { server = await startExampleServer('examples/sprinkled-blade/mock-server.mjs', 'Mock backend listening'); });
+beforeAll(async () => { server = await startExampleServer('examples/pages/sprinkled-blade/mock-server.mjs', 'Mock backend listening'); });
 afterAll(() => server.stop());
 
 describe('GET /dist/', () => {
@@ -38,7 +38,7 @@ describe('GET /dist/', () => {
       request({ host: '127.0.0.1', port: server.port, path }, (r) => { r.resume(); ok(r.statusCode!); }).on('error', fail).end();
     });
     expect(await raw('/dist/../package.json')).toBe(403);
-    expect(await raw('/dist/../examples/sprinkled-blade/mock-server.mjs')).toBe(403);
+    expect(await raw('/dist/../examples/pages/sprinkled-blade/mock-server.mjs')).toBe(403);
     expect(await raw('/dist/%2e%2e/package.json')).toBe(403);
     expect(await raw('/dist/..%2fpackage.json')).toBe(403);
     expect(server.alive()).toBe(true);
@@ -55,6 +55,19 @@ describe('GET /favicon.ico', () => {
     expect(Buffer.from(await r.arrayBuffer()).equals(readFileSync(resolve(process.cwd(), 'assets/favicon/favicon.ico')))).toBe(true);
     // Control: a file that is not there still answers 404.
     expect((await fetch(`${server.origin}/nope.ico`)).status).toBe(404);
+  });
+});
+
+describe('GET /shared/base.css', () => {
+  // The page links `../../shared/base.css`, which from this origin's `/` is `/shared/base.css`.
+  it('answers the examples shared sheet, the one the page links', async () => {
+    const page = await (await fetch(`${server.origin}/`)).text();
+    expect(page).toContain('href="../../shared/base.css"');
+    const r = await fetch(`${server.origin}/shared/base.css`);
+    expect([r.status, r.headers.get('content-type')]).toEqual([200, 'text/css; charset=utf-8']);
+    expect(Buffer.from(await r.arrayBuffer()).equals(readFileSync(resolve(process.cwd(), 'examples/shared/base.css')))).toBe(true);
+    // Control: another file under /shared/ is not handed out.
+    expect((await fetch(`${server.origin}/shared/static-server.mjs`)).status).toBe(404);
   });
 });
 

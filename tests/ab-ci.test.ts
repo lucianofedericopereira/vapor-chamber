@@ -98,7 +98,19 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     const head = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
     const was = JSON.parse(execSync('git show HEAD:package.json', { encoding: 'utf8' })).version;
     const now = JSON.parse(readFileSync('package.json', 'utf8')).version;
-    if (was === now) expect(await run([head])).toEqual({ status: 0, out: '' });
+    // base-ok refuses a version whose release tag exists ANYWHERE in the
+    // checkout, not only on HEAD: a later commit on a released version lands no
+    // new release, so there is nothing to measure. This checkout carries the
+    // tags, so mirror that rule here rather than assuming an unreleased head.
+    const short = now.replace(/\.\d+$/, '');
+    const tags = new Set(execSync('git tag --list', { encoding: 'utf8' }).split('\n'));
+    const released = tags.has(`v${now}`) ? `v${now}` : tags.has(`v${short}`) ? `v${short}` : null;
+    if (was === now && released) {
+      expect(await run([head])).toEqual({
+        status: 1,
+        out: `head is ${now}, already released (tag ${released}): no new release, nothing to measure`,
+      });
+    } else if (was === now) expect(await run([head])).toEqual({ status: 0, out: '' });
     else {
       const esc = (v: string) => v.replaceAll('.', '\\.');
       expect(await run([head])).toEqual({ status: 1, out: expect.stringMatching(new RegExp(`${esc(was)} release, head is ${esc(now)}`)) });

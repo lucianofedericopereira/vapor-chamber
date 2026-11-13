@@ -192,13 +192,13 @@
   "scripts": {
     "prepare": "npm run build",
     "version": "npm run docs && npm run coverage:doc && npm run docs:stamp && git add docs README.md",
-    "build": "tsc && node scripts/build.mjs",
-    "build:types": "tsc",
+    "build": "node node_modules/typescript7/bin/tsc && node scripts/build.mjs",
+    "build:types": "node node_modules/typescript7/bin/tsc",
     "build:js": "node scripts/build.mjs",
-    "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p tsconfig.tests.json && tsc -p examples/tsconfig.patterns.json && tsc -p examples/tsconfig.pattern-4.json",
-    "lint": "biome check --write src tests scripts bin",
-    "lint:check": "biome check src tests scripts bin && node scripts/check-env-guards.mjs && node scripts/check-console-shape.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
+    "dev": "node node_modules/typescript7/bin/tsc --watch",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit && node node_modules/typescript7/bin/tsc -p tsconfig.typecheck.json && node node_modules/typescript7/bin/tsc -p tsconfig.tests.json && node node_modules/typescript7/bin/tsc -p examples/snippets/tsconfig.patterns.json && node node_modules/typescript7/bin/tsc -p examples/snippets/tsconfig.pattern-4.json",
+    "lint": "biome check --write src tests scripts bin examples",
+    "lint:check": "biome check src tests scripts bin examples && node scripts/check-env-guards.mjs && node scripts/check-console-shape.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
     "docs:stamp": "node scripts/stamp-docs.mjs",
     "docs:check": "node scripts/stamp-docs.mjs --check",
     "test": "vitest run && vitest run -c vitest.vapor.config.ts",
@@ -221,7 +221,9 @@
     "size:doc": "node scripts/measure-size.mjs --md > docs/BUNDLE-SIZES.md",
     "coverage": "node scripts/measure-coverage.mjs",
     "coverage:doc": "vitest run --coverage && node scripts/measure-coverage.mjs --md > docs/COVERAGE.md",
-    "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build && npm --prefix examples/exo-astro run build",
+    "preexamples": "node examples/shared/ensure-lib.mjs",
+    "examples": "vite --config examples/shared/vite.pages.config.mjs",
+    "check:example": "npm --prefix examples/apps/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/apps/vapor-island-cart run build && npm --prefix examples/apps/exo-astro run build",
     "loc": "node scripts/measure-loc.mjs src",
     "docs": "node scripts/generate-api-docs.mjs && node scripts/generate-errors-doc.mjs && node scripts/generate-contract.mjs",
     "docs:serve": "node scripts/serve-docs.mjs",
@@ -260,11 +262,11 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.14",
+    "@vue/reactivity": ">=3.5.45 || >=3.6.0-rc.15",
     "alien-signals": ">=3.1.2",
     "vite": ">=5.0.0",
     "vitest": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.14"
+    "vue": ">=3.5.45 || >=3.6.0-rc.15"
   },
   "peerDependenciesMeta": {
     "alien-signals": {
@@ -290,42 +292,46 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.0",
-    "@types/node": "^26.2.0",
+    "@biomejs/biome": "2.6.7",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
-    "@vitejs/plugin-vue": "^6.0.8",
-    "@vitest/browser-playwright": "^5.0.5",
-    "@vitest/coverage-v8": "^5.0.5",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "@vitest/browser-playwright": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.0",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.14",
-    "@vue/runtime-vapor": "^3.6.0-rc.14",
+    "@vue/reactivity": "^3.6.0-rc.15",
+    "@vue/runtime-vapor": "^3.6.0-rc.15",
     "alien-signals": "^3.1.2",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
     "happy-dom": "^21.0.4",
     "mitt": "^3.0.1",
-    "playwright": "^1.63.0",
+    "playwright": "^1.65.0",
     "rxjs": "^7.8.2",
-    "semver": "^7.8.5",
+    "semver": "^7.8.6",
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",
-    "undici": "^8.12.3",
-    "vite": "^8.3.5",
-    "vitest": "^5.0.5",
-    "vue": "^3.6.0-rc.14",
-    "vue35": "npm:vue@^3.5.43"
+    "typescript7": "npm:typescript@^7.0.2",
+    "undici": "^8.12.4",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0",
+    "vue": "^3.6.0-rc.15",
+    "vue35": "npm:vue@^3.5.45"
   },
   "engines": {
-    "node": "^24.5.0"
+    "node": ">=24.5.0"
   },
   "workspaces": [
-    "examples/exo-astro",
-    "examples/vapor-island-cart",
-    "examples/vapor-sfc"
+    "examples/apps/exo-astro",
+    "examples/apps/vapor-island-cart",
+    "examples/apps/vapor-sfc"
   ],
   "overrides": {
     "@vitejs/plugin-vue": {
       "vue": "$vue"
     }
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

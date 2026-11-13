@@ -177,6 +177,9 @@ export function createEngine(ctx: EngineContext) {
   function syncRevalidating(): void {
     isRevalidating.value = revalidateCount > 0;
   }
+  /** Set by cancel() (router.dispose): a refresh still pending, or reported
+   *  later, lands nowhere (tests/router/dispose-ends-late-work.test.ts). */
+  let refreshesEnded = false;
 
   /**
    * A loader preset serving stale data reports its background refresh here
@@ -185,6 +188,11 @@ export function createEngine(ctx: EngineContext) {
    * one, and always as a new frozen snapshot.
    */
   function trackRevalidation(recordName: string, revalidation: Promise<unknown>, to: RouteLocation): void {
+    if (refreshesEnded) {
+      // Reported after dispose(): dropped, and its rejection handled.
+      void revalidation.catch(() => {});
+      return;
+    }
     revalidateCount++;
     // The chain that lowers the count is built in the `finally`: a sync
     // subscriber throwing on the write cannot leave `isRevalidating` stuck
@@ -194,6 +202,7 @@ export function createEngine(ctx: EngineContext) {
     } finally {
       void revalidation
         .then((fresh) => {
+          if (refreshesEnded) return; // disposed while it ran - drop it
           const current = snapshot.value;
           if (current.location.fullPath !== to.fullPath) return; // navigated away - drop it
           // The same object: a 304 kept the copy. No new
@@ -208,6 +217,8 @@ export function createEngine(ctx: EngineContext) {
           // this degrades quietly.
         })
         .finally(() => {
+          // cancel() already cleared the count; a late one must not take it below 0.
+          if (refreshesEnded) return;
           revalidateCount--;
           syncRevalidating();
         });
@@ -309,6 +320,11 @@ export function createEngine(ctx: EngineContext) {
       ctx.onError(error, from);
       return error as RouterError;
     }
+    // A location's own `replace: true` (RouteLocationRaw) replaces as
+    // router.replace() does: a push to it, and a guard's redirect to it
+    // (tests/router/location-replace.test.ts). Read once `raw` resolved, so a
+    // location that cannot be read still fails as router:failed:navigation.
+    const replace = opts.replace === true || (typeof raw === 'object' && raw.replace === true);
 
     // Duplicate - but never short-circuit before the first commit
     // (START_LOCATION shares '/' with a common initial URL). The page on
@@ -323,7 +339,7 @@ export function createEngine(ctx: EngineContext) {
     }
 
     if (to.matched.length && isQueryOnlyChange(to)) {
-      commitQueryLocation(to, opts.replace ? 'replace' : 'push', popstate);
+      commitQueryLocation(to, replace ? 'replace' : 'push', popstate);
       refetchAffected(to, changedKeys(from.query, to.query));
       return null;
     }
@@ -390,7 +406,7 @@ export function createEngine(ctx: EngineContext) {
           // the entry being redirected away from, so pushing would leave that
           // entry behind and Back would land on it again - the redirect fires
           // once more and the user is stuck. Replacing consumes it.
-          const result = await navigate(verdict, { replace: opts.replace || popstate }, redirects + 1);
+          const result = await navigate(verdict, { replace: replace || popstate }, redirects + 1);
           // Only this frame holds a popstate's delta: inner frames carry none,
           // so their revert() is a no-op. A chain that committed no page
           // (refused, failed, or back to the page on screen) and was not
@@ -412,7 +428,7 @@ export function createEngine(ctx: EngineContext) {
       const next: RouteSnapshot = Object.freeze({ location: to, render: Object.freeze(render), data });
       if (!opts.popstate) {
         try {
-          ctx.history[opts.replace ? 'replace' : 'push'](to.fullPath);
+          ctx.history[replace ? 'replace' : 'push'](to.fullPath);
         } catch (cause) {
           // A history the app supplied threw writing the URL: its own code,
           // not a component failure, and not a hard navigation (log s35.118).
@@ -660,10 +676,15 @@ export function createEngine(ctx: EngineContext) {
     setRouteData,
     /** Cancel the navigation in flight, as a newer one would (router.dispose).
      *  No successor will clear the loading flag, so this does; a cancelled
-     *  navigation walks no history back (see revert). */
+     *  navigation walks no history back (see revert). The background
+     *  refreshes end too: none lands after it, and `isRevalidating` reads
+     *  false from here. */
     cancel: () => {
       supersede();
       refetchController?.abort();
+      refreshesEnded = true;
+      revalidateCount = 0;
+      syncRevalidating();
     },
     beforeEach: (guard: NavigationGuard) => add(beforeGuards, guard),
     afterEach: (hook: AfterEachHook) => add(afterHooks, hook),

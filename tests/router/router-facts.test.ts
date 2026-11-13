@@ -1,13 +1,14 @@
 /**
  * routerFacts emits a fact after a navigation commits or fails, and never dispatches a command.
  * Why: if a navigation were a dispatched command, the bus's guards and hooks would gate it; if no fact were emitted, bus plugins, listeners and DevTools could not see navigations.
- * Shows: routerNavigated carries to and from with no meta and no dispatch; routerFailed carries the error and target; a refusal and a query-only change emit nothing; the stop, and stopping a Vue scope, end both subscriptions; without routerFacts nothing is emitted.
- * See: log s35.215
+ * Shows: routerNavigated carries to and from with no meta and no dispatch; routerFailed carries the error and target; a refusal and a query-only change emit nothing; the stop, and stopping a Vue scope, end both subscriptions; without routerFacts nothing is emitted; made in a scope already stopped (an async setup resumed after its unmount), it subscribes to nothing, the loading facts included.
+ * See: log s35.215, log 36.F58
  */
 import { describe, expect, it } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus } from '../../src/command-bus';
 import { routerFacts } from '@router/index';
+import type { LoaderHandlers } from '@router/loaders';
 import type { RouteRecord } from '@router/types';
 import { ROWS, makeRouter } from './fixture';
 
@@ -80,6 +81,34 @@ describe('routerFacts', () => {
     await router.push('/');
     await router.push('/broken');
     expect(heard).toEqual(['routerNavigated', 'routerNavigated']);
+  });
+
+  // Vue rc.15 (#16108) releases what goes through onScopeDispose at once in a
+  // stopped scope, but a watch created there stays live: routerFacts was left
+  // half subscribed, the loading facts going on for the router's life.
+  it('made in a scope already stopped, it subscribes to nothing, the loading facts included', async () => {
+    let release!: () => void;
+    const loaders: LoaderHandlers = {
+      prefixes: { 'rows:': () => new Promise((resolve) => { release = () => resolve({ rows: [] }); }) },
+    };
+    const rows: RouteRecord[] = [
+      { name: 'shell', path: '/', parent: null },
+      { name: 'home', path: '/', parent: 'shell', component: 'Home' },
+      { name: 'slow', path: '/slow', parent: 'shell', component: 'Slow', load: 'rows:slow' },
+    ];
+    const router = makeRouter({ routes: rows, loaders, links: false, components: { Home: { name: 'Home' }, Slow: { name: 'Slow' } } });
+    const bus = createCommandBus();
+    const heard: string[] = [];
+    bus.on('router*', (cmd) => heard.push(cmd.action));
+    const scope = effectScope();
+    scope.stop();
+    scope.run(() => routerFacts(router, bus));
+    await router.isReady();
+    const going = router.push('/slow');
+    await Promise.resolve();
+    release();
+    await going;
+    expect(heard).toEqual([]);
   });
 
   it('control: without routerFacts the same navigations emit nothing', async () => {

@@ -104,9 +104,12 @@ export function interpolateLoad(
   queryDefs: Record<string, QueryParamDef>,
 ): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => {
-    const param = location.params[key];
+    // `Object.hasOwn`: a placeholder comes from the routes payload, and params
+    // and queryDefs are plain objects, so `{toString}` would read the
+    // inherited function. See `../dict`.
+    const param = Object.hasOwn(location.params, key) ? location.params[key] : undefined;
     if (param !== undefined) return key === 'pathMatch' ? encodeSplat(String(param)) : encodeURIComponent(String(param));
-    const typed = decodeQueryParam(location.query[key], queryDefs[key] ?? {});
+    const typed = decodeQueryParam(location.query[key], (Object.hasOwn(queryDefs, key) ? queryDefs[key] : undefined) ?? {});
     if (typed === undefined || typed === null) return '';
     return Array.isArray(typed)
       ? typed.map((v) => encodeURIComponent(String(v))).join(',')

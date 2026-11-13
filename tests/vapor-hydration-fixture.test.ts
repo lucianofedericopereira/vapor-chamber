@@ -3,7 +3,7 @@
  * `v-vc-command` (`vcCommandVapor`) on server-rendered markup hydrated by `createVaporSSRApp`.
  * Why: a hydrated element whose directive mounts zero times is a dead control and one that mounts twice has two listeners and a doubled delegated count; both are silent. The directive's element sits behind an empty text node, a null-bound attribute and a fragment root, so hydration must adopt the server's node rather than replace it.
  * Shows: the server button is adopted (same node), the directive runs once with one document click listener, a click dispatches, unmount runs one cleanup and removes the listener, and no hydration or mismatch warning is logged; a bound `:data-vc-payload` is kept when equal, the client value wins when it differs, and a later write reaches the next click; the same warning spy does count a text mismatch.
- * See: vuejs/core#15541
+ * See: vuejs/core#15541, vuejs/core#16088, tests/render-on-server.ts
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -42,8 +42,8 @@ describe('v-vc-command on hydrated markup', () => {
   });
 
   it('adopts the server element, mounts exactly once, dispatches, and tears down clean', async () => {
-    const html = await renderOnTheServer(SOURCE, CTX);
-    expect(html).toContain('<!--[-->');
+    const html = await renderOnTheServer(SOURCE, CTX, true);
+    expect(html).toContain('<!--{-->');
     expect(html).toContain('<button>go</button>');
 
     const v = (await import(/* @vite-ignore */ WITH_VAPOR)) as unknown as VaporApi;
@@ -112,7 +112,7 @@ describe('v-vc-command on hydrated markup', () => {
    * Returns the attribute and the dispatched payload after hydration and after the client writes `next`; `clientLabel` is the client's button text (the server renders 'go').
    */
   async function hydratePayload(server: string, client: string, next: string, clientLabel = 'go') {
-    const html = await renderOnTheServer(PAYLOAD_SOURCE, { act: 'cartAdd', pay: server, label: 'go' });
+    const html = await renderOnTheServer(PAYLOAD_SOURCE, { act: 'cartAdd', pay: server, label: 'go' }, true);
     expect(html).toContain(`data-vc-payload="${server.replace(/"/g, '&quot;')}"`);
 
     const v = (await import(/* @vite-ignore */ WITH_VAPOR)) as unknown as VaporApi;

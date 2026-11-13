@@ -5,7 +5,7 @@
  * raw ceiling AND a brotli q=11 ceiling. Exit 1 when either is exceeded or a
  * file is missing (run `npm run build` first). It does not measure the ESM
  * entries or the subpaths; `npm run size` (measure-size.mjs) reports those.
- * Runs in the CI `check` and macOS jobs and in `npm run gate`.
+ * Runs in the CI `check` and Node 24 jobs and in `npm run gate`.
  *
  * Adjust thresholds in BUDGETS when an intentional size change lands - the
  * goal is "intentional only", not "never grow". The comments inside BUDGETS are
@@ -939,7 +939,17 @@ const BUDGETS = {
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 98,063/30,471. Raised to measured.
   // Then a plain store action's result, the state it wrote (tests/store-result-own-write.test.ts): raw -10, brotli +3, 98,053/30,474. Brotli raised to measured. Core and elements moved down and stay under.
   // Then an optimistic store's lost rollback, coded (store:lost:rollback; each handler brackets its reducer and calls the step directly, a throw kept): 98,512/30,623. Raised to measured.
-  'vapor-chamber.iife.min.js':          { rawMax: 98_512, brotliMax: 30_623 },
+  // Then log 36.F58 (Vue rc.15 #16108: a composable made in a stopped scope keeps nothing; tryAutoCleanup's scope.active, the `dead` checks, `_noop`, `_pendingOnce`): +183/+49. 98,695/30,672. Raised to measured.
+  // Then log 36.F58 (a 419 refresh with no cookie URL no longer stays stored: the slot cleared by a handler after the assignment, as idb.ts): +28/+25. 98,723/30,697. Raised to measured. The SSR and router fixes before it move no IIFE.
+  // Then log 36.F58 (a shared store's dispose says `bye`, as pagehide does, so a lead left alone stops sending; the http-cache, mcp and hot-update carry fixes before it move no IIFE, measured): +38/-16. 98,761/30,681. Raw raised to measured; brotli moved down and stays under.
+  // Then log 36.F58 (a disposed outbox flushes nothing on its own: the guard in maybeFlush and before the Retry-After wait): +38/+12. 98,799/30,693. Raw raised to measured; brotli stays under.
+  // Then log 36.F58 (a body with no JSON text is transport:invalid:json: one failure call for a throw and for no text): +19/+14. 98,818/30,707. Raised to measured.
+  // Then log 36.F58 (a durable outbox's ttl ends at dispose(): its stored record is not reported dropped): +51/-3. 98,869/30,704. Raw raised to measured; brotli stays under.
+  // Then log 36.F58 (a composable's scope ending marks it dead too: `release` in useCommand, useCommandGroup and useVaporAsyncCommand): +50/+45. 98,919/30,749. Raised to measured.
+  // Then log 36.F58 (af9f506 reverted: a failed send is an attempt that failed, so a ttl after dispose() rightly settles the caller; owner): -51/-38. 98,868/30,711. Lowered to measured.
+  // Then log 36.F58 (no `release` closure per composable: dispose() reads the scope's `active`, which Vue clears before it runs the cleanup; creation about 3 ns faster, owner: performance over size): +26/+14. 98,894/30,725. Raised to measured.
+  // Then log 36.F58 (that change reverted: measured by docs/TESTING_PROCEDURE.md against main on the examples' component shapes it read no result, and it cost +46 bytes per full ESM entry): -26/-14. 98,868/30,711. Lowered to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 98_868, brotliMax: 30_711 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
@@ -1083,7 +1093,9 @@ const BUDGETS = {
   // Then log 36.F56: raw 70,826. Raised to measured.
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 71,020/22,207. Raised to measured.
   // Then an optimistic store's lost rollback (see the full IIFE's note): 71,473/22,356. Raised to measured.
-  'vapor-chamber-core.iife.min.js':     { rawMax: 71_473, brotliMax: 22_356 },
+  // Then log 36.F58 (the 419 refresh slot, see the full IIFE's note): +28/+11. 71,501/22,367. Raised to measured.
+  // Then log 36.F58 (a body with no JSON text, see the full IIFE's note): +19/-60, 71,520/22,307. Raw raised to measured; brotli moved down and stays under.
+  'vapor-chamber-core.iife.min.js':     { rawMax: 71_520, brotliMax: 22_367 },
   // Then the bundler alone (rolldown 1.2.12 -> 1.2.15 with vite 8.3.5, no source changed): elements brotli 22,542 -> 22,581 (+39), raw 72,256 -> 72,208. Raised to measured. Full and core moved down and stay under.
   // Then log 36.F41, `store.$ready` (see the full IIFE's note): 72,321/22,634. Raised to measured.
   // Then log 36.F42 (B4, see the full IIFE's note): 72,636/22,719. Raised to measured.
@@ -1096,7 +1108,9 @@ const BUDGETS = {
   // Then log 36.F56: raw 73,274. Raised to measured.
   // Then log 36.F57 (a thunk out of the dispatch functions, counted faster; performance decides over size): 73,469/22,892. Raised to measured.
   // Then an optimistic store's lost rollback (see the full IIFE's note): 73,922/23,111. Raised to measured.
-  'vapor-chamber-elements.iife.min.js': { rawMax: 73_922, brotliMax: 23_111 },
+  // Then log 36.F58 (the 419 refresh slot, see the full IIFE's note): +28/-56, 73,950/23,055. Raw raised to measured; brotli moved down and stays under.
+  // Then log 36.F58 (a body with no JSON text, see the full IIFE's note): +19/+54, 73,969/23,109. Raw raised to measured; brotli stays under.
+  'vapor-chamber-elements.iife.min.js': { rawMax: 73_969, brotliMax: 23_111 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

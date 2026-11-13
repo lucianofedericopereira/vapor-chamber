@@ -1,7 +1,7 @@
 /**
  * A store across tabs carries commands, and an undo in any tab undoes the command in every tab.
  * Why: sending whole states with a per-tab count would drop one of two simultaneous writes and leave Undo in one tab unable to take back another tab's write; a state message also grows with the state where a command does not.
- * Shows: tabs end on one state after adds, undo, redo, simultaneous writes, a late-opening tab, a tab alone, a server state and a bfcache return; the receiving tab records the command in history with no dispatch; the wire carries only ask, lead and cmd messages (bye on leaving); an action the other tab lacks, and a history scoped away from it, are ignored.
+ * Shows: tabs end on one state after adds, undo, redo, simultaneous writes, a late-opening tab, a tab alone, a server state and a bfcache return; the receiving tab records the command in history with no dispatch; the wire carries only ask, lead and cmd messages (bye on leaving, by pagehide or by $dispose, so the lead does not keep a gone store as a peer and send to nobody); an action the other tab lacks, and a history scoped away from it, are ignored.
  * See: log s36.F30, s36.F39.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -289,6 +289,23 @@ describe('the wire', () => {
     await settle();
     expect(heard.some((m) => m.kind === 'bye')).toBe(true);
     expect(heard.length).toBe(before);
+  });
+
+  // A store a component held, disposed while its page stays open (a route left): the same leave.
+  it('a store disposed with no pagehide says so too, and a tab left alone stops sending', async () => {
+    const name = `prop-${n++}`;
+    net.watch(name);
+    const heard = wire(name);
+    const a = tab(name);
+    const b = tab(name);
+    await settle();
+    b.cart.$dispose();
+    await settle();
+    const before = heard.length;
+    a.cart.add('coffee');
+    await settle();
+    expect(heard.length).toBe(before); // docs/store.md: "A tab sends only while another tab is there"
+    expect(heard.some((m) => m.kind === 'bye')).toBe(true);
   });
 });
 

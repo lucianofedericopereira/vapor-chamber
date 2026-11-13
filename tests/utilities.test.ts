@@ -1,7 +1,7 @@
 /**
  * createChamber, createWorkflow and createReaction from src/utilities.
  * Why: a chamber must install and cleanly uninstall its namespaced handlers, a workflow must stop and compensate in reverse on failure, and a reaction must fire only as configured and keep delivering while tracking its chain.
- * Shows: chamber prefixing, forwarded undo option, uninstall, no collision and no partial install; workflow order, failure with compensation, target and payload mapping, frozen steps; reaction firing, when, map, mapPayload, cleanup, wildcard source, and chain-tracking edges (foreign causation id, emitted source, 300 dispatches still all delivered).
+ * Shows: chamber prefixing, forwarded undo option, uninstall, no collision and no partial install; workflow order, failure with compensation, target and payload mapping, frozen steps, which are the steps run runs (an edit to the caller's array after createWorkflow changes neither); reaction firing, when, map, mapPayload, cleanup, wildcard source, and chain-tracking edges (foreign causation id, emitted source, 300 dispatches still all delivered).
  */
 import { describe, expect, vi } from 'vitest';
 import { createChamber, createWorkflow, createReaction } from '../src/utilities';
@@ -130,6 +130,19 @@ describe('createWorkflow', () => {
     const wf = createWorkflow([{ action: 'a' }, { action: 'b' }]);
     expect(wf.steps).toHaveLength(2);
     expect(() => (wf.steps as any).push({ action: 'c' })).toThrow();
+  });
+
+  // The caller's array stays the caller's: run reads the frozen copy, so what runs is what `steps` lists.
+  it('runs the steps it lists: an edit to the array given to createWorkflow runs nothing more', async ({ bus }) => {
+    const ran: string[] = [];
+    bus.register('a', () => { ran.push('a'); });
+    bus.register('b', () => { ran.push('b'); });
+    const given = [{ action: 'a' }];
+    const wf = createWorkflow(given);
+    given.push({ action: 'b' });
+    const result = await wf.run(bus, {});
+    expect(ran).toEqual(['a']);
+    expect(result.results).toHaveLength(wf.steps.length);
   });
 
   it('returns ok:true with empty compensations when all steps pass', async ({ bus }) => {

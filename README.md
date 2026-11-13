@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a>: a <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli dispatch core, and opt-in modules that cost 0 KB until imported. Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a>: a <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli dispatch core, and opt-in modules that cost 0 KB until imported. Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->. LGPL-2.1.
 </p>
 
 ---
@@ -40,13 +40,13 @@ rules and steps, so each action has one place to read and one place to test.
 | **Transports** | Opt-in | `httpTransport` (with batch), WebSocket, SSE, Laravel Echo/Reverb. |
 | **Extras** | Opt-in | SSR by stores' states, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox. |
 
-- **Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->:** signals, `onScopeDispose`,
+- **Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->:** signals, `onScopeDispose`,
   `getCurrentScope`, alien-signals internals. The [CHANGELOG](CHANGELOG.md) tracks each release.
 - **No runtime dependency.** `alien-signals` is an optional peer, installed only by apps that use
   the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero.
 - **ESM only**, plus three IIFE `<script>` drop-ins for pages with no bundler.
 - **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes:** statements, branches, functions and
-  lines, across **<!-- vc:tests -->4875<!-- /vc:tests --> tests** in <!-- vc:testFiles -->473<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)).
+  lines, across **<!-- vc:tests -->4952<!-- /vc:tests --> tests** in <!-- vc:testFiles -->482<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)).
 
 ## Install
 
@@ -54,8 +54,8 @@ rules and steps, so each action has one place to read and one place to test.
 npm install vapor-chamber
 ```
 
-It needs Node 24.5 or later. Vue is an optional peer: 3.5 or later for the composables,
-<!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
+It needs Node <!-- vc:nodeEngines -->>=24.5.0<!-- /vc:nodeEngines -->. Vue is an optional peer: 3.5 or later for the composables,
+<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
 
 In a Vue app, import the composables from `vapor-chamber/vue` (or `vapor-chamber/vapor`), never
 from the root: the root cannot wire Vue in a production bundle.
@@ -119,6 +119,7 @@ result.ok ? console.log('Added:', result.value) : console.error(result.error);
 | [docs/whitepaper.md](docs/whitepaper.md) | Why it is built this way: design, architecture, the naming evidence, the Vue 3.6 alignment log |
 | [docs/router.md](docs/router.md), [docs/store.md](docs/store.md) | The router and store guides, in depth |
 | [docs/performance.md](docs/performance.md) | What is optimized, tuning knobs, benchmarks |
+| [docs/typescript.md](docs/typescript.md) | The two TypeScript versions: 7 for `tsc` and builds, 6 for the compiler API |
 | [docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md), [docs/COVERAGE.md](docs/COVERAGE.md) | Generated, always current |
 | [docs/api/](docs/api/README.md), [docs/errors.md](docs/errors.md) | Every export and every failure code, generated |
 | [ROADMAP.md](ROADMAP.md) | Per-module status, versions, forward plan |

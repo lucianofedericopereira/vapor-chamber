@@ -32,6 +32,11 @@
  *      an inherited member as a rule or a schema.
  *    - `form.ts`: a rule for a field named after an inherited member ran on a
  *      form with no such field.
+ *    - `router/table.ts` `renderSegments` and `router/loaders.ts`
+ *      `interpolateLoad`: a param or placeholder name from the ROUTES PAYLOAD
+ *      read on `params` / `queryDefs`, so an absent `constructor` built
+ *      `/function%20Object()...` into a link or a loader URL
+ *      (tests/router/payload-name-prototype.test.ts).
  *    Pinned outside the router by tests/prototype-keys.test.ts.
  *
  * 2. **Writes to `__proto__` are swallowed by the inherited setter.** The key
@@ -49,6 +54,14 @@
  *      `location.query` was prototype-free after navigate() and plain after
  *      setQuery(), and a `__proto__` write vanished through the setter again.
  *      Spreading is not prototype-preserving; `Object.assign(dict(), x)` is.
+ *    - `ssr.ts` `storeStates`: a store whose id is `__proto__` wrote its state
+ *      through that setter, so the page's states lost it. Its result is public,
+ *      so it is built with `Object.fromEntries`, which defines every key as
+ *      its own, on a plain object (as http.ts builds its headers).
+ *    - `store-base.ts` `carry` (DEV, a hot update): the carried state was
+ *      built key by key on a `{}`, so an entry under `__proto__` was lost or
+ *      became the carried object's prototype. A state, so plain: built with
+ *      `Object.fromEntries` too (tests/store-hot-update.test.ts).
  *
  * Use `dict()` to build any map keyed by strings you did not author, and
  * `Object.hasOwn()` (never `in`, never `!== undefined`) to test membership on

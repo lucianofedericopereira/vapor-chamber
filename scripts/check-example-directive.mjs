@@ -7,7 +7,7 @@
  * type-checks cleanly, and ships a button that does nothing. A build that
  * finishes is not evidence about a directive.
  *
- * So this loads the BUILT production bundle of examples/vapor-sfc into a DOM,
+ * So this loads the BUILT production bundle of examples/apps/vapor-sfc into a DOM,
  * lets the app mount, clicks the `v-vc-command` control, and checks that the
  * directive responded: `vc-loading` on the element and `aria-disabled="true"`
  * (busy, keeping keyboard focus - never `disabled`) are what `buildHandler`
@@ -19,12 +19,12 @@
  * example's build output, so it would fail on a fresh clone before anything is
  * built. Run it after the example rebuilds:
  *
- *     npm --prefix examples/vapor-sfc run build
+ *     npm --prefix examples/apps/vapor-sfc run build
  *     node scripts/check-example-directive.mjs
  *
  * or `npm run check:example`, which does both.
  *
- * `check:example` ALSO BUILDS examples/vapor-island-cart and examples/exo-astro
+ * `check:example` ALSO BUILDS examples/apps/vapor-island-cart and examples/apps/exo-astro
  * afterwards, which this script has nothing to do with and which is why it is
  * said here rather than nowhere: package.json cannot carry a comment.
  * vapor-island-cart is a workspace with its own `vue-tsc --noEmit && vite
@@ -37,14 +37,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const DIST = resolve(process.cwd(), 'examples/vapor-sfc/dist');
+const DIST = resolve(process.cwd(), 'examples/apps/vapor-sfc/dist');
 const fail = (msg) => {
   console.error(`check-example-directive: ${msg}`);
   process.exit(1);
 };
 
 if (!existsSync(resolve(DIST, 'index.html'))) {
-  fail(`no build at ${DIST} - run: npm --prefix examples/vapor-sfc run build`);
+  fail(`no build at ${DIST} - run: npm --prefix examples/apps/vapor-sfc run build`);
 }
 
 const html = readFileSync(resolve(DIST, 'index.html'), 'utf8');

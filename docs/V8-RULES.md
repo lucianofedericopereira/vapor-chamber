@@ -7,6 +7,12 @@ yet, is under "Open" at the end. It becomes a rule when it is measured.
 
 - The full record, with the numbers: [performance.md](./performance.md).
 - The steps of a measurement: [TESTING_PROCEDURE.md](./TESTING_PROCEDURE.md).
+- Every measurement below ran on Node 24 (V8 13.6). Development moved to Node 26 (V8 14.6) on
+  2026-11-12. Each V8 source a rule cites was read again in 14.6 that day. The footnotes of rules
+  1, 18 and 19, `[^json]` and the inlining item say what held. A ratio is not re-measured on
+  Node 26 until the owner says go.[^node26]
+
+[^node26]: Log 36.F58, decisions 2026-11-12.
 
 ## Writing code
 
@@ -43,7 +49,7 @@ yet, is under "Open" at the end. It becomes a rule when it is measured.
    this: a callback that captures per-call state is an allocation, not syntax. Neither is
    rule 19.[^r8]
 
-[^r1]: `tests/v8-shapes.test.ts` compares maps with `%HaveSameMap` and fails on a hand-built result literal in `src/`. [performance.md, "Hot-path shape consistency"](./performance.md#hot-path-shape-consistency).
+[^r1]: `tests/v8-shapes.test.ts` compares maps with `%HaveSameMap` and fails on a hand-built result literal in `src/`. It passes on Node 24 and Node 26, the two majors CI tests (log 36.F58). [performance.md, "Hot-path shape consistency"](./performance.md#hot-path-shape-consistency).
 
 [^r2-late]: Measured on `meta.idempotencyKey`, written by `idempotent` and the retry runner: the two maps differ (`%HaveSameMap` false). The cost was first inside the control band (log s35.44). Log s35.81 then put the slot in every meta literal (`idempotencyKey: undefined`), one map for every command (`tests/v8-shapes.test.ts`).
 
@@ -77,7 +83,7 @@ A rule added after rule 18 takes the next number, so a cited number never moves.
     has a test that counts the microtask turns to settle, against a path with no such
     step.[^r20]
 
-[^r19]: Measured 2026-10-14, Node 24.21.0, 10 processes: `commandKey` over string and number targets read 0.765x, 1.1 ns per key (row `key_primitives`, log 36.36). Over numbers only it read 0.999, as V8 speculates (row `primitive_cache`). Source: V8 13.6 as Node 24.21.0 ships it, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: interpreter/bytecode-generator.cc 7415-7474, compiler/bytecode-graph-builder.cc 3520-3570, compiler/js-type-hint-lowering.cc 419-437, maglev/maglev-graph-builder.cc 8000-8030, compiler/turboshaft/graph-builder.cc 2055-2056, compiler/js-call-reducer.cc 7841.
+[^r19]: Measured 2026-10-14, Node 24.21.0, 10 processes: `commandKey` over string and number targets read 0.765x, 1.1 ns per key (row `key_primitives`, log 36.36). Over numbers only it read 0.999, as V8 speculates (row `primitive_cache`). Source: V8 13.6 as Node 24.21.0 ships it, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: interpreter/bytecode-generator.cc 7415-7474, compiler/bytecode-graph-builder.cc 3520-3570, compiler/js-type-hint-lowering.cc 419-437, maglev/maglev-graph-builder.cc 8000-8030, compiler/turboshaft/graph-builder.cc 2055-2056, compiler/js-call-reducer.cc 7841. Read again 2026-11-12 in V8 14.6, as Node 26.13.0 ships it: the same lowering, with a Smi case beside number, string and function. Not measured on Node 26. Source, under https://github.com/nodejs/node/blob/v26.13.0/deps/v8/src/: interpreter/bytecode-generator.cc 7679-7773, compiler/bytecode-graph-builder.cc 3556-3606, compiler/js-type-hint-lowering.cc 445-477, maglev/maglev-graph-builder.cc 8087-8121, compiler/turboshaft/graph-builder.cc 2148-2150, compiler/js-call-reducer.cc 8090.
 
 [^r20]: Measured 2026-10-24, Node 24.22.1, an Intel i7-8650U, each against the commit before it. After-hooks in a plain loop: an async dispatch with two hooks 0.894x (61 ns, log 36.F45). The retry's success read with no `.then`: a local async operation 0.970x (71 ns, log 36.F46). `_postJson` with no `async`: a sent command 0.951x (203 ns, log 36.F48). A sync handler outside an async frame, and a composable with no `.then` on a bus that cannot reject, leaned the same way without counting (log 36.F47, 36.F49).
 
@@ -152,8 +158,8 @@ A rule added after rule 18 takes the next number, so a cited number never moves.
     - A root process (Time Machine's `backupd`) cannot be demoted.
     - The owner says "go": a measurement does not start on this side's initiative.[^r17]
 18. **A minor gc before a timed call, never a full one.** A full `gc()` evicts the timing loop's
-    OSR code, so every timed call recompiles it. `gc({ type: 'minor' })` (a scavenge, Node 24)
-    leaves the code alone: no compile, no deopt, other-thread CPU about 0.[^r18]
+    OSR code, so every timed call recompiles it. `gc({ type: 'minor' })` (a scavenge, Node 24
+    and 26) leaves the code alone: no compile, no deopt, other-thread CPU about 0.[^r18]
 
 [^r9]: `tests/signal-shallow-ab.test.ts`. [performance.md, "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36).
 
@@ -179,7 +185,7 @@ A rule added after rule 18 takes the next number, so a cited number never moves.
 
 [^r17]: Log s35.44, s35.49, decisions 2026-10-01.
 
-[^r18]: The full gc forced a Maglev OSR (0.7 ms), then a TurboFan OSR (1.5 ms), on the compiler threads, and each call's first part ran in lower tiers, on dispatch as on creation (`--trace-osr`). That compile and the sweeping after the collection were nearly all the background CPU. The minor gc removed the flag dependence: D2 read 0.864 default and 0.876 `--single-threaded-gc`, against 0.859 / 0.925 with the full gc. It kept the ratio flat over call length: 0.864-0.878 at 10k-80k iterations. Log s35.48.
+[^r18]: The full gc forced a Maglev OSR (0.7 ms), then a TurboFan OSR (1.5 ms), on the compiler threads, and each call's first part ran in lower tiers, on dispatch as on creation (`--trace-osr`). That compile and the sweeping after the collection were nearly all the background CPU. The minor gc removed the flag dependence: D2 read 0.864 default and 0.876 `--single-threaded-gc`, against 0.859 / 0.925 with the full gc. It kept the ratio flat over call length: 0.864-0.878 at 10k-80k iterations. Log s35.48. On Node 26.13.0 the minor gc is still a scavenge: `--minor-ms` is off by default in V8 13.6 and 14.6, and `--trace-gc` prints `Scavenge` for `gc({ type: 'minor' })` (log 36.F58). The harness's `--min-semi-space-size` and `--max-semi-space-size` print the same help text in 14.6. The flat ratio is not re-measured on Node 26.
 
 ## Open: not yet settled
 
@@ -211,7 +217,8 @@ measured and recorded.
   mechanism and for why rule 5's `.call` variant gained nothing.
 - **Bytecode size and inlining.** Inlining is budgeted in bytecode bytes, and a hot function
   past the budget stops being inlined. To measure on `runDispatch` and the runners before it
-  becomes a rule. One case is measured.[^inlining]
+  becomes a rule. One case is measured.[^inlining] The inlining limits V8 13.6 and 14.6 set, read
+  from `node --v8-options`, are recorded in log 36.F58.
 - **Flags as the control for a mechanism.** A flag that turns one optimizer decision off shows
   whether it is the cause, with no code change. Read the direction only, in one
   process.[^flags]
@@ -232,6 +239,13 @@ measured and recorded.
   value and allocates a holder object per call. `keyTextFor` pays each of these: a C++ call per
   value, a holder per key and one `dict()` per object level. Not measured: the next lead for
   `commandKey`'s object path.[^json]
+- **The fast JSON.stringify and a `dict()`, on Node 26.** V8 14.6 tries its fast path first
+  whenever there is no replacer and no indent. It restarts on the slow path at the first object
+  that has a dictionary map or another prototype, so a value holding a `dict()` pays for the
+  attempt as well. The calls with no replacer: the HTTP body (`src/http.ts`), the SSR payload
+  (`src/ssr.ts`), a store's `persist` (`src/store-persist.ts`), the store's JSON comparison
+  (`src/store-base.ts`), `testing.ts` and `mcp.ts`. Which of their values hold a `dict()`, and
+  what the attempt costs, is not measured.[^json]
 
 [^consumer-build]: Every A/B has been built this way since the 1.26 evaluation, where a harness on Node's CommonJS Vue read a false 1.2x.
 
@@ -249,4 +263,4 @@ measured and recorded.
 
 [^box]: 2026-10-06, v1.27, read off the printed code.
 
-[^json]: Read 2026-10-14 in V8 13.6, as Node 24.21.0 ships it. `Object.create(null)` and a `{ __proto__: null }` literal both get a dictionary map. `JSON.stringify` serializes a dictionary-mode object on its slow path, which collects its keys into a list and then looks each one up. V8's newer fast `JSON.stringify` runs only with no replacer and no indent, behind a flag off by default in 13.6. Source, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: json/json-stringifier.cc 547-551, 726-752, 950-954, 1317-1334, 1401-1429 and 3466-3470, builtins/builtins-object-gen.cc 1269-1276, runtime/runtime-literals.cc 382-387, flags/flag-definitions.h 758.
+[^json]: Read 2026-10-14 in V8 13.6, as Node 24.21.0 ships it. `Object.create(null)` and a `{ __proto__: null }` literal both get a dictionary map. `JSON.stringify` serializes a dictionary-mode object on its slow path, which collects its keys into a list and then looks each one up. V8's newer fast `JSON.stringify` runs only with no replacer and no indent, behind a flag off by default in 13.6. Source, under https://github.com/nodejs/node/blob/v24.21.0/deps/v8/src/: json/json-stringifier.cc 547-551, 726-752, 950-954, 1317-1334, 1401-1429 and 3466-3470, builtins/builtins-object-gen.cc 1269-1276, runtime/runtime-literals.cc 382-387, flags/flag-definitions.h 758. Read again 2026-11-12 in V8 14.6, as Node 26.13.0 ships it. Both null-prototype forms still get the dictionary map. The fast `JSON.stringify` is on by default now, still only with no replacer and no indent, so `keyTextFor` stays on the slow path. An object takes the fast path only with fast properties and `Object.prototype` as its prototype, so a `dict()` never does. A value that fails the fast path anywhere restarts the whole call on the slow path. Source, under https://github.com/nodejs/node/blob/v26.13.0/deps/v8/src/: flags/flag-definitions.h 867, json/json-stringifier.cc 2357-2373, 2765-2771, 3517-3522, 3581-3587 and 3595-3604, builtins/builtins-object-gen.cc 1273, runtime/runtime-literals.cc 382-396.

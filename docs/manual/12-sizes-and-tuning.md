@@ -10,34 +10,34 @@ Minified, comment-free, brotli q=11. The always-current per-export table is
 fails CI on any regression past budget.
 
 The two that matter: the dispatch core is **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB**, and the import-everything barrel
-is <!-- vc:sizeBarrel -->48.7<!-- /vc:sizeBarrel --> KB.
+is <!-- vc:sizeBarrel -->49.0<!-- /vc:sizeBarrel --> KB.
 
 ### The main entries
 
 | Entry | brotli |
 |---|--:|
 | dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->48.7<!-- /vc:sizeBarrel --> KB |
-| `vapor-chamber/router` | <!-- vc:sizeRouter -->11.3<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->49.0<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber/router` | <!-- vc:sizeRouter -->11.4<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
-| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->6.5<!-- /vc:sizeRouterRemote --> KB |
+| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->6.6<!-- /vc:sizeRouterRemote --> KB |
 | `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->6.9<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->48.9<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->49.0<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->49.0<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->49.1<!-- /vc:sizeVapor --> KB |
 | `vapor-chamber/reactive` | <!-- vc:sizeReactive -->0.5<!-- /vc:sizeReactive --> KB |
 | `vapor-chamber/transports` | <!-- vc:sizeTransports -->12.1<!-- /vc:sizeTransports --> KB |
 | `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->6.1<!-- /vc:sizeOutbox --> KB |
-| `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.8<!-- /vc:sizeMcp --> KB |
+| `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.9<!-- /vc:sizeMcp --> KB |
 | `vapor-chamber/ssr` | <!-- vc:sizeSsr -->1.0<!-- /vc:sizeSsr --> KB |
-| `vapor-chamber/store` | <!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB |
+| `vapor-chamber/store` | <!-- vc:sizeStore -->6.0<!-- /vc:sizeStore --> KB |
 
 **Rows are not additive.** Every row includes the shared core, which your bundle carries once.
 The `/vue` and `/vapor` rows include the whole root they carry. An app pays only for what it
 imports.[^one-import] `vapor-chamber` is the barrel measured import-everything, and your bundler
 drops what you do not use.
 
-[^one-import]: One import from `/vapor` builds `examples/vapor-sfc` to the same bytes as two (log s35.236).
+[^one-import]: One import from `/vapor` builds `examples/apps/vapor-sfc` to the same bytes as two (log s35.236).
 
 These figures are **machine-stamped** from [docs/BUNDLE-SIZES.md](../BUNDLE-SIZES.md), the
 generated source of truth (`npm run size:doc`). `npm run docs:stamp` republishes its rows here,

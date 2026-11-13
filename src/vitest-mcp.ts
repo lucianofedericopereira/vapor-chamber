@@ -37,7 +37,7 @@
  * { "command": "npx", "args": ["vc-vitest-mcp"] }
  */
 
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { type FSWatcher, existsSync, mkdtempSync, readFileSync, rmSync, watch } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -101,7 +101,7 @@ export interface VitestMcpGap {
   uncoveredBranches: { line: number; type: string; uncoveredArms: number[]; arms: number }[];
 }
 
-/** A running server: the bus to serve, and `disposeAsync()`, which stops the watcher and closes Vitest. */
+/** A running server: the bus to serve, and `disposeAsync()`, which stops the watcher, ends a coverage run in progress and closes Vitest. */
 export interface VitestMcpServer {
   bus: ReturnType<typeof createAsyncSchemaCommandBus<BusSchema>>;
   disposeAsync(): Promise<void>;
@@ -220,6 +220,8 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
   };
 
   let last: VitestMcpRun | undefined;
+  // The coverage run in progress, ended by disposeAsync so no child outlives the server.
+  let running: ChildProcess | undefined;
 
   const bus = createAsyncSchemaCommandBus(VITEST_MCP_SCHEMA);
 
@@ -267,10 +269,16 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
         const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(VITEST|TEST$|NODE_ENV$)/.test(key)));
         const stderr = await new Promise<string>((done) => {
           let text = '';
-          const child = spawn(process.execPath, args, { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
+          const child = (running = spawn(process.execPath, args, { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] }));
           child.stderr.on('data', (chunk) => { text += chunk; });
+          // A spawn that fails (the root gone) emits 'error'. With no listener
+          // Node throws it, which killed a stdio server, and 'close' never came.
+          // Its message joins the run's error lines: no report is written, so
+          // the call answers test:missing:coverage. tests/vitest-mcp-server.test.ts.
+          child.on('error', (e) => done(`${text}\nerror: ${e.message}`));
           child.on('close', () => done(text));
         });
+        running = undefined;
         const report = join(dir, 'coverage-final.json');
         if (!existsSync(report)) throw new VcTestError('test:missing:coverage', `: ${stderr.split('\n').map((line) => line.trim()).filter((line) => /error/i.test(line)).slice(0, 3).join(' | ')}`);
         return { files: coverageGaps(JSON.parse(readFileSync(report, 'utf8')), root) };
@@ -283,6 +291,9 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
   return {
     bus,
     async disposeAsync() {
+      // A coverage run in progress ends with the server: its call answers
+      // test:missing:coverage, as a run that wrote no report.
+      running?.kill();
       watcher.close();
       await vitest.close();
     },

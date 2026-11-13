@@ -129,6 +129,10 @@ export interface Workflow {
  * // If orderCreate fails -> paymentRelease runs automatically
  */
 export function createWorkflow(steps: WorkflowStep[]): Workflow {
+  // The steps as given, frozen: `run` reads them and `steps` reports them, so
+  // an edit to the caller's array later runs nothing `steps` does not list
+  // (tests/utilities.test.ts).
+  const frozen: readonly WorkflowStep[] = Object.freeze([...steps]);
   async function run(bus: BaseBus, target: any, payload?: any): Promise<WorkflowResult> {
     const results: CommandResult[] = [];
     // The MAPPED target/payload are captured alongside the compensating action,
@@ -138,8 +142,8 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
     // arguments - silently wrong otherwise, and only on the failure path.
     const compensations_: Array<{ action: string; target: any; payload: any }> = [];
 
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
+    for (let i = 0; i < frozen.length; i++) {
+      const step = frozen[i];
       const stepTarget = step.mapTarget ? step.mapTarget(target, payload) : target;
       const stepPayload = step.mapPayload ? step.mapPayload(target, payload) : payload;
 
@@ -178,7 +182,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
     return { ok: true, results };
   }
 
-  return { run, steps: Object.freeze([...steps]) };
+  return { run, steps: frozen };
 }
 
 // ---------------------------------------------------------------------------

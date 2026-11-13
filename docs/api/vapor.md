@@ -42,7 +42,7 @@ const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:241](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L241)
+**Function** - [src/chamber-vapor.ts:242](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L242)
 
 ```ts
 defineVaporCommand<B extends BaseBus = CommandBus<import("./command-bus").CommandMap>, D extends number | undefined = undefined, T extends number | undefined = undefined>(action: string, handler: Handler, options?: VaporCommandOptions<B, D, T>) => { dispatch: (target: any, payload?: any) => PacedOn<B, CommandResult, D, T>; dispose: () => void; }
@@ -72,7 +72,7 @@ dispatch({ name: 'page_view', params: { page: '/landing' } });
 
 ### defineVaporComponent
 
-**Function** - [src/chamber-vapor.ts:177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L177)
+**Function** - [src/chamber-vapor.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L178)
 
 ```ts
 defineVaporComponent<T = any>(options: object) => T | null
@@ -103,7 +103,7 @@ const Comp = defineVaporComponent({
 
 ### defineVaporCustomElement
 
-**Function** - [src/chamber-vapor.ts:145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L145)
+**Function** - [src/chamber-vapor.ts:146](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L146)
 
 ```ts
 defineVaporCustomElement<T = any>(options: object, extraOptions?: object) => T | null
@@ -136,7 +136,7 @@ if (MyEl) customElements.define('vc-greeting', MyEl);
 
 ### getVaporInteropPlugin
 
-**Function** - [src/chamber-vapor.ts:112](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L112)
+**Function** - [src/chamber-vapor.ts:113](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L113)
 
 ```ts
 getVaporInteropPlugin() => any | null
@@ -157,7 +157,7 @@ if (plugin) createApp(App).use(plugin).mount('#app');
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:318](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L318)
+**Function** - [src/chamber-vapor.ts:320](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L320)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; pending: (action: string, target?: unknown) => Readonly<Signal<boolean>>; dispose: () => void; }
@@ -184,7 +184,8 @@ Vue 3.6.0-rc.8: an awaiting `<script setup vapor>` compiles to an
 template as a render closure, and it registers with the NEAREST `<Suspense>`.
 Composables called after the `await` - this one, `useCommand()` - arm their
 cleanup on the restored component scope, including when the app unmounts
-during the await. Pinned by tests/async-vapor-setup-fixture.test.ts.
+during the await. Called before it, they keep nothing the setup registers
+after the app unmounted. Pinned by tests/async-vapor-setup-fixture.test.ts.
 
 ```ts
 // In a <script setup vapor> component under <Suspense>:

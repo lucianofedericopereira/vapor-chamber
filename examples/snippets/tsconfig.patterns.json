@@ -1,0 +1,38 @@
+{
+  // Type-checks the top-level example/pattern reference snippets against the
+  // real library types (paths below map straight into ../../src). Nothing else
+  // runs these files - they are not built or tested - so this is what catches
+  // an example misusing the library's own API. examples/snippets/patterns-ambient.d.ts
+  // stubs the imports a real project would have (a .vue file, Inertia).
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "vapor-chamber": ["../../src/index.ts"],
+      "vapor-chamber/vite": ["../../src/vite-hmr.ts"],
+      "vapor-chamber/standard-schema": ["../../src/plugins-schema.ts"],
+      "vapor-chamber/*": ["../../src/*"]
+    }
+  },
+  // A glob, so an example added tomorrow is checked too. Not checked here,
+  // each for its reason:
+  //   vue-vapor-component.vue - an SFC, which plain tsc cannot read: the
+  //                             vapor-sfc example's vue-tsc checks it
+  // The HTML pages live in ../pages and the shared Vite config factory in
+  // ../shared (each app's own `vue-tsc` type-checks it during that app's
+  // build), so this folder holds snippets only.
+  "include": ["*.ts", "patterns-ambient.d.ts"],
+  "exclude": [
+    // Checked by tsconfig.pattern-4.json: it needs JSX and @types/react alone
+    // (19.3.0, "types": ["react"]). react-dom is not needed (measured
+    // 2026-10-08).
+    "pattern-4-nextjs.tsx"
+  ]
+}

@@ -83,6 +83,24 @@ describe('postCommand - 419 refresh uses the fresh cookie as the only csrf heade
     expect(res.ok).toBe(true);
     expect(sent[1]['X-CSRF-TOKEN']).toBe('stale-meta-token');
   });
+
+  // With no cookie URL the refresh awaits nothing, so it settles before its own
+  // promise is stored: it must not stay stored and answer every later 419.
+  it('with no cookie URL, a later 419 reads the token again', async () => {
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: { headers?: Record<string, string> }) => {
+      posts++;
+      sent.push({ ...(init.headers ?? {}) });
+      return Promise.resolve(mockResponse(posts % 2 === 1 ? 419 : 200));
+    }));
+
+    expect((await postCommand('/api/cmd', {}, { retry: false, csrf: true, csrfCookieUrl: '' })).ok).toBe(true);
+    expect(sent[1]['X-XSRF-TOKEN']).toBe('stale-cookie');
+
+    cookie = 'XSRF-TOKEN=rotated-cookie';
+    expect((await postCommand('/api/cmd', {}, { retry: false, csrf: true, csrfCookieUrl: '' })).ok).toBe(true);
+    expect(sent[3]['X-XSRF-TOKEN']).toBe('rotated-cookie');
+  });
 });
 
 describe('postCommand - 419 refresh with no document (a server)', () => {

@@ -3,8 +3,8 @@
 This chapter connects a Laravel backend in four steps. Every detail (Sanctum, CORS, Inertia,
 Filament, Reverb, queued commands, idempotency, the contract check) is in
 [integrations/laravel.md](../integrations/laravel.md). Runnable files are in
-[`examples/laravel-backend/`](../../examples/laravel-backend), and a runnable app in
-[`examples/laravel-app/`](../../examples/laravel-app).
+[`examples/laravel/backend/`](../../examples/laravel/backend), and a runnable app in
+[`examples/laravel/app/`](../../examples/laravel/app).
 
 ## 1. Add one route
 
@@ -19,7 +19,7 @@ Every command comes to this one route. The action name is in the JSON body.
 
 ## 2. Copy the controller
 
-Copy [`VaporChamberController.php`](../../examples/laravel-backend/VaporChamberController.php)
+Copy [`VaporChamberController.php`](../../examples/laravel/backend/VaporChamberController.php)
 into `app/Http/Controllers/`. It resolves each command name to an action class, and answers a
 failure as an RFC 9457 problem with the status that names its condition.
 

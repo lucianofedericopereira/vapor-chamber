@@ -1,5 +1,5 @@
 /**
- * examples/static-server.mjs started for real and fetched with Node's fetch.
+ * examples/shared/static-server.mjs started for real and fetched with Node's fetch.
  * Why: the no-build pages and the browser project talk to this server, and a stub would only repeat the handler table.
  * Shows: prototype names are unknown commands; an unreadable body is a 400; the catalog carries ETag and Cache-Groups (RFC 9875), a matching If-None-Match is a 304, its one write names the group; each beside a control.
  * See: audit SSV-1, SSV-2.
@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startExampleServer, type ExampleServer } from './start-server';
 
 let server: ExampleServer;
-beforeAll(async () => { server = await startExampleServer('examples/static-server.mjs', 'Static host for examples'); });
+beforeAll(async () => { server = await startExampleServer('examples/shared/static-server.mjs', 'Static host for examples'); });
 afterAll(() => server.stop());
 
 describe('GET /favicon.ico', () => {

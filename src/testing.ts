@@ -26,14 +26,14 @@
 import type {
   Command, CommandResult, Handler, Hook, Facts,
   PluginParts, Rules, Steps, BatchCommand, BatchOptions, BatchResult, CommandBus,
-  Listener, RegisterOptions, BusInspection, AsyncCommandBusOptions,
+  Listener, ListenerOptions, RegisterOptions, BusInspection, AsyncCommandBusOptions,
 } from './command-bus';
 
 // The double stands in for the bus, so its failures are core's: a test must
 // read the same code it will meet in production.
 const testFail = _failures('core');
 import { matchesPattern } from './pattern';
-import { abortedResult, _failures, _errResult, _inspectPlugins, _okResult, _stampMeta, _syncBatch, _UNSEAL, _FACTS, _tryCatchHandler, _declaredTransports, _attachTransports, _send, _assertPlugin, _checkHandler, _composeFacts, _rulesOf, _stepsOf, _stepped, _refusal } from './command-bus';
+import { abortedResult, _failures, _errResult, _finalizeOff, _inspectPlugins, _okResult, _stampMeta, _syncBatch, _UNSEAL, _FACTS, _tryCatchHandler, _declaredTransports, _attachTransports, _send, _assertPlugin, _checkHandler, _composeFacts, _rulesOf, _stepsOf, _stepped, _refusal } from './command-bus';
 import { isThenable } from './settled';
 import { _hotUpdate } from './applied-remotely';
 import { _report } from './report';
@@ -335,18 +335,20 @@ export function createTestBus(opts: { passthroughHandlers?: boolean; transport?:
     };
   }
 
-  function on(pattern: string, listener: Listener): () => void {
+  // `{ signal }` and Symbol.dispose through the real bus's own finisher, so a
+  // listener here lives exactly as long as on the real bus (whitepaper 13).
+  function on(pattern: string, listener: Listener, options?: ListenerOptions): () => void {
     const entry = { pattern, listener, off: false };
     patternListeners.push(entry);
-    return () => {
+    return _finalizeOff(() => {
       if (entry.off) return;
       entry.off = true;
       patternListeners = patternListeners.filter((e) => e !== entry);
-    };
+    }, options?.signal);
   }
 
-  function once(pattern: string, listener: Listener): () => void {
-    const unsub = on(pattern, (cmd, result) => { unsub(); listener(cmd, result); });
+  function once(pattern: string, listener: Listener, options?: ListenerOptions): () => void {
+    const unsub = on(pattern, (cmd, result) => { unsub(); listener(cmd, result); }, options);
     return unsub;
   }
 

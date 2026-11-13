@@ -5,7 +5,7 @@ controller, action classes. Then the optional pieces: the Sanctum SPA flow, Fila
 Inertia coexistence, Reverb and Echo realtime, queued commands.
 
 The examples ship as runnable PHP files under
-[`examples/laravel-backend/`](../../examples/laravel-backend/), ready to copy but not
+[`examples/laravel/backend/`](../../examples/laravel/backend/), ready to copy but not
 auto-loaded. Adapt namespaces and table names to your project.
 
 ---
@@ -147,7 +147,7 @@ Route::post('/vc', VaporChamberController::class)
 ### 2. Controller
 
 A thin dispatcher that resolves the command name to an action class. See
-[`examples/laravel-backend/VaporChamberController.php`](../../examples/laravel-backend/VaporChamberController.php).
+[`examples/laravel/backend/VaporChamberController.php`](../../examples/laravel/backend/VaporChamberController.php).
 
 ```php
 namespace App\Http\Controllers;
@@ -221,7 +221,7 @@ action classes. The example controller adds what this minimal one leaves out:
 ### 3. Action classes
 
 One class per command, easy to test, to authorize and to validate. See
-[`examples/laravel-backend/AddToCart.php`](../../examples/laravel-backend/AddToCart.php).
+[`examples/laravel/backend/AddToCart.php`](../../examples/laravel/backend/AddToCart.php).
 
 ```php
 namespace App\Actions\Cart;
@@ -253,7 +253,7 @@ class AddToCart
 ### 4. Command-to-handler registry
 
 A single config file maps command names to action classes. See
-[`examples/laravel-backend/config-vapor-chamber.php`](../../examples/laravel-backend/config-vapor-chamber.php).
+[`examples/laravel/backend/config-vapor-chamber.php`](../../examples/laravel/backend/config-vapor-chamber.php).
 
 ```php
 // config/vapor-chamber.php
@@ -385,7 +385,7 @@ the header.
     'X-XSRF-TOKEN',        // <- Flow B (Sanctum cookie)
     'Idempotency-Key',     // <- with idempotent() or the outbox
     'If-None-Match',       // <- a stale cached read's refresh (its ETag)
-    'X-App-Version',       // <- a page's build, when the controller checks `app_version` (examples/laravel-backend/README.md, "An old page")
+    'X-App-Version',       // <- a page's build, when the controller checks `app_version` (examples/laravel/backend/README.md, "An old page")
 ],
 'exposed_headers' => ['Location', 'Retry-After', 'ETag', 'Cache-Groups', 'Cache-Group-Invalidation'],   // <- a 202's Accepted, a read's refresh and its groups
 'supports_credentials' => true,   // needed for the cookie flows
@@ -412,7 +412,7 @@ For Blade apps the first-choice navigation layer is the in-box `vapor-chamber/ro
 - Writes go through this package's commands.
 
 The split is CQRS across the two subpaths: **bus = C (writes), router = R + URL state (reads)**.
-See `examples/pattern-6-vapor-router.ts`.
+See `examples/snippets/pattern-6-vapor-router.ts`.
 
 ### Refresh after a write: cache groups
 
@@ -432,7 +432,7 @@ Route::get('/api/cart', fn (Request $r) => response()->json($cart)->header('Cach
 ```
 
 Give the transport and the router one client, and the router refreshes the reads on screen in
-that group (`examples/laravel-backend/routes-web.php`, docs/router.md). A transport without a
+that group (`examples/laravel/backend/routes-web.php`, docs/router.md). A transport without a
 client warns in development when an answer names groups.
 
 ---
@@ -560,7 +560,7 @@ dispatches a real `CustomEvent` on the host element. The event bubbles, escapes 
 > The four host-framework patterns below are **illustrative**. Alpine, Livewire and Filament are
 > not dependencies of this repo, and nothing here executes them, so treat the snippets as the
 > shape to follow rather than as tested code. The runnable Blade example that does ship,
-> [`examples/laravel-app`](../../examples/laravel-app/), uses plain DOM and no framework at all.
+> [`examples/laravel/app`](../../examples/laravel/app/), uses plain DOM and no framework at all.
 
 [^widget-shape]: `tests/vapor/widget-shape.test.ts` mounts a real Vapor custom element. It asserts the event leaves the shadow root and arrives at the host, at `document` and at `window`. The last is what Alpine's `.window` modifier and Livewire's `#[On(...)]` both rely on.
 
@@ -627,7 +627,7 @@ dispatches a real `CustomEvent` on the host element. The event bubbles, escapes 
 </script>
 ```
 
-[`examples/laravel-app`](../../examples/laravel-app/) runs this page for real. It pins the Vue
+[`examples/laravel/app`](../../examples/laravel/app/) runs this page for real. It pins the Vue
 version it loads to the one this library is tested against, instead of leaving a placeholder in
 the URL.
 
@@ -768,7 +768,7 @@ class AnalyticsWidget extends Widget
 The vapor-chamber controller and Filament's panel guard sit on different routes, so there is no
 auth conflict and no middleware overlap.
 
-See [`examples/pattern-5-filament.ts`](../../examples/pattern-5-filament.ts) for the full
+See [`examples/snippets/pattern-5-filament.ts`](../../examples/snippets/pattern-5-filament.ts) for the full
 client-side island.
 
 ---
@@ -1108,7 +1108,7 @@ action finishes. A retry can arrive while the first attempt is still running, af
 timeout on a slow write. It would miss the cache and run the action again, concurrently. So the
 example controller takes a lock on the key before the cache read, and holds it for the whole run.
 From `dispatchOne()` in
-[`examples/laravel-backend/VaporChamberController.php`](../../examples/laravel-backend/VaporChamberController.php),
+[`examples/laravel/backend/VaporChamberController.php`](../../examples/laravel/backend/VaporChamberController.php),
 abridged:
 
 ```php

@@ -1,7 +1,7 @@
 /**
  * The offline outbox on an async bus: holding, the stored queue, flush and replay, the default retry rule, window listeners, IndexedDB storage, a custom key, storage failures.
  * Why: a command dispatched offline would be lost, sent twice or sent out of order, and a bad `maxSize` or a failing storage would make the queue throw or grow without bound.
- * Shows: a covered command is held as an Accepted and saved, others are sent at once; the stored queue loads and replays first with its keys and origin replay in FIFO order; a retryable failure keeps the order, a final one is rejected; maxSize is clamped or defaulted; window events drive the flag and flush; storage errors only warn.
+ * Shows: a covered command is held as an Accepted and saved, others are sent at once; the stored queue loads and replays first with its keys and origin replay in FIFO order; a retryable failure keeps the order, a final one is rejected; maxSize is clamped or defaulted; window events drive the flag and flush, and after dispose() nothing flushes on its own, a queue that lands later included; a ttl passing after dispose() still settles the caller (an attempt that failed), and the next session sends the stored record; storage errors only warn.
  * See: log s36.48
  */
 
@@ -424,6 +424,64 @@ describe('createOutbox - window listeners and lifecycle', () => {
     expect(sent).toEqual(['a']);
     expect(outbox.pending.value).toBe(0);
     outbox.dispose();
+  });
+
+  // autoFlush's three triggers: the online event and the Retry-After wait end at dispose(); the load landing is the third.
+  // In a page dispose() also releases this tab's lock, and the tab that takes it over sends these records.
+  it('a stored queue that lands after dispose() starts no flush, as the other two triggers do not', async () => {
+    let land!: (v: string | null) => void;
+    const storage: PersistStorage = { getItem: () => new Promise((r) => { land = r; }), setItem: () => {} };
+    const sent: string[] = [];
+    const transport = defineTransport(async (cmd) => { sent.push(cmd.action); return { ok: true, value: 'ok', error: undefined }; });
+    const outbox = createOutbox({ name: NAME, storage, isOnline: () => true });
+    const bus = createAsyncCommandBus({ retry: false, transport, outbox });
+    expect((await bus.dispatch('a', {})).value).toBeInstanceOf(Accepted); // held while the queue loads
+    outbox.dispose();
+    land(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual([]);
+  });
+
+  // A failed send is an attempt that failed, not a change of data status; the truth is the server's. So the ttl
+  // tells this session's caller its attempt failed, also after dispose(), and a later session sending the stored
+  // record is a new attempt, which the server deduplicates by the record's key.
+  it('a ttl passing after dispose() settles the caller (this attempt failed); the next session sends the stored record', async () => {
+    vi.useFakeTimers();
+    try {
+      const saved: Record<string, string> = {};
+      const storage: PersistStorage = { getItem: (k) => saved[k] ?? null, setItem: (k, v) => { saved[k] = v; } };
+      const sent: string[] = [];
+      const transport = defineTransport(async (cmd) => { sent.push(cmd.action); return { ok: true, value: 'ok', error: undefined }; });
+      const outbox = createOutbox({ name: NAME, storage, ttl: 50, isOnline: () => false });
+      const held = await createAsyncCommandBus({ retry: false, transport, outbox }).dispatch('cartAdd', { id: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      outbox.dispose();
+      await vi.advanceTimersByTimeAsync(60);
+      expect(await doneOf(held)).toFailWith('outbox:timeout:queue');
+      expect(saved[NAME]).toContain('cartAdd');
+
+      const next = createOutbox({ name: NAME, storage, isOnline: () => true });
+      createAsyncCommandBus({ retry: false, transport, outbox: next });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent).toEqual(['cartAdd']);
+      next.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an outbox in memory only: its ttl settles the caller after dispose() the same way', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = defineTransport(async () => ({ ok: true, value: 'ok', error: undefined }));
+      const outbox = createOutbox({ name: NAME, storage: null, ttl: 50, isOnline: () => false });
+      const held = await createAsyncCommandBus({ retry: false, transport, outbox }).dispatch('cartAdd', { id: 1 });
+      outbox.dispose();
+      await vi.advanceTimersByTimeAsync(60);
+      expect(await doneOf(held)).toFailWith('outbox:timeout:queue');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('dispose() removes both listeners, once; the bus disposes its outbox', () => {

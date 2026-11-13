@@ -36,14 +36,14 @@ export const inYoungGeneration = (o: object): boolean => inYoung(o);
 // here. Each is pinned by a positive control in tests/v8-helper.test.ts. Bit 1
 // (kNeverOptimize) is left out: on Node 24.21 %NeverOptimizeFunction does not
 // set it, and %PrepareFunctionForOptimization after it is a fatal CHECK.
-const BIT = {
-  isFunction: 1 << 0,
-  optimized: 1 << 4,
-  maglevved: 1 << 5,
-  turbofanned: 1 << 6,
-  interpreted: 1 << 7,
-  baseline: 1 << 15,
-} as const;
+// Two layouts, keyed on the V8 major: V8 14 dropped kAlwaysOptimize (1 << 2)
+// and moved every later bit down one (the enum in src/runtime/runtime.h, read
+// as Node 24.21.0 and 26.13.0 ship it). On Node 26.13 %NeverOptimizeFunction
+// does not set bit 1 either.
+const BIT =
+  Number(process.versions.v8.split('.')[0]) >= 14
+    ? ({ isFunction: 1 << 0, optimized: 1 << 3, maglevved: 1 << 4, turbofanned: 1 << 5, interpreted: 1 << 6, baseline: 1 << 14 } as const)
+    : ({ isFunction: 1 << 0, optimized: 1 << 4, maglevved: 1 << 5, turbofanned: 1 << 6, interpreted: 1 << 7, baseline: 1 << 15 } as const);
 
 export type Tier = 'interpreted' | 'baseline' | 'maglev' | 'turbofan' | 'unknown';
 export type OptimizationStatus = { raw: number; tier: Tier } & { [K in keyof typeof BIT]: boolean };

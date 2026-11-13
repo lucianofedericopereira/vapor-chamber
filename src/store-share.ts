@@ -471,11 +471,15 @@ export function shareTabs<S>(name?: string): StoreShare<S> {
     request();
     ask();
     return {
+      // A disposed store leaves as a hidden page does: it says so (unless
+      // `pagehide` already did), or the lead kept it as a peer and sent each
+      // write to no one. tests/store-propagate-undo.test.ts.
       dispose() {
         if (page) {
           removeEventListener('pagehide', hide);
           removeEventListener('pageshow', show);
         }
+        if (!away) post({ kind: 'bye', value: undefined, tab });
         free();
         channel.close();
         settle();

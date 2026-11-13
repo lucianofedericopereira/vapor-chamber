@@ -313,13 +313,18 @@ const plain = (v: unknown): v is Record<string, unknown> =>
 function carry(fresh: unknown, old: unknown, declared: unknown): unknown {
   if (!plain(old) || !plain(fresh)) return old;
   const was = plain(declared) ? declared : undefined;
-  const next: Record<string, unknown> = {};
+  // Pairs, then Object.fromEntries: the keys are the state's, external ones
+  // included (an id, a state JSON.parse read), and `next[k]` on a `{}` sent
+  // `__proto__` through the inherited setter, so the entry was lost or became
+  // the carried object's prototype (see ./dict, the pattern of ssr.ts's
+  // storeStates). tests/store-hot-update.test.ts.
+  const next: Array<[string, unknown]> = [];
   for (const k of Object.keys(old)) {
-    if (Object.hasOwn(fresh, k)) next[k] = carry(fresh[k], old[k], was?.[k]);
-    else if (was === undefined || !Object.hasOwn(was, k)) next[k] = old[k];
+    if (Object.hasOwn(fresh, k)) next.push([k, carry(fresh[k], old[k], was?.[k])]);
+    else if (was === undefined || !Object.hasOwn(was, k)) next.push([k, old[k]]);
   }
-  for (const k of Object.keys(fresh)) if (!Object.hasOwn(old, k)) next[k] = fresh[k];
-  return next;
+  for (const k of Object.keys(fresh)) if (!Object.hasOwn(old, k)) next.push([k, fresh[k]]);
+  return Object.fromEntries(next);
 }
 
 /** A store's field events: each field a write changed, by identity, to its subscribers. */

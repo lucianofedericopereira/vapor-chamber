@@ -52,7 +52,7 @@
  * which is why `$reset` and every action build fresh objects.
  */
 
-import { effect, effectScope, getCurrentScope, onScopeDispose, reactive, shallowRef } from 'vue';
+import { effect, effectScope, getCurrentInstance, getCurrentScope, inject, onScopeDispose, reactive, shallowRef, ssrContextKey } from 'vue';
 import { type DefineChamberStore, type StoreRuntime, _fieldCell, createStoreDefiner } from './store-base';
 
 export type { ChamberStore, ChamberStoreOptions, StoreReducer, StoreRouter } from './store-base';
@@ -80,8 +80,20 @@ const vueRuntime: StoreRuntime = {
     }));
     return () => scope.stop();
   },
-  scope: { active: () => getCurrentScope() !== undefined, onDispose: onScopeDispose },
+  // During a server render the store is the request's, not the component's
+  // (a store is its bus): Vue 3.6 stops every component's scope when the
+  // render ends, before the request reads `storeStates`, so a scoped store
+  // would be gone from the page. Outside a scope the store is pinned and the
+  // request owns it. The marker is Vue's own: the SSR context the server
+  // renderer provides, the one it tests to stop that scope; nothing on the
+  // client provides it. tests/ssr-store-states-components.test.ts.
+  scope: { active: () => getCurrentScope() !== undefined && !inServerRender(), onDispose: onScopeDispose },
 };
+
+/** In a component's setup during a server render (inject only where a setup runs, so it never warns). */
+function inServerRender(): boolean {
+  return getCurrentInstance() !== null && inject(ssrContextKey, null) !== null;
+}
 
 export const defineChamberStore: DefineChamberStore = createStoreDefiner(vueRuntime);
 

@@ -9,7 +9,7 @@
  *
  * A bare `process.env.NODE_ENV` is a ReferenceError anywhere this library is
  * delivered without a bundler - Blade inline payloads, plain ESM + import map
- * (examples/router-demo), pattern-1 no-build. The guarded form is
+ * (examples/pages/router-demo), pattern-1 no-build. The guarded form is
  * `typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'`.
  *
  * Five files are allowlisted, each with its reason on ALLOWLIST below. Two keep

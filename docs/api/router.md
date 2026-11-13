@@ -56,7 +56,7 @@ replaceState with the CURRENT state is side-effect-free and authoritative.
 
 ### compilePath
 
-**Function** - [src/router/table.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L76)
+**Function** - [src/router/table.ts:78](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L78)
 
 ```ts
 compilePath(path: string, paramTypes?: Readonly<Record<string, ParamType>>) => { segments: Segment[]; re: RegExp; keys: string[]; }
@@ -85,7 +85,7 @@ createRouter<TName extends string = string>(options: RouterOptions) => Router<TN
 
 ### createRouteTable
 
-**Function** - [src/router/table.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L148)
+**Function** - [src/router/table.ts:150](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L150)
 
 ```ts
 createRouteTable(rows: readonly RouteRecord[]) => RouteTable
@@ -112,7 +112,7 @@ Decode one raw query value through its declaration; falls back to
 
 ### defaultAffects
 
-**Function** - [src/router/loaders.ts:193](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L193)
+**Function** - [src/router/loaders.ts:196](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L196)
 
 ```ts
 defaultAffects(record: TableRecord, keys: readonly string[], handlers: LoaderHandlers) => boolean
@@ -166,7 +166,7 @@ normalizeBase(base?: string) => string
 
 ### onBeforeLeave
 
-**Function** - [src/router/composables.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L152)
+**Function** - [src/router/composables.ts:154](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L154)
 
 ```ts
 onBeforeLeave(guard: (to: RouteLocation, from: RouteLocation) => boolean | void | Promise<boolean | void>) => () => void
@@ -204,7 +204,7 @@ Trailing-slash tolerant. exact = same path; active = exact or path prefix
 
 ### preheatIdle
 
-**Function** - [src/router/dom.ts:320](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L320)
+**Function** - [src/router/dom.ts:322](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L322)
 
 ```ts
 preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options?: IdlePreheatOptions) => () => void
@@ -313,7 +313,7 @@ bus.on('routerNavigated', (cmd) => track(cmd.target.to.fullPath));
 
 ### runLoaders
 
-**Function** - [src/router/loaders.ts:142](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L142)
+**Function** - [src/router/loaders.ts:145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L145)
 
 ```ts
 runLoaders(handlers: LoaderHandlers, records: readonly TableRecord[], location: RouteLocation, signal: AbortSignal, onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void, refresh?: boolean, http?: HttpClient, onGroups?: (recordName: string, groups: readonly string[]) => void) => Promise<Map<string, unknown>>
@@ -324,7 +324,7 @@ failures throw coded RouterErrors (cause attached, abort -> `aborted:navigation`
 
 ### stampActiveLinks
 
-**Function** - [src/router/dom.ts:290](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L290)
+**Function** - [src/router/dom.ts:292](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L292)
 
 ```ts
 stampActiveLinks(base: string, currentPath: string, root?: ParentNode) => void
@@ -361,7 +361,7 @@ Case-insensitive base prefix strip; null when pathname is outside base.
 
 ### useBreadcrumbs
 
-**Function** - [src/router/composables.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L141)
+**Function** - [src/router/composables.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L143)
 
 ```ts
 useBreadcrumbs() => { readonly value: readonly Breadcrumb[]; }
@@ -373,7 +373,7 @@ rows and ancestors whose params the location can't supply come href-less.
 
 ### useMenu
 
-**Function** - [src/router/composables.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L129)
+**Function** - [src/router/composables.ts:131](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L131)
 
 ```ts
 useMenu() => { readonly value: readonly MenuItem[]; }
@@ -386,7 +386,7 @@ Reactive to navigation AND table swaps (setRoutes / reload).
 
 ### usePagination
 
-**Function** - [src/router/composables.ts:214](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L214)
+**Function** - [src/router/composables.ts:216](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L216)
 
 ```ts
 usePagination<T = unknown>(options?: PaginationOptions<T>) => Pagination<T>
@@ -430,7 +430,7 @@ Reactive current location (URL state - outlets read snapshot.render).
 
 ### useRouteData
 
-**Function** - [src/router/composables.ts:100](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L100)
+**Function** - [src/router/composables.ts:102](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L102)
 
 ```ts
 useRouteData<T = unknown>(recordName?: string) => { readonly value: T | undefined; }
@@ -442,7 +442,7 @@ layout ancestor also loads.
 
 ### useRouteError
 
-**Function** - [src/router/composables.ts:113](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L113)
+**Function** - [src/router/composables.ts:115](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L115)
 
 ```ts
 useRouteError() => { latestError: { readonly value: unknown; }; clear: () => void; }
@@ -534,7 +534,7 @@ for tests and SSR. Link handling lives in router/dom.ts, not here.
 
 ### IdlePreheatOptions
 
-**Type alias** - [src/router/dom.ts:307](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L307)
+**Type alias** - [src/router/dom.ts:309](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L309)
 
 ```ts
 export type IdlePreheatOptions = {
@@ -647,7 +647,7 @@ Navigation guard. Return:
 
 ### Pagination
 
-**Type alias** - [src/router/composables.ts:180](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L180)
+**Type alias** - [src/router/composables.ts:182](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L182)
 
 ```ts
 export type Pagination<T> = {
@@ -672,7 +672,7 @@ export type Pagination<T> = {
 
 ### PaginationOptions
 
-**Type alias** - [src/router/composables.ts:167](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L167)
+**Type alias** - [src/router/composables.ts:169](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L169)
 
 ```ts
 export type PaginationOptions<T> = {
@@ -969,7 +969,10 @@ export type Router<TName extends string = string> = {
    *  requiring it would have this type contradict the implementation. */
   install: (app: { provide: (key: symbol, value: unknown) => unknown }) => void;
   /** Cancels the navigation in flight, removes what `start()` installed (a
-   *  start still running installs nothing more) and disposes the history. */
+   *  start still running installs nothing more) and disposes the history.
+   *  What the router was still waiting on ends with it: a background refresh
+   *  lands nowhere and `isRevalidating` reads false, and a late failure
+   *  reaches no `onError` handler and sets no `lastError`. */
   dispose: () => void;
 };
 ```

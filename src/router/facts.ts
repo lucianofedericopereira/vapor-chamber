@@ -5,7 +5,7 @@
  * knows no router. An app that never calls `routerFacts` ships none of it.
  */
 
-import { watch } from 'vue';
+import { getCurrentScope, onScopeDispose, watch } from 'vue';
 import type { Router } from './router-type';
 import type { RouteLocation } from './types';
 
@@ -49,10 +49,16 @@ export function routerFacts(router: Pick<Router, 'afterEach' | 'onError' | 'isLo
   // Synchronous, so a fact goes out as the flag moves, in order.
   const offLoading = watch(router.isLoading, (value) => bus.emit('routerLoading', { value } satisfies RouterFlagFact), { flush: 'sync' });
   const offRevalidating = watch(router.isRevalidating, (value) => bus.emit('routerRevalidating', { value } satisfies RouterFlagFact), { flush: 'sync' });
-  return () => {
+  const stop = (): void => {
     offNavigated();
     offFailed();
     offLoading();
     offRevalidating();
   };
+  // All four, after they are made: Vue 3.6.0-rc.15 runs a cleanup armed in a
+  // stopped scope at once (#16108), while a watch created there stays live, so
+  // without this an async setup resumed after its unmount kept the loading
+  // facts going. Each off is idempotent. tests/router/router-facts.test.ts.
+  if (getCurrentScope()) onScopeDispose(stop);
+  return stop;
 }

@@ -17,7 +17,9 @@ requireDist(existsSync(join(root, 'dist', 'index.js')));
 /** Every server-rendered view that could carry a `<script src>`: plain HTML and Blade. */
 function findViews(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro') continue;
+    // demo-app: examples/laravel/app/setup.sh's scaffold, gitignored; its vendor/ links back to this repo,
+    // so a walk into it never ends (ENAMETOOLONG; log 36.F58).
+    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro' || entry === 'demo-app') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) findViews(full, out);
     else if (entry.endsWith('.html') || entry.endsWith('.blade.php')) out.push(full);
@@ -38,9 +40,9 @@ function analyse(file: string): Page | null {
   if (!script) return null;
 
   const globals = [...src.matchAll(/VaporChamber\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
-  // Served from the repo root (examples/static-server.mjs), so a leading `/` means the repo root, as in the browser.
+  // Served from the repo root (examples/shared/static-server.mjs), so a leading `/` means the repo root, as in the browser.
   const src0 = script[1];
-  // A Blade view's `/js/<name>` is the same built file: examples/laravel-app/setup.sh copies the IIFEs from dist/ into public/js/.
+  // A Blade view's `/js/<name>` is the same built file: examples/laravel/app/setup.sh copies the IIFEs from dist/ into public/js/.
   const fromRoot = src0.startsWith('/js/') ? `/dist/${src0.slice('/js/'.length)}` : src0;
   const bundle = fromRoot.startsWith('/')
     ? join(root, fromRoot.slice(1))
@@ -67,8 +69,8 @@ describe('HTML examples call real IIFE globals', () => {
   it('covers the Blade tier, not only plain .html', () => {
     const blade = pages.filter((p) => p.file.endsWith('.blade.php'));
     expect(blade.map((p) => p.file).sort()).toEqual([
-      'examples/laravel-app/resources/views/cart.blade.php',
-      'examples/laravel-app/resources/views/widget.blade.php',
+      'examples/laravel/app/resources/views/cart.blade.php',
+      'examples/laravel/app/resources/views/widget.blade.php',
     ]);
     // widget.blade.php is the one that needs the `elements` variant: its two
     // identifying globals are absent from `core`.

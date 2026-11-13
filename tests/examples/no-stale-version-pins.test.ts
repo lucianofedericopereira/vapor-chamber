@@ -17,7 +17,9 @@ const LITERAL_PIN = /vapor-chamber@\d+(?:\.\d+)*/g;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro') continue;
+    // demo-app: examples/laravel/app/setup.sh's scaffold, gitignored; its vendor/ links back to this repo,
+    // so a walk into it never ends (ENAMETOOLONG; log 36.F58).
+    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro' || entry === 'demo-app') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, out);
     else if (EXTS.some((e) => entry.endsWith(e))) out.push(full);

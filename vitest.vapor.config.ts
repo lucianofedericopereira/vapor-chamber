@@ -23,7 +23,7 @@ import { defineConfig } from 'vitest/config';
  * configuration in which the router's composables can be observed inside a real
  * Vapor component at all.
  *
- * The examples (`examples/vapor-sfc`, `examples/vapor-island-cart`) do not alias:
+ * The examples (`examples/apps/vapor-sfc`, `examples/apps/vapor-island-cart`) do not alias:
  * Vue's own `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`, and
  * building each with and without the alias produced byte-identical output. The
  * alias is right HERE because vitest's bare `vue` is not that bundler entry.

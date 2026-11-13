@@ -1,6 +1,6 @@
 /**
  * Every package export whose built module graph imports bare `vue` or `@vue/reactivity`, bundled as a consumer ships it with Vue resolved to 3.5.
- * Why: the peer range promises Vue >=3.5.0, so an entry that fails to load on 3.5, other than the documented 3.6-only ones, would break a user on 3.5.
+ * Why: the peer range promises Vue >=3.5.45 (>=3.5.0 until the rc.15 cycle), so an entry that fails to load on 3.5, other than the documented 3.6-only ones, would break a user on 3.5.
  * Shows: a control that `vue35` is a 3.5 release without the Vapor runtime; the entry list holds `./vue` and the 3.6-only entries and not the root; each other entry builds and loads; each 3.6-only entry fails to build on a missing export; `/vue` on 3.5 returns a 3.5 ref from the composable and `untracked()` suspends tracking while a plain effect re-runs.
  * See: log s35.228, log s36.F26
  */

@@ -1,7 +1,7 @@
 /**
  * The wire contract end to end, with only `fetch` and the socket stubbed, plus a replay of the contract/ pact files over a real HTTP server.
  * Why: a client that reads an answer, classifies a failure, retries or drops an outbox record differently from the contract would break every backend that follows it.
- * Shows: an answer is `{ state }`, `{ redirect }` or `{ problem }` and reads the same on single, batch and ws; a failure is `remote:<condition of its status>:<code>`; retries follow the condition and stay invisible to outside plugins; the outbox drops a record only on the backend's verdict; each pact case's request is what the client sends and the result is what the app sees.
+ * Shows: an answer is `{ state }`, `{ redirect }` or `{ problem }` and reads the same on single, batch and ws; a failure is `remote:<condition of its status>:<code>`; retries follow the condition and stay invisible to outside plugins; the outbox drops a record only on the backend's verdict, and its Retry-After wait ends at dispose(), one a send on the wire answers after it included; each pact case's request is what the client sends and the result is what the app sees.
  * See: docs/contract.md, RFC 9110
  */
 import { createServer, type IncomingHttpHeaders } from 'node:http';
@@ -452,6 +452,35 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
       vi.useRealTimers();
       vi.unstubAllGlobals();
     }
+  });
+
+  // The same wait, from a flush whose send was on the wire when dispose() ran: its answer comes after.
+  it('dispose() while the send is on the wire: its Retry-After schedules no wait, nothing is sent again', async () => {
+    vi.useFakeTimers();
+    const sent: string[] = [];
+    let answer!: (r: Response) => void;
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      sent.push((JSON.parse(init.body as string) as { command: string }).command);
+      return sent.length === 1 ? new Promise<Response>((r) => { answer = r; }) : Promise.resolve(reply(200, { state: 1 }));
+    });
+    let online = false;
+    const outbox = createOutbox({ storage: null, isOnline: () => online });
+    const bus = createAsyncCommandBus({ transport: httpTransport({ endpoint: '/api/vc' }), outbox });
+    await bus.dispatch('orderA', {});
+    online = true;
+
+    const flushing = outbox.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toHaveLength(1);
+    outbox.dispose();
+    answer(new Response(JSON.stringify(problem(503, 'unavailable')), {
+      status: 503, headers: { 'content-type': 'application/problem+json', 'retry-after': '1' },
+    }));
+    expect(await flushing).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(1);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   /** One record queued offline over the single endpoint, back online, `autoFlush` on. */

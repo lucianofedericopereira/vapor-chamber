@@ -44,16 +44,14 @@ export async function compileVapor(v: VaporApi, source: string): Promise<Compile
  * also carries `__multiRoot` when its template has several roots: compileScript
  * stamps it, and a component without it does not claim the server's `<!--[-->`,
  * so hydration recreates its first root (Vue 3.6.0-rc.14 #16052).
+ * Vue 3.6.0-rc.15 (#16088) removed the flag: `compileTemplate` reports no
+ * `multiRoot`, and a Vapor component claims the `<!--{-->` range its server
+ * build (`vapor: true`) wraps a multi-root render in, so a fixture's server
+ * half passes `vapor` to `renderOnTheServer`.
  */
 export async function compileVaporComponent(v: VaporApi, source: string, ctx: unknown): Promise<unknown> {
-  const { multiRoot } = (await import('vue/compiler-sfc')).compileTemplate({
-    source,
-    filename: 'T.vue',
-    id: 'vc-fixture',
-    vapor: true,
-  });
   const { render } = await compileVapor(v, source);
-  return v.defineVaporComponent({ __multiRoot: multiRoot, setup: () => render(ctx) });
+  return v.defineVaporComponent({ setup: () => render(ctx) });
 }
 
 /**

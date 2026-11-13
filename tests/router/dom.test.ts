@@ -5,7 +5,8 @@
  * hijacked, active stamps and aria-current would be wrong for users and screen readers, hover preheat would
  * outlive teardown, and a bfcache restore would not re-arm the router.
  * Shows: click interception and its bail-outs, hover preheat and its cancel, onRestore on a persisted pageshow,
- * data-active, data-exact-active and aria-current stamping, and preheatIdle scheduling, abort and skip rules.
+ * data-active, data-exact-active and aria-current stamping (one anchor read under two bases included), and preheatIdle
+ * scheduling, abort and skip rules.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from '@router/dom';
@@ -280,6 +281,16 @@ describe('stampActiveLinks', () => {
     document.body.innerHTML = `<a id="s" href="/admin/checkout/2" aria-current="step">Step 2</a>`;
     stampActiveLinks('/admin', '/orders');
     expect(document.getElementById('s')!.getAttribute('aria-current')).toBe('step');
+  });
+
+  // The anchor's parse is cached per anchor, and two routers (or a page's own
+  // stampActiveLinks call) can read one anchor under different bases.
+  it('reads one anchor afresh under another base', () => {
+    document.body.innerHTML = `<a id="b" href="/b/x">X</a>`;
+    stampActiveLinks('/a', '/x');
+    expect(document.getElementById('b')!.hasAttribute('data-exact-active')).toBe(false);
+    stampActiveLinks('/b', '/x');
+    expect(document.getElementById('b')!.hasAttribute('data-exact-active')).toBe(true);
   });
 
   it('clears stale stamps on a link that is no longer routable', () => {

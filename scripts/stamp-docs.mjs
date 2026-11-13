@@ -39,7 +39,7 @@
  *
  * Scope: markers in README.md, CONTRIBUTING.md, ROADMAP.md, SECURITY.md and in
  * the .md, .html and .php files under docs/ and examples/. CHANGELOG.md is not
- * scanned. It also keeps each examples/*\/package.json `vue` range equal to the
+ * scanned. It also keeps each examples/apps/*\/package.json `vue` range equal to the
  * root devDependency.
  *
  * Adding a value: put it in VALUES below. Anything derivable from a file the
@@ -67,10 +67,15 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
  * `vueAligned` reads the devDependency rather than being typed by hand: it is
  * the version the suite actually runs against, which is the only honest thing
  * for a doc to claim.
+ *
+ * `nodeEngines` is the range package.json declares, and `nodeVersion` the one
+ * Node CI runs, read from `.node-version` (every CI job takes Node from it).
  */
 const VALUES = {
   version: pkg.version,
   vueAligned: String(pkg.devDependencies?.vue ?? '').replace(/^[\^~]/, ''),
+  nodeEngines: String(pkg.engines?.node ?? ''),
+  nodeVersion: readFileSync(join(root, '.node-version'), 'utf8').trim(),
 };
 
 /**
@@ -239,7 +244,7 @@ if (coverage) {
 
 const SCAN_DIRS = ['docs', 'examples'];
 const SCAN_FILES = ['README.md', 'CONTRIBUTING.md', 'ROADMAP.md', 'SECURITY.md'];
-// `.php` for the Blade views in examples/laravel-app: Blade passes HTML
+// `.php` for the Blade views in examples/laravel/app: Blade passes HTML
 // comments through untouched, so a marker works there exactly as it does in
 // Markdown and plain HTML - which is the same reason `.html` is here. The
 // runnable Laravel demo pins Vue by CDN URL rather than vendoring a copy of the
@@ -255,7 +260,9 @@ function walk(dir, out = []) {
     return out;
   }
   for (const entry of entries) {
-    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro') continue;
+    // demo-app: examples/laravel/app/setup.sh's scaffold, gitignored; its vendor/ links back to this repo,
+    // so a walk into it never ends (ENAMETOOLONG; log 36.F58).
+    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro' || entry === 'demo-app') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, out);
     else if (EXTS.some((e) => entry.endsWith(e))) out.push(full);
@@ -293,7 +300,7 @@ const files = [
 const VUE_RANGE = String(pkg.devDependencies?.vue ?? '');
 
 function examplePinFiles() {
-  const dir = join(root, 'examples');
+  const dir = join(root, 'examples', 'apps');
   let entries;
   try {
     entries = readdirSync(dir);

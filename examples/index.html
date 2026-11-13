@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vapor-chamber examples</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/examples/shared/base.css">
+</head>
+<body>
+<!--
+  The index of `npm run examples` (examples/shared/vite.pages.config.mjs).
+  Vite serves this page; every page it links is sent as it is on disk by
+  shared/static-server.mjs's handler, so `node examples/shared/static-server.mjs`
+  serves the same pages at the same URLs (this index at /examples/).
+-->
+<main>
+  <h1>vapor-chamber examples</h1>
+
+  <h2>Pages, no build step</h2>
+  <ul>
+    <li><a href="/examples/pages/router-demo/">router-demo</a>: the router end to end (outlet, loaders, typed query params, menus).</li>
+    <li><a href="/examples/pages/feature-directives.html">feature-directives.html</a>: <code>v-vc-command</code>, <code>v-vc-payload</code>, <code>v-vc-optimistic</code>, with ESM and an import map.</li>
+    <li><a href="/examples/pages/pattern-1-blade-cdn.html">pattern-1-blade-cdn.html</a>: a Blade-style page with the IIFE in a script tag.</li>
+    <li>sprinkled-blade: <a href="http://localhost:3001/">same origin</a>, the cart rendered into the page by its backend, or <a href="/examples/pages/sprinkled-blade/index.html">cross-origin</a>, the page served statically and talking to that backend.</li>
+  </ul>
+
+  <h2>Apps, each with its own dev server</h2>
+  <ul>
+    <li>vapor-sfc: <code>npm run dev -w examples/apps/vapor-sfc</code>, then the printed URL (default http://localhost:5173).</li>
+    <li>vapor-island-cart: <code>npm run dev -w examples/apps/vapor-island-cart</code>, then http://localhost:8889.</li>
+    <li>exo-astro: <code>npm run dev -w examples/apps/exo-astro</code>, then http://localhost:8890.</li>
+  </ul>
+
+  <p>The single-file snippets in <code>examples/snippets/</code> are type-checked, not run. The Laravel app is scaffolded by <code>examples/laravel/app/setup.sh</code> (its README).</p>
+</main>
+</body>
+</html>

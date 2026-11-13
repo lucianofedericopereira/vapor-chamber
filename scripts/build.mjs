@@ -20,6 +20,7 @@ import { build } from 'vite';
 import { transform } from 'esbuild';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { DEV_ESM_EXPR, DEV_ESM_SOURCE } from './dev-esm.mjs';
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 
@@ -131,7 +132,7 @@ function writeLicenseManifest() {
  * WHERE IT IS EMITTED. Once per importing module, never as a shared export. A
  * minifier folds DEV only inside the chunk that defines it: in a code-split
  * app, a chunk that IMPORTED the one shared constant kept every warning it
- * guards (measured on examples/vapor-island-cart, whose Cart chunk shipped
+ * guards (measured on examples/apps/vapor-island-cart, whose Cart chunk shipped
  * the whole probe-path hint, 4,718 -> 3,264 B raw). So every `./dev` import
  * from src resolves to its own module, which lands in its importer's chunk,
  * and no chunk of this build or a consumer's imports DEV from another. Both
@@ -144,9 +145,10 @@ function writeLicenseManifest() {
  * OUR build's answer in and silences every dev page again), so the modules
  * carry a placeholder and the expression is written in after bundling.
  */
-export const DEV_ESM_EXPR =
-  'typeof process !== "undefined" || import.meta.env?.DEV ? process.env.NODE_ENV !== "production" : false';
-export const DEV_ESM_SOURCE = `export const DEV = ${DEV_ESM_EXPR};\n`;
+//
+// The two constants live in ./dev-esm.mjs, so a reader of them (tests/dev-flag.test.ts)
+// does not run this build; re-exported here for any caller of this file.
+export { DEV_ESM_EXPR, DEV_ESM_SOURCE };
 
 const DEV_PLACEHOLDER = '__VC_DEV_ESM__';
 

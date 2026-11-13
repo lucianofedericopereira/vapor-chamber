@@ -148,7 +148,7 @@ step('size:check', (name) => {
  */
 step('lint', (name) => {
   const pieces = [
-    ['biome', ['check', 'src', 'tests', 'scripts', 'bin'], 'npx'],
+    ['biome', ['check', 'src', 'tests', 'scripts', 'bin', 'examples'], 'npx'],
     ['scripts/check-env-guards.mjs', [], 'node'],
     // The gate enumerates the pieces by hand, so a check wired into the npm
     // script is invisible to `npm run gate` until someone copies it across.

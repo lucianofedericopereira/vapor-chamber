@@ -260,6 +260,11 @@ export class StreamParser {
    * `decoder.decode()` contributes nothing, and `end()` runs - so this is the
    * same path, not a special case. `end()` still reports an unclosed structure
    * if the stream stops mid-value.
+   *
+   * A parse error is reported, never thrown. A callback that throws, or a
+   * read that fails, ends the stream as `for await` over the body does: the
+   * body is cancelled (the response stops downloading) and its lock released,
+   * then `stream()` rejects with that error.
    */
   async stream(response: Response): Promise<void> {
     if (!response.body) {
@@ -268,13 +273,22 @@ export class StreamParser {
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      this.write(decoder.decode(value, { stream: true }));
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        this.write(decoder.decode(value, { stream: true }));
+      }
+      this.write(decoder.decode());
+      this.end();
+    } catch (e) {
+      // The async iterator's `return` (Streams, ReadableStream async
+      // iteration): cancel, then release. A body already errored rejects
+      // the cancel: nothing to report beyond `e`.
+      reader.cancel(e).then(undefined, () => {});
+      reader.releaseLock();
+      throw e;
     }
-    this.write(decoder.decode());
-    this.end();
   }
 
   /** Current parser position (for pause/resume). */

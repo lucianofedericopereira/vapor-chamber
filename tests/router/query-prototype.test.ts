@@ -36,6 +36,7 @@ describe('parseQuery - prototype safety', () => {
     const query = parseQuery('?__proto__=a');
     expect(Object.getPrototypeOf(query)).toBe(null);
     expect(Object.hasOwn(query, '__proto__')).toBe(true);
+    // biome-ignore lint/suspicious/noProto: the pin is that a plain property read of `__proto__` finds the own key on the null-prototype query
     expect(query['__proto__' as keyof typeof query]).toBe('a');
   });
 

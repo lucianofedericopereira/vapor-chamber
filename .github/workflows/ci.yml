@@ -21,9 +21,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Jobs are split only where the install, the runner or the time budget
-# differs. macOS waits for `check`, so it runs only on a head already green on
-# Linux and repeats only the build and the tests. Node comes from .node-version
-# in every job: V8 shapes are under test, so a Node bump is a deliberate commit.
+# differs. The Node 24 job waits for `check`, so it runs only on a head already
+# green on Node 26 and repeats only the build and the tests. Node comes from
+# .node-version in every job but that one, which pins the other major
+# `engines` admits: V8 shapes are under test, so a Node bump is a deliberate
+# commit.
 permissions:
   contents: read
 
@@ -38,7 +40,7 @@ jobs:
     # stamp check. A pull request fails on stale generated files; a push to
     # main commits them instead. The local gate (scripts/gate.mjs) still fails
     # on any drift. `npm ci` builds dist/ through `prepare`.
-    name: check (Node 24, ubuntu)
+    name: check (Node 26, ubuntu)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -93,19 +95,21 @@ jobs:
             echo "::warning::Could not push the generated files. The next push to main regenerates them."
           fi
 
-  macos:
-    # The same build, both test projects and the size budgets on macOS, once
-    # Linux has passed: what an OS can change is the build and the tests, not
-    # the guards. Full suite, no coverage: the floors were gated above.
-    name: test (Node 24, macos)
+  node24:
+    # The same build, both test projects and the size budgets on Node 24, the
+    # other major `engines` admits, once Node 26 has passed: what a V8 can
+    # change is the build and the tests, not the guards. Full suite, no
+    # coverage: the floors were gated above. Pinned, not `24`: a Node bump is a
+    # commit (decisions.md, 2026-11-13: this job replaced the macOS one).
+    name: test (Node 24, ubuntu)
     needs: [check]
-    runs-on: macos-15
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version-file: .node-version
+          node-version: 24.22.2
           cache: npm
       - run: npm ci --workspaces=false --include-workspace-root
       - run: npm run test:run
@@ -208,10 +212,10 @@ jobs:
           retention-days: 14
 
   deploy-docs:
-    # Waits for check and macos (not for browser, examples or perf-ab); pushes
+    # Waits for check and node24 (not for browser, examples or perf-ab); pushes
     # to main only. Publishes the repository root as the Pages site.
     name: deploy docs
-    needs: [check, macos]
+    needs: [check, node24]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -66,6 +66,9 @@ export type Router<TName extends string = string> = {
    *  requiring it would have this type contradict the implementation. */
   install: (app: { provide: (key: symbol, value: unknown) => unknown }) => void;
   /** Cancels the navigation in flight, removes what `start()` installed (a
-   *  start still running installs nothing more) and disposes the history. */
+   *  start still running installs nothing more) and disposes the history.
+   *  What the router was still waiting on ends with it: a background refresh
+   *  lands nowhere and `isRevalidating` reads false, and a late failure
+   *  reaches no `onError` handler and sets no `lastError`. */
   dispose: () => void;
 };

@@ -294,25 +294,28 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult | null> {
   // shared failure, since each request marks its own (`silent`), and a mark
   // on one shared error reached every waiter (tests/silent-csrf-refresh.test.ts).
   if (_csrfRefreshPromise) return _csrfRefreshPromise;
-  _csrfRefreshPromise = (async () => {
-    try {
-      // Fetch the CSRF cookie endpoint so the backend issues a fresh
-      // XSRF-TOKEN cookie (Laravel Sanctum's `/sanctum/csrf-cookie` is the
-      // most common shape; other frameworks expose equivalent endpoints).
-      // Only fetch if cookieUrl is a non-empty string.
-      if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
-        try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
-      }
-      invalidateCsrfCache();
-      // Cookie FIRST here: the fetch above just made the backend set a fresh
-      // XSRF-TOKEN cookie, while the meta tag is still the stale one the page
-      // was rendered with. See readCsrfAfterRefresh.
-      return readCsrfAfterRefresh();
-    } finally {
-      _csrfRefreshPromise = null;
+  const refresh = (async () => {
+    // Fetch the CSRF cookie endpoint so the backend issues a fresh
+    // XSRF-TOKEN cookie (Laravel Sanctum's `/sanctum/csrf-cookie` is the
+    // most common shape; other frameworks expose equivalent endpoints).
+    // Only fetch if cookieUrl is a non-empty string.
+    if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
+      try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
     }
+    invalidateCsrfCache();
+    // Cookie FIRST here: the fetch above just made the backend set a fresh
+    // XSRF-TOKEN cookie, while the meta tag is still the stale one the page
+    // was rendered with. See readCsrfAfterRefresh.
+    return readCsrfAfterRefresh();
   })();
-  return _csrfRefreshPromise;
+  _csrfRefreshPromise = refresh;
+  // Cleared once it settles, written here and not in the body: with no cookie
+  // URL the body awaits nothing and finishes before the assignment above
+  // lands, so a `finally` there left a settled refresh stored for good (as
+  // idb.ts's open). tests/csrf-419-refresh.test.ts.
+  const done = (): void => { _csrfRefreshPromise = null; };
+  refresh.then(done, done);
+  return refresh;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,16 +441,24 @@ const transportFail = _failures('transport');
 /**
  * @internal - a request body as JSON, or the failure that says it cannot be
  * one: `transport:invalid:json` (a BigInt, a cycle; the platform's TypeError
- * is its cause). Nothing was sent, and `invalid` is never re-sent. Returned,
- * not thrown, so each caller settles it its own way. The client, postCommand
- * and every bridge encode through it (tests/invalid-json.test.ts).
+ * is its cause). A value with no JSON text (undefined, a function, a Symbol,
+ * a `toJSON` answering undefined) is the same failure with no cause:
+ * `JSON.stringify` answers undefined for it instead of throwing. Nothing was
+ * sent, and `invalid` is never re-sent. Returned, not thrown, so each caller
+ * settles it its own way. The client, postCommand and every bridge encode
+ * through it (tests/invalid-json.test.ts).
  */
 export function _encodeJson(value: unknown, url: string, action?: string): string | BusError {
+  // One failure for both: a throw is its cause; no text leaves `cause`
+  // undefined, which BusError does not set (failure.ts).
+  let text: string | undefined;
+  let cause: unknown;
   try {
-    return JSON.stringify(value);
+    text = JSON.stringify(value);
   } catch (e) {
-    return transportFail('invalid:json', `The request to "${url}" cannot be encoded as JSON.`, { action, context: { url }, cause: e });
+    cause = e;
   }
+  return text !== undefined ? text : transportFail('invalid:json', `The request to "${url}" cannot be encoded as JSON.`, { action, context: { url }, cause });
 }
 
 /**

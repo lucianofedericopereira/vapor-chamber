@@ -1,5 +1,5 @@
 // Workload for scripts/ab/ab.mjs (.probes/fixup-1-7-pickup.md, 3b): a navigation with routerFacts
-// on a bus, the shape examples/router-demo/index.html wires for its shell (the router's loading
+// on a bus, the shape examples/pages/router-demo/index.html wires for its shell (the router's loading
 // as a fact a `data-vc-router` element follows). Rows: nav_facts, a path navigation whose page
 // has a loader, routerFacts installed; nav_bare, the same router without it (the control: no
 // code of the change runs). Each call alternates two pages.

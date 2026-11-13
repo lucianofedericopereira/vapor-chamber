@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB brotli. Its graph reaches `vue`, and never the bus or the Vue probe (see "The bus is always an argument" below).
+<!-- vc:sizeStore -->6.0<!-- /vc:sizeStore --> KB brotli. Its graph reaches `vue`, and never the bus or the Vue probe (see "The bus is always an argument" below).
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';
@@ -314,8 +314,8 @@ with no handler.
   module global is the one thing that cannot give that, so defaulting to it would hand every
   request the same state.
 
-With the bus a mandatory argument, the store is <!-- vc:sizeStoreRaw -->16.0<!-- /vc:sizeStoreRaw --> KB minified
-(<!-- vc:sizeStore -->5.9<!-- /vc:sizeStore --> KB brotli), the `./store` row of
+With the bus a mandatory argument, the store is <!-- vc:sizeStoreRaw -->16.2<!-- /vc:sizeStoreRaw --> KB minified
+(<!-- vc:sizeStore -->6.0<!-- /vc:sizeStore --> KB brotli), the `./store` row of
 [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).[^first-draft] Its built entry's one external is `vue`, and
 no chunk in it is `chamber.js`, the bus or the root barrel.[^graph] What it holds:
 
@@ -453,7 +453,8 @@ and posts it on, and every other tab runs only what the lead posts.
   holds its own writes, and over the answer it runs them again and sends them. What the lead sent
   before its answer is in that answer, so it is not applied again.
 - A tab that leaves says so on `pagehide` and frees the lock. It asks again when the page comes
-  back from the back-forward cache.
+  back from the back-forward cache. A store disposed while its page stays open (a component that
+  held it unmounted) leaves the same way, so a tab left alone stops sending.
 - When the lead leaves, the browser grants the lock to a waiting tab. Every other tab asks it and
   sends its own writes again, so none is lost.
 - An undo stops at a state another tab sent, an answer or a server's state. The other tabs do not
@@ -525,6 +526,13 @@ when it unmounts.
 
 Called outside a scope, there is no lifetime to hook and nothing is counted. The caller owns
 `$dispose()`, the same contract as every other composable here.
+
+**On the server, the request owns a store.** A store a component creates during a server render
+is not counted against that component's scope: Vue 3.6 stops every component's scope when the
+render ends, before the request reads `storeStates`. It is pinned, as a store created outside a
+scope is, and goes with the request's bus.[^ssr-holder]
+
+[^ssr-holder]: `tests/ssr-store-states-components.test.ts`.
 
 `$dispose()` always finishes. A cleanup that throws, such as an app's own `share` closing its
 channel, is logged. The other cleanups still run and the store leaves the registry, so the next

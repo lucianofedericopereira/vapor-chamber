@@ -1,5 +1,5 @@
 /**
- * examples/feature-vite-hmr.ts imported for real, through the package self-link to dist/: its handler runs, and a hot re-run keeps the cart.
+ * examples/snippets/feature-vite-hmr.ts imported for real, through the package self-link to dist/: its handler runs, and a hot re-run keeps the cart.
  * Why: the store registers one handler per action, so one the example also registered by hand would be taken by whichever came last; a hot update must keep state.
  * Shows: its own handler runs with no overwrite warning; a re-run inside a marked update takes the cart with its items; outside one it starts empty; the bus is kept either way.
  * See: audit FVH-4.
@@ -8,13 +8,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // The mark vaporChamberHMR's shim sets from `vite:beforeUpdate` to `vite:afterUpdate`.
 const HOT = '__VAPOR_CHAMBER_HOT__';
-const example = '../../examples/feature-vite-hmr.ts';
+const example = '../../examples/snippets/feature-vite-hmr.ts';
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>)[HOT];
 });
 
-describe('examples/feature-vite-hmr.ts', () => {
+describe('examples/snippets/feature-vite-hmr.ts', () => {
   it('runs its own handler, with no overwrite warning (FVH-4)', async () => {
     const logs: string[] = [];
     const warns: string[] = [];

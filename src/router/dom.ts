@@ -75,7 +75,7 @@ export type RoutableTarget = { path: string; fullPath: string; pathname: string;
  * optimised differently by V8 and inflates the ratio. Prefer the harness's
  * printed table over any figure copied into prose, including this one.
  */
-const routableMemo = new WeakMap<HTMLAnchorElement, { href: string; target: RoutableTarget | null }>();
+const routableMemo = new WeakMap<HTMLAnchorElement, { href: string; base: string; target: RoutableTarget | null }>();
 
 /** Resolve an anchor's href to a base-relative fullPath, or null when the
  *  link is not ours (cross-origin, outside base, not a plain string href). */
@@ -84,11 +84,13 @@ function routableTarget(anchor: HTMLAnchorElement, base: string): RoutableTarget
   if (typeof href !== 'string') return null;
 
   const memo = routableMemo.get(anchor);
-  // `base` is fixed per router instance, so href alone settles validity.
-  if (memo !== undefined && memo.href === href) return memo.target;
+  // `href` and `base` together settle validity: `base` is fixed per router,
+  // but this memo is the module's, read by every router on the page and by
+  // stampActiveLinks' own callers (tests/router/dom.test.ts, two bases).
+  if (memo !== undefined && memo.href === href && memo.base === base) return memo.target;
 
   const target = parseRoutable(href, base);
-  routableMemo.set(anchor, { href, target });
+  routableMemo.set(anchor, { href, base, target });
   return target;
 }
 

@@ -1,7 +1,7 @@
 /**
  * A store replaced inside a hot update the Vite plugin marks starts from the state of the one it replaces.
  * Why: an edited store module re-runs and builds its store from state(), so every edit would lose the live state unless the update carries it by key, at every nesting level of plain objects.
- * Shows: the state carries across a scope-disposed store and a module-load takeover; keys match top-level and nested (added keys get their declared value, dropped keys go, app-added keys stay); non-keyed states carry as they are; another bus's store, an unmarked takeover and production carry nothing.
+ * Shows: the state carries across a scope-disposed store and a module-load takeover; keys match top-level and nested (added keys get their declared value, dropped keys go, app-added keys stay, one named __proto__ included: an own key, never the carried object's prototype); non-keyed states carry as they are; another bus's store, an unmarked takeover and production carry nothing.
  * See: log s36.77, tests/vapor/store-hmr.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -177,6 +177,26 @@ describe('a hot update matches nested keys too', () => {
     const d = marked(() => flat()(bus)) as unknown as { state: { value: unknown }; $dispose(): void };
     expect(d.state.value).toEqual({ k: 1 });
     for (const s of [a, b, c, d]) s.$dispose();
+    bus.dispose();
+  });
+
+  // An entry's key is external (an id from a server, a state parsed by JSON.parse): CONTRIBUTING, "External strings are never keys on {}".
+  it('an entry the app added under __proto__ carries as an own key, and the carried object keeps its prototype', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    const rows = () => defineChamberStore('rows', {
+      state: () => ({ byId: {} as Record<string, unknown> }),
+      reducers: { put: (s, [k, v]: [string, unknown]) => ({ ...s, byId: { ...s.byId, [k]: v } }) },
+    });
+    const a = rows()(bus);
+    a.put(['__proto__', { x: 1 }]);
+    expect(Object.hasOwn(a.state.value.byId, '__proto__')).toBe(true); // the reducer's computed key is an own key
+    const b = marked(() => rows()(bus));
+    const byId = b.state.value.byId;
+    expect(Object.hasOwn(byId, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(byId)).toBe(Object.prototype);
+    a.$dispose();
+    b.$dispose();
     bus.dispose();
   });
 

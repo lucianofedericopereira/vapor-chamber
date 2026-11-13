@@ -1,6 +1,6 @@
 // Workload for scripts/ab/ab.mjs: an app session, the question "does an app run slower on 1.32
 // than on 1.31" (.probes/machine.md, ORDERS for app-session). The shopping-cart example's app
-// (examples/shopping-cart.ts at each release) on a bus as pattern 2 builds it, through the Vue entry.
+// (examples/snippets/shopping-cart.ts at each release) on a bus as pattern 2 builds it, through the Vue entry.
 // One seeded list of 50 operations, varied products and quantities, run in order and again:
 // adds, updates, removes, local and sent queries, a sent save, a validation refusal, a failed
 // checkout, an undo, and a clear that ends each pass. Half the cart calls go through the store's

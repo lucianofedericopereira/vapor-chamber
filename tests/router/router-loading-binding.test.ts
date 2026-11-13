@@ -3,7 +3,7 @@
  * The router's loading and revalidating flags reach plain HTML as bus facts, and `data-vc-router` follows them without importing the router.
  * Why: a plain-HTML shell around the router's island would show no navigation loading or background refresh, or would keep reacting after unbind, if the flags did not reach the bus.
  * Shows: routerFacts emits routerLoading true then false around a loader; `data-vc-router="loading"` and `"revalidating"` toggle `vc-loading` with the flag; an unknown flag is unbound, warned in development and silent in production; after unbind and stop nothing is heard.
- * See: examples/router-demo/index.html
+ * See: examples/pages/router-demo/index.html
  */
 import { describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../../src/command-bus';

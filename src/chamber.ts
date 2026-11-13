@@ -6,6 +6,10 @@
  * created but never mounted (a sibling's render threw) has its scope stopped
  * on unmount, so a `useCommand().on()` listener does not
  * outlive `app.unmount()` (tests/never-mounted-disposal-fixture.test.ts).
+ * Also the scope's public `active`: in a scope already stopped (an async
+ * setup resumed after its component unmounted) Vue runs the cleanup at once,
+ * so a composable made there keeps nothing it is asked to register
+ * (`tryAutoCleanup`, tests/async-vapor-setup-fixture.test.ts).
  * `warnUnwired()` is the one production warning, for a Vue app whose
  * composables came from the root with nothing wired. The history is in
  * CHANGELOG.md.
@@ -26,7 +30,7 @@ import { _paceOf, pace, type PaceOption, type PacedOn } from './pace';
  * the three IIFE (<script>-tag) bundles, `false` in the ESM build.
  *
  * Declared inline rather than in a `.d.ts` so it travels with this module -
- * `examples/tsconfig.patterns.json` reaches this file through imports and
+ * `examples/snippets/tsconfig.patterns.json` reaches this file through imports and
  * would not pick up an ambient declaration from `src/`.
  *
  * Every call site guards with `typeof __VC_IIFE__ !== 'undefined'`, so the
@@ -685,15 +689,23 @@ export type { BusOption, ResultOn };
  * No-ops entirely when called outside any Vue scope (e.g. module init time,
  * plain async callbacks). Caller is responsible for calling `dispose()` in
  * those cases.
+ *
+ * Returns true when that scope is already stopped: an async `setup()` resumed
+ * after its component unmounted during the await, where `withAsyncContext`
+ * restores the stopped scope. Vue runs the cleanup at once there (3.6.0-rc.15,
+ * #16108; earlier, at the scope's `reset()` a microtask later), so the caller
+ * keeps nothing it is asked to register afterwards: nothing would release it
+ * (`tests/async-vapor-setup-fixture.test.ts`).
  */
-export function tryAutoCleanup(disposeFn: () => void): void {
+export function tryAutoCleanup(disposeFn: () => void): boolean {
   // Every composable passes through here, so this is where "Vue is on the
   // page but not wired" can be seen before anything silently degrades.
   warnUnwired();
 
-  if (_vueOnScopeDispose && _vueGetCurrentScope?.()) {
-    _vueOnScopeDispose(disposeFn);
-    return;
+  const scope = _vueOnScopeDispose && _vueGetCurrentScope?.();
+  if (scope) {
+    _vueOnScopeDispose!(disposeFn);
+    return scope.active === false;
   }
 
   if (
@@ -710,6 +722,22 @@ export function tryAutoCleanup(disposeFn: () => void): void {
       'one-off scripts, or anywhere you dispose manually. Logged once per module.'
     );
   }
+  return false;
+}
+
+/** What a composable created in a stopped scope returns from on(), register() or use(): nothing was kept. */
+export const _noop = (): void => {};
+
+/**
+ * pending() on a composable created in a stopped scope: the key's state as it
+ * is now, read through a handle released at once, so nothing stays holding a
+ * share of the bus's command state.
+ */
+export function _pendingOnce(bus: BaseBus, action: string, target?: unknown): Readonly<Signal<boolean>> {
+  const once = commandState(bus);
+  const flag = once.pending(action, target);
+  once.dispose();
+  return flag;
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +960,8 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
   // Held from the first pending() call, released with the composable.
   var state: CommandState | undefined;
   const listeners: Array<() => void> = [];
+  // Created in a scope already stopped: keep nothing (tryAutoCleanup).
+  let dead = false;
   const registered: Array<{ action: string; handler: Handler; opts?: RegisterOptions; off: (() => void) | null }> = [];
 
   function direct<A extends keyof SharedCommandMap & string>(
@@ -954,6 +984,7 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
 
   /** In flight for this key, bus-wide (`commandState`'s `pending`). */
   function pending<A extends keyof SharedCommandMap & string>(action: A, target?: TargetOf<SharedCommandMap, A>): Readonly<Signal<boolean>> {
+    if (dead) return _pendingOnce(bus, action, target);
     if (state === undefined) {
       state = commandState(bus);
       listeners.push(state.dispose);
@@ -966,9 +997,10 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
     handler: (cmd: Command<A, TargetOf<SharedCommandMap, A>, PayloadOf<SharedCommandMap, A>>) => ResultOf<SharedCommandMap, A> | Promise<ResultOf<SharedCommandMap, A>>,
     opts?: RegisterOptions,
   ): () => void {
+    if (dead) return _noop;
     // Kept so a KeepAlive deactivation can release it and an activation take
     // it back (below); the returned function removes it for good.
-    const reg = { action: action as string, handler: handler as Handler, opts, off: bus.register(action, handler as Handler, opts) as (() => void) | null };
+    const reg ={ action: action as string, handler: handler as Handler, opts, off: bus.register(action, handler as Handler, opts) as (() => void) | null };
     registered.push(reg);
     const unregister = (): void => {
       reg.off?.();
@@ -981,6 +1013,7 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
   }
 
   function on(pattern: string, listener: (cmd: Command, result: CommandResult) => void): () => void {
+    if (dead) return _noop;
     const unsub = bus.on(pattern, listener);
     listeners.push(unsub);
     return unsub;
@@ -993,6 +1026,15 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
 
   function dispose() {
     disposeAll(listeners);
+  }
+
+  // The scope's own end also marks the composable dead: one made before an
+  // `await` whose component unmounted during it would otherwise keep what the
+  // setup registers after it, with nothing left to release it. A dispose()
+  // by hand does not (tests/async-vapor-setup-fixture.test.ts).
+  function release() {
+    dead = true;
+    dispose();
   }
 
   // A page cached by KeepAlive releases its handlers while it is off screen and
@@ -1013,7 +1055,7 @@ export function useCommand<B extends BaseBus = CommandBus, D extends number | un
     },
   );
 
-  tryAutoCleanup(dispose);
+  dead = tryAutoCleanup(release);
 
   return { dispatch, pending, register, on, emit, dispose };
 }
@@ -1178,6 +1220,8 @@ export function useCommandQuery<B extends BaseBus = CommandBus>(options?: BusOpt
 export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: string, options?: BusOption<B>) {
   const bus = resolveBus(options?.bus);
   const cleanups: Array<() => void> = [];
+  // Created in a scope already stopped: keep nothing (tryAutoCleanup).
+  let dead = false;
 
   // camelCase namespace join ('cart' + 'add' -> 'cartAdd'), memoised per group.
   //
@@ -1223,18 +1267,21 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
   }
 
   function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
+    if (dead) return _noop;
     const unregister = bus.register(prefixed(action), handler, opts);
     cleanups.push(unregister);
     return unregister;
   }
 
   function use(plugin: PluginParts): () => void {
+    if (dead) return _noop;
     const remove = bus.use(plugin);
     cleanups.push(remove);
     return remove;
   }
 
   function on(pattern: string, listener: Listener): () => void {
+    if (dead) return _noop;
     // Translate wildcard to namespaced: '*' -> 'cart*', 'add' -> 'cartAdd'
     // `prefixed` keeps a trailing `*`, so `'*'` becomes the namespace's prefix pattern.
     const namespacedPattern = prefixed(pattern);
@@ -1247,7 +1294,13 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
     disposeAll(cleanups);
   }
 
-  tryAutoCleanup(dispose);
+  // The scope's own end marks it dead too, as useCommand's `release`.
+  function release() {
+    dead = true;
+    dispose();
+  }
+
+  dead = tryAutoCleanup(release);
 
   return { dispatch, query, emit, register, use, on, namespace, dispose };
 }

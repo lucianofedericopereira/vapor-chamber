@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/ssr';
 
 ### liveStores
 
-**Function** - [src/ssr.ts:108](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L108)
+**Function** - [src/ssr.ts:114](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L114)
 
 ```ts
 liveStores(bus: BaseBus) => Array<ChamberStore<any, any>>
@@ -33,7 +33,7 @@ for (const store of liveStores(bus)) store.$reset();
 
 ### seedStores
 
-**Function** - [src/ssr.ts:132](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L132)
+**Function** - [src/ssr.ts:138](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L138)
 
 ```ts
 seedStores(bus: BaseBus, states: Record<string, unknown>) => void
@@ -53,7 +53,7 @@ seedStores(getCommandBus(), window.__VAPOR_STATES__);
 
 ### serializeForScript
 
-**Function** - [src/ssr.ts:65](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L65)
+**Function** - [src/ssr.ts:68](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L68)
 
 ```ts
 serializeForScript(value: unknown) => string
@@ -71,7 +71,7 @@ go into the page.
 
 ### storeStates
 
-**Function** - [src/ssr.ts:81](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L81)
+**Function** - [src/ssr.ts:84](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L84)
 
 ```ts
 storeStates(bus: BaseBus) => Record<string, unknown>

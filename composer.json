@@ -5,7 +5,7 @@
   "license": "LGPL-2.1-only",
   "require": {
     "php": "^8.3",
-    "laravel/framework": "^13.0"
+    "laravel/framework": "^13.42"
   },
   "autoload": {
     "psr-4": {

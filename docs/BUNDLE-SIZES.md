@@ -17,7 +17,7 @@ external. **Read this carefully:** the shared command-bus core (6.1 KB brotli on
 included in *every* row, so the rows are **not additive** - importing two exports does not cost
 their sum (the core is shared once). `.` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just `createCommandBus`
-from it is 6.1 KB brotli, not 48.7 KB).
+from it is 6.1 KB brotli, not 49.0 KB).
 
 **brotli vs first load.** `brotli` joins every chunk of the build into one measurement, the
 historical figure and the one to compare against older releases. `first load` and `on demand`
@@ -28,15 +28,15 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|
-| `.` | 169.8 | 48.7 | 48.7 | - |
-| `./vue` | 170.2 | 48.9 | 48.9 | - |
-| `./vapor` | 170.6 | 49.0 | 49.0 | - |
-| `./transports` | 34.9 | 12.1 | 12.1 | - |
+| `.` | 170.3 | 49.0 | 49.0 | - |
+| `./vue` | 170.7 | 49.0 | 49.0 | - |
+| `./vapor` | 171.1 | 49.1 | 49.1 | - |
+| `./transports` | 35.0 | 12.1 | 12.1 | - |
 | `./directives` | 28.7 | 9.0 | 9.0 | - |
 | `./vite` | 6.1 | 2.5 | 2.5 | - |
-| `./vitest` | 181.1 | 52.2 | 3.9 | 48.7 |
+| `./vitest` | 181.7 | 52.3 | 3.9 | 49.0 |
 | `./vitest/pure` | 9.0 | 3.1 | 3.1 | - |
-| `./vitest/mcp` | 42.3 | 13.7 | 13.7 | - |
+| `./vitest/mcp` | 42.6 | 13.8 | 13.8 | - |
 | `./transitions` | 23.0 | 7.3 | 7.3 | - |
 | `./transitions/vapor` | 20.7 | 6.6 | 6.6 | - |
 | `./ssr` | 2.5 | 1.0 | 1.0 | - |
@@ -45,22 +45,22 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./standard-schema` | 2.6 | 1.1 | 1.1 | - |
 | `./alien-signals` | 0.2 | 0.1 | 0.1 | - |
 | `./reactive` | 1.5 | 0.5 | 0.5 | - |
-| `./outbox` | 16.4 | 6.1 | 6.1 | - |
-| `./mcp` | 4.3 | 1.8 | 1.8 | - |
+| `./outbox` | 16.5 | 6.1 | 6.1 | - |
+| `./mcp` | 4.5 | 1.9 | 1.9 | - |
 | `./devtools` | 0.1 | 0.1 | 0.1 | - |
-| `./stream-parser` | 6.6 | 1.9 | 1.9 | - |
-| `./store` | 16.0 | 5.9 | 5.9 | - |
+| `./stream-parser` | 6.7 | 1.9 | 1.9 | - |
+| `./store` | 16.2 | 6.0 | 6.0 | - |
 | `./store/core` | 15.9 | 5.9 | 5.9 | - |
-| `./router` | 33.4 | 11.3 | 11.1 | 0.3 |
+| `./router` | 33.7 | 11.4 | 11.3 | 0.3 |
 | `./router/vdom` | 1.5 | 0.7 | 0.7 | - |
 | `./router/vapor` | 1.5 | 0.7 | 0.7 | - |
-| `./router/remote` | 17.5 | 6.5 | 6.5 | - |
-| `./router-fetch` | 18.5 | 6.9 | 6.9 | - |
-| `./iife` | 96.7 | 30.0 | 30.0 | - |
-| `./iife-core` | 69.8 | 21.8 | 21.8 | - |
-| `./iife-elements` | 72.5 | 22.7 | 22.7 | - |
+| `./router/remote` | 17.6 | 6.6 | 6.6 | - |
+| `./router-fetch` | 18.6 | 6.9 | 6.9 | - |
+| `./iife` | 97.0 | 30.1 | 30.1 | - |
+| `./iife-core` | 69.9 | 21.8 | 21.8 | - |
+| `./iife-elements` | 72.5 | 22.6 | 22.6 | - |
 | `core: createCommandBus alone` | 19.5 | 6.1 | 6.1 | - |
-| `consumer: createAsyncCommandBus + logger + httpTransport` | 41.5 | 13.4 | 13.4 | - |
+| `consumer: createAsyncCommandBus + logger + httpTransport` | 41.6 | 13.4 | 13.4 | - |
 
 ## Vapor wiring, Vue bundled
 
@@ -74,10 +74,10 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 
 | step (rows after the first are deltas) | min KB | brotli KB |
 |---|--:|--:|
-| `Vapor wiring: hand-wired createVaporApp` | 47.9 | 16.3 |
+| `Vapor wiring: hand-wired createVaporApp` | 49.0 | 16.7 |
 | `vapor-chamber/vapor over that` | 4.4 | 1.4 |
 | `+ defineVaporCustomElement` | 6.9 | 1.9 |
-| `+ vaporInteropPlugin` | 73.0 | 23.1 |
+| `+ vaporInteropPlugin` | 74.4 | 23.5 |
 
 ## For comparison
 
@@ -87,33 +87,33 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 
 ## Example snippets
 
-One row per top-level `examples/*.ts` (found by glob), each bundled the way the ESM rows are: a
+One row per `examples/snippets/*.ts` (found by glob), each bundled the way the ESM rows are: a
 Vite production build of the file itself, `vue` external, DEV folded. The row is the snippet's
 own code plus the part of the library it imports. The Vite apps report their own `vite build`
-sizes. Left out: `feature-vite-hmr.ts` (a Vite config that imports vite, not a browser bundle); `feature-vite-wire.ts` (a Vite config that imports vite and @vitejs/plugin-vue, not a browser bundle); `pattern-2-laravel-vite.ts` (imports App.vue, a page the repo does not carry); `pattern-3-inertia.ts` (imports @inertiajs/vue3 and page files the repo does not carry); `pattern-4-nextjs.tsx` (a React file, and the repo has no React); `pattern-6-vapor-router.ts` (imports .vue pages the repo does not carry); `vite.base.ts` (the shared Vite config of the Vue apps, not a browser bundle).
+sizes. Left out: `feature-vite-hmr.ts` (a Vite config that imports vite, not a browser bundle); `feature-vite-wire.ts` (a Vite config that imports vite and @vitejs/plugin-vue, not a browser bundle); `pattern-2-laravel-vite.ts` (imports App.vue, a page the repo does not carry); `pattern-3-inertia.ts` (imports @inertiajs/vue3 and page files the repo does not carry); `pattern-4-nextjs.tsx` (a React file, and the repo has no React); `pattern-6-vapor-router.ts` (imports .vue pages the repo does not carry).
 
 | example | min KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|
-| `examples/async-api.ts` | 29.7 | 9.5 | 9.5 | - |
-| `examples/custom-plugins.ts` | 22.2 | 7.0 | 7.0 | - |
-| `examples/feature-command-group.ts` | 23.6 | 7.5 | 7.5 | - |
-| `examples/feature-cross-tab-sync.ts` | 35.6 | 11.5 | 11.5 | - |
-| `examples/feature-error-boundary.ts` | 44.4 | 13.3 | 13.3 | - |
-| `examples/feature-outbox.ts` | 54.0 | 17.4 | 17.4 | - |
-| `examples/feature-persistence.ts` | 32.2 | 10.4 | 10.4 | - |
-| `examples/feature-retry.ts` | 45.9 | 14.7 | 14.7 | - |
-| `examples/feature-store.ts` | 61.3 | 19.8 | 19.8 | - |
-| `examples/feature-transitions.ts` | 38.8 | 11.7 | 11.7 | - |
-| `examples/feature-transports.ts` | 63.8 | 20.6 | 20.6 | - |
-| `examples/form-validation.ts` | 21.5 | 6.8 | 6.8 | - |
-| `examples/pattern-5-filament.ts` | 65.3 | 21.1 | 21.1 | - |
-| `examples/realtime-search.ts` | 23.8 | 7.5 | 7.5 | - |
-| `examples/shopping-cart.ts` | 35.3 | 11.4 | 11.4 | - |
+| `examples/snippets/async-api.ts` | 29.7 | 9.5 | 9.5 | - |
+| `examples/snippets/custom-plugins.ts` | 22.2 | 7.0 | 7.0 | - |
+| `examples/snippets/feature-command-group.ts` | 23.7 | 7.5 | 7.5 | - |
+| `examples/snippets/feature-cross-tab-sync.ts` | 35.8 | 11.5 | 11.5 | - |
+| `examples/snippets/feature-error-boundary.ts` | 44.5 | 13.4 | 13.4 | - |
+| `examples/snippets/feature-outbox.ts` | 54.0 | 17.4 | 17.4 | - |
+| `examples/snippets/feature-persistence.ts` | 32.4 | 10.4 | 10.4 | - |
+| `examples/snippets/feature-retry.ts` | 45.9 | 14.8 | 14.8 | - |
+| `examples/snippets/feature-store.ts` | 61.5 | 19.9 | 19.9 | - |
+| `examples/snippets/feature-transitions.ts` | 38.9 | 11.7 | 11.7 | - |
+| `examples/snippets/feature-transports.ts` | 64.0 | 20.7 | 20.7 | - |
+| `examples/snippets/form-validation.ts` | 21.5 | 6.8 | 6.8 | - |
+| `examples/snippets/pattern-5-filament.ts` | 65.4 | 21.2 | 21.2 | - |
+| `examples/snippets/realtime-search.ts` | 23.8 | 7.5 | 7.5 | - |
+| `examples/snippets/shopping-cart.ts` | 35.4 | 11.4 | 11.4 | - |
 
 ## IIFE variants (`<script>` drop-ins)
 
 | variant | min KB | brotli KB |
 |---|--:|--:|
-| `vapor-chamber (full)` | 96.2 | 29.9 |
+| `vapor-chamber (full)` | 96.6 | 30.0 |
 | `vapor-chamber-core` | 69.8 | 21.8 |
 | `vapor-chamber-elements` | 72.2 | 22.6 |

@@ -2594,8 +2594,10 @@ const _SYM_DISPOSE: symbol = ((Symbol as any).dispose ??= Symbol());
  * synchronously before returning - same observable effect as never
  * subscribing, matches DOM `addEventListener`, no separate pre-check needed
  * in `on()`. Cold path - runs once per subscription, never touches dispatch.
+ * @internal Exported for the test bus, whose on()/once() must answer as these
+ * do (src/testing.ts, tests/test-bus-parity.test.ts).
  */
-function finalizeOff(off: () => void, signal?: AbortSignal): () => void {
+export function _finalizeOff(off: () => void, signal?: AbortSignal): () => void {
   if (signal) {
     const raw = off;
     off = () => { signal.removeEventListener('abort', off); raw(); };
@@ -2620,7 +2622,7 @@ function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: Liste
     // WildcardEntry.
     const entry: WildcardEntry = { pattern, prefix, listener, off: false };
     s.wildcardListeners.push(entry);
-    return finalizeOff(() => {
+    return _finalizeOff(() => {
       if (entry.off) return;
       entry.off = true;
       s.wildcardListeners = s.wildcardListeners.filter((e) => e !== entry);
@@ -2630,7 +2632,7 @@ function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: Liste
   let bucket = s.exactListeners.get(pattern);
   if (bucket === undefined) { bucket = []; s.exactListeners.set(pattern, bucket); }
   bucket.push(entry);
-  return finalizeOff(() => {
+  return _finalizeOff(() => {
     if (entry.off) return;
     entry.off = true;
     // Present: every path that drops a bucket marks its entries off first.

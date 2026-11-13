@@ -3,7 +3,7 @@
  * `v-vc-command` on server markup the client disagrees with, hydrated by `createVaporSSRApp`.
  * Why: the app the server rendered and the app that hydrates can differ, and a control that shows one label and dispatches another, or a second button left behind by recovery, is silent; the user presses what they read.
  * Shows: a `v-if` chain whose branches look alike renders the client's branch in the server's range, with one mismatch warning, the client's label and the client's action; the same branch is adopted with no warning; a first root that differs is replaced, also over a whole server range, with one button left and the directive run once.
- * See: vuejs/core#16044, vuejs/core#16049, vuejs/core#16052, vuejs/core#16067, tests/vapor-hydration-fixture.test.ts
+ * See: vuejs/core#16044, vuejs/core#16049, vuejs/core#16052, vuejs/core#16067, vuejs/core#16088, tests/vapor-hydration-fixture.test.ts
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -119,7 +119,7 @@ describe('v-vc-command when the server and the client disagree', () => {
   });
 
   it('a first root that differs is replaced, and the block behind it is the client one', async () => {
-    const html = await renderOnTheServer('<p>a</p><button>go</button>', {});
+    const html = await renderOnTheServer('<p>a</p><button>go</button>', {}, true);
     expect(await hydrate(html, '<div>a</div><button v-vc-command="act">go</button>', { act: 'one' })).toMatchObject({
       labels: ['go'],
       adopted: false,
@@ -130,7 +130,7 @@ describe('v-vc-command when the server and the client disagree', () => {
   });
 
   it('a server range under the cursor goes as one unit: one button left', async () => {
-    const html = await renderOnTheServer('<template v-if="on"><i>1</i><i>2</i></template><button>go</button>', { on: true });
+    const html = await renderOnTheServer('<template v-if="on"><i>1</i><i>2</i></template><button>go</button>', { on: true }, true);
     expect(html).toContain('<i>1</i><i>2</i>');
     expect(await hydrate(html, '<b>1</b><button v-vc-command="act">go</button>', { act: 'one' })).toMatchObject({
       labels: ['go'],

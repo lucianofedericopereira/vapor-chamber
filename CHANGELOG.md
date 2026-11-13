@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+Aligned with Vue 3.6.0-rc.15, and developed and tested on Node 26. rc.15 runs a cleanup armed in a stopped scope at once, which left two composables' registrations behind. Reading each module against its commits found fifteen older defects, and six more were proved by failing tests through the public API.
+
+- Changed the peer range to `>=3.5.45 || >=3.6.0-rc.15` for `vue` and `@vue/reactivity`. The Vue 3.5 floor rises from 3.5.0 to 3.5.45, the first 3.5 release with the `out-in` fix below. Migrate: an app on Vue 3.5 below 3.5.45 updates Vue.
+- Changed `engines.node` to `>=24.5.0`, in the package and in `examples/apps/exo-astro`: a floor, so a later Node is not refused for being later. Development runs on Node 26, CI tests Node 26 and Node 24 on Linux, and the CI jobs are now `check (Node 26, ubuntu)` and `test (Node 24, ubuntu)`; the macOS job is gone. A branch protection rule that requires the old check names must be updated.
+- Changed the Composer package's requirement to `laravel/framework ^13.42`, the newest release, from `^13.0`. PHP stays `^8.3`, what Laravel 13.42 asks. Migrate: an app on Laravel 13 below 13.42 updates Laravel.
+- Fixed `useCommand`, `useCommandGroup` and `useVaporAsyncCommand` made in an async `<script setup>` after its component unmounted during the await. On rc.15 they were disposed at creation, and the next `on()` or `register()` stayed on the bus. Made in a stopped scope, they now keep nothing. A `dispose()` called by hand is unchanged.
+- Fixed `routerFacts` made in a stopped scope. On rc.15 `routerLoading` and `routerRevalidating` kept emitting for the router's life, and the other two never did. It now subscribes to nothing there.
+- Removed, through Vue: the limitation that a vDOM `<Transition mode="out-in">` with the transition bridge needs an async bus. On a sync bus it now settles as the default mode does, in every Vue the peer range admits (vuejs/core#15727, fixed by #11824 in 3.5.45 and 3.6.0-rc.15).
+- Fixed `storeStates` losing a store whose id is `__proto__`.
+- Fixed the router reading a route param or `load` placeholder named like an `Object.prototype` member, such as `constructor`, off the prototype. An absent one built the function's source into a link or a loader URL instead of failing with `router:missing:param`.
+- Fixed a 419 CSRF refresh with `csrfCookieUrl: ''` staying stored: every later 419, on any client, got the first refresh's token.
+- Fixed a link parsed under one router base keeping that answer under another. A router on `/b`, or `stampActiveLinks('/b', ...)`, neither stamped nor intercepted a `/b` link first parsed under `/a`.
+- Fixed `createTestBus()`'s `on()` and `once()` ignoring `{ signal }`, and their unsubscribe having no `Symbol.dispose`, unlike the real buses.
+- Fixed `serveMcpStdio` serving every line of one chunk past `maxInFlight`, and decoding a UTF-8 character split across two chunks as U+FFFD.
+- Fixed `createMcpHandler` answering a tool whose value is a function or a Symbol with a text block that has no `text`. It is now the not-JSON failure, as a BigInt is.
+- Fixed a second `createEchoBridge().install()` binding every event again on laravel-echo's cached channels, so each broadcast reached both buses. It now replaces the first, as the SSE bridge's does.
+- Fixed the HTTP response cache evicting a live entry when a refresh re-set a key it held at 50 entries, and keeping the refreshed key the oldest.
+- Fixed a hot update losing a state entry named `__proto__` (development only).
+- Fixed a shared store disposed while its page stays open leaving without a `bye`: the lead kept it as a peer and posted every write to no one.
+- Fixed a disposed outbox flushing on its own. A send answered with a `Retry-After` after `dispose()`, or a stored queue that landed after it, sent records the next tab takes over.
+- Fixed `createWorkflow().run()` running steps pushed to the given array after creation, which `steps` does not list.
+- Fixed `StreamParser.stream()` leaving the response body locked and downloading after a callback threw or a read failed. It now cancels the body and releases its lock, as `for await` over it does.
+- Fixed `storeStates(bus)` after `renderToString` missing, on Vue 3.6, the stores components created: Vue stops every component's scope when a server render ends. A store created during a server render now belongs to the request and goes with its bus.
+- Fixed `useCommand`, `useCommandGroup` and `useVaporAsyncCommand` created before an `await` keeping what the setup registered after it, when the component unmounted during the await.
+- Fixed `postCommand(url, undefined)` rejecting with `undefined`, and throwing synchronously with `silent: true`. A body with no JSON text (undefined, a function, a `toJSON` answering undefined) is `transport:invalid:json`, as a BigInt is, and the client's `post()` of one no longer sends a JSON request with no body.
+- Fixed `vc-vitest-mcp` exiting when a coverage run cannot start; the call answers `test:missing:coverage`. `disposeAsync()` also ends a coverage run in progress.
+- Fixed manual chapter 10's reason not to alias `vue` to `vue.runtime.esm-bundler.js`: on rc.15 that entry loads, but it is a second module and a Vapor app cannot mount through it.
+- Fixed `router.push({ path, replace: true })` pushing. `RouteLocationRaw` declares `replace`, and nothing read it: the same for `{ name, replace: true }`, a query-only push, and a guard's redirect returning one. It now replaces the current history entry, as `router.replace()` does.
+- Fixed `router.dispose()` leaving the router's late work running. A background refresh a loader reported through `ctx.revalidate` still patched `currentRoute` after it, and `isRevalidating` stayed true; a remote route table failing after it reached the `onError` handlers and `lastError`. They now end with `dispose()`.
+- Changed the examples' layout, grouped by kind: `examples/apps/` (vapor-sfc, vapor-island-cart, exo-astro), `examples/pages/` (router-demo, sprinkled-blade, feature-directives.html, pattern-1-blade-cdn.html), `examples/laravel/` (`app/`, `backend/`), `examples/snippets/` and `examples/shared/`. The docs link the new paths.
+- Added `npm run examples`: one Vite server at `http://localhost:3000/` with an index of the no-build pages, each sent as it is on disk with its mock API, and sprinkled-blade's backend on 3001. The apps keep their own `npm run dev`.
+- Changed the examples to share one layout sheet, `examples/shared/base.css`; each page keeps its own `vc-*` and `aria-disabled` rules. The Laravel views link `/css/base.css`, which `setup.sh` copies: a view copied before this needs that file too.
+- Fixed router-demo's diagnostic line naming a query its active-link stamps were not taken at. The stamps follow the path alone, and the line now names the path.
+- Changed the size budgets of the IIFE variants to 98,868 / 30,711, 71,520 / 22,367 and 73,969 / 23,111 raw / brotli, and the Blade consumer to 13,788 brotli. The consumer moved with no code change: rolldown 1.2.19 orders `dist`'s imports differently.
+- Updated the development dependencies: Vitest 5.1.0, Vite 8.3.8, `@vitejs/plugin-vue` 6.0.11, Playwright 1.65.0, Biome 2.6.7, the Vue 3.5 test copy to 3.5.45, and patch releases.
+- Changed the compiler that emits the declaration files to TypeScript 7.0.2. The JavaScript is byte-identical; five `.d.ts` files list union members, `Pick` keys and optional properties in another order, which changes no type, and a strict consumer of every entry type-checks under TypeScript 6 and 7. TypeScript 6 stays for the compiler API and `vue-tsc` ([docs/typescript.md](docs/typescript.md)).
+
 ## v1.35.1 - 2026-11-08
 
 A patch: an optimistic store's lost rollback is reported, and the router guide catches up with the Vapor outlet's `view` slot.

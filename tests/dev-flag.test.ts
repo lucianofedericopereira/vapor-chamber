@@ -2,10 +2,16 @@
  * src/dev.ts: the DEV constant's resolution paths, and the expression the ESM build emits in its place.
  * Why: DEV is one expression whose paths only exercising can tell apart, vitest defines no __VC_DEV__, and the ESM expression lives in a build script coverage cannot see.
  * Shows: the __VC_DEV__ define beats NODE_ENV; the fallback reads NODE_ENV and survives no `process`; the ESM expression folds, agrees, is false with no bundler and true under a dev server.
- * See: scripts/build.mjs, scripts/check-env-guards.mjs, tests/dev-esm-consumers.test.ts.
+ * See: scripts/build.mjs, scripts/dev-esm.mjs, scripts/check-env-guards.mjs, tests/dev-esm-consumers.test.ts.
  */
 
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { requireDist } from './require-dist';
+
+// The no-build pin below reads dist/index.js.
+requireDist(existsSync(resolve(process.cwd(), 'dist/index.js')));
 
 /** DEV is evaluated once at module scope, so each case re-imports it after arranging globals. */
 async function freshDEV(): Promise<boolean> {
@@ -73,8 +79,18 @@ describe('DEV - the expression the ESM build emits', () => {
   };
 
   // The first import of scripts/build.mjs pulls esbuild through the coverage transform: slow, not what this asserts.
+  // The constants now come from scripts/dev-esm.mjs: importing build.mjs RAN the build, so every run rewrote
+  // dist/ while other tests read it (a consumer build saw a half-written dist/: a missing export; log 36.F58).
+  it('reading the expression builds nothing: dist/ is left as it is', async () => {
+    const built = () => statSync(resolve(process.cwd(), 'dist/index.js')).mtimeMs;
+    const before = built();
+    const { DEV_ESM_SOURCE } = await import('../scripts/dev-esm.mjs');
+    expect(DEV_ESM_SOURCE).toContain('export const DEV = ');
+    expect(built()).toBe(before);
+  });
+
   it('is a bare, foldable expression - no `__VC_DEV__`, both arms false under a production define', async () => {
-    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    const { DEV_ESM_SOURCE } = await import('../scripts/dev-esm.mjs');
     expect(DEV_ESM_SOURCE).not.toContain('__VC_DEV__');
     expect(DEV_ESM_SOURCE).toContain('process.env.NODE_ENV');
     // The guard that keeps a no-bundler page safe, and the arm a dev page passes on.
@@ -86,14 +102,14 @@ describe('DEV - the expression the ESM build emits', () => {
   });
 
   it('agrees with src/dev.ts wherever `process` exists', async () => {
-    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    const { DEV_ESM_SOURCE } = await import('../scripts/dev-esm.mjs');
     expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'production' } }, {})).toBe(false);
     expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'development' } }, {})).toBe(true);
     expect(evaluate(DEV_ESM_SOURCE, { env: {} }, {})).toBe(true);
   });
 
   it('a page with no `process`: false with no bundler, true under a dev server', async () => {
-    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    const { DEV_ESM_SOURCE } = await import('../scripts/dev-esm.mjs');
     // No bundler: nothing substituted, no import.meta.env. False, and it must
     // not throw - the whole point of scripts/check-env-guards.mjs.
     expect(() => evaluate(DEV_ESM_SOURCE, undefined, {})).not.toThrow();

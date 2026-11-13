@@ -15,6 +15,7 @@ import {
   tryAutoCleanup,
   tryKeepAliveHooks,
   untracked,
+  _pendingOnce,
   getVaporAppFn,
   getVaporInteropRef,
   getDefineVaporCustomElementFn,
@@ -306,7 +307,8 @@ export function defineVaporCommand<B extends BaseBus = CommandBus, D extends num
  * template as a render closure, and it registers with the NEAREST `<Suspense>`.
  * Composables called after the `await` - this one, `useCommand()` - arm their
  * cleanup on the restored component scope, including when the app unmounts
- * during the await. Pinned by tests/async-vapor-setup-fixture.test.ts.
+ * during the await. Called before it, they keep nothing the setup registers
+ * after the app unmounted. Pinned by tests/async-vapor-setup-fixture.test.ts.
  *
  * @example
  * // In a <script setup vapor> component under <Suspense>:
@@ -319,6 +321,8 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
   const bus: any = resolveBus(asyncBus as BaseBus | undefined);
   // Held from the first pending() call, released with the composable.
   var state: CommandState | undefined;
+  // Its scope ended (already stopped at creation, or since): hold nothing.
+  let dead = false;
 
   // Intentionally hand-rolled, NOT routed through chamber.ts's runCommand. A
   // single async/await is ~1.2x leaner on the dispatch wrapper than a
@@ -339,6 +343,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
 
   /** In flight for this key, bus-wide (`commandState`'s `pending`). */
   function pending(action: string, target?: unknown): Readonly<Signal<boolean>> {
+    if (dead) return _pendingOnce(bus, action, target);
     return (state ??= commandState(bus)).pending(action, target);
   }
 
@@ -347,7 +352,15 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
     state = undefined;
   }
 
-  tryAutoCleanup(dispose);
+  // The scope's own end marks it dead too, as useCommand's `release`: made
+  // before an `await` and unmounted during it, a later pending() holds
+  // nothing. A dispose() by hand does not.
+  function release() {
+    dead = true;
+    dispose();
+  }
+
+  dead = tryAutoCleanup(release);
 
   return { dispatch, pending, dispose };
 }

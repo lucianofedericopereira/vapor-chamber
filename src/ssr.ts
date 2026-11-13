@@ -13,7 +13,10 @@
  * server that renders requests concurrently creates a bus per request: it
  * provides it to that request's app, and each store is created on it
  * (`useCart(bus)`). Its stores, and so its states, are that request's alone
- * (tests/ssr-per-request-bus.test.ts, tests/ssr-store-states.test.ts).
+ * (tests/ssr-per-request-bus.test.ts, tests/ssr-store-states.test.ts). A
+ * store a component creates during the render is the request's too, not the
+ * component's, so `storeStates` after `renderToString` reads it (src/store.ts,
+ * tests/ssr-store-states-components.test.ts).
  *
  * The HTTP client has the same rule: its cache and in-flight dedupe map live
  * in `createHttpClient()`'s closure, and while the cache key holds the
@@ -79,7 +82,10 @@ type Entry = RegistryEntry;
  * const states = storeStates(bus); // { cart: { items: [...] }, user: { ... } }
  */
 export function storeStates(bus: BaseBus): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+  // Store ids come from outside (../dict). `Object.fromEntries` defines each as
+  // an own key, an id `__proto__` included, on the plain object returned, as
+  // http.ts returns its headers: no write goes through the inherited setter.
+  const out: Array<[string, unknown]> = [];
   const registry = _busStores.get(bus)?.entries as Map<string, Entry> | undefined;
   if (registry !== undefined) {
     for (const [id, entry] of registry) {
@@ -89,10 +95,10 @@ export function storeStates(bus: BaseBus): Record<string, unknown> {
       // `coalesce` holds lands first, so one made this tick is read.
       entry.land();
       const cell = entry.cell;
-      if (cell !== null && cell.value !== entry.first) out[id] = cell.value;
+      if (cell !== null && cell.value !== entry.first) out.push([id, cell.value]);
     }
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 /**

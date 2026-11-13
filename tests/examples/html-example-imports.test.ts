@@ -17,7 +17,9 @@ requireDist(existsSync(join(root, 'dist', 'index.js')));
 /** Every .html under examples/, at any depth, ignoring node_modules and build output. */
 function findHtml(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro') continue;
+    // demo-app: examples/laravel/app/setup.sh's scaffold, gitignored; its vendor/ links back to this repo,
+    // so a walk into it never ends (ENAMETOOLONG; log 36.F58).
+    if (entry === 'node_modules' || entry === 'dist' || entry === '.astro' || entry === 'demo-app') continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) findHtml(full, out);
     else if (entry.endsWith('.html')) out.push(full);

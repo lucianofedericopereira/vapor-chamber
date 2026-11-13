@@ -89,7 +89,7 @@ const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 
 ### serveMcpStdio
 
-**Function** - [src/mcp.ts:384](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L384)
+**Function** - [src/mcp.ts:388](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L388)
 
 ```ts
 serveMcpStdio(bus: McpBus, options?: McpStdioOptions) => () => void
@@ -169,7 +169,7 @@ export type McpHandlerOptions = {
 
 ### McpStdioOptions
 
-**Type alias** - [src/mcp.ts:333](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L333)
+**Type alias** - [src/mcp.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L337)
 
 ```ts
 export type McpStdioOptions = McpHandlerOptions & {

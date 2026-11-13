@@ -3,10 +3,12 @@
  * When the transition bridge's phase settles on a sync bus, as shipped and with done deferred to a microtask.
  * Why: on a sync bus the bridge calls done() inside the hook's own stack, and on a vDOM mode="out-in"
  * Transition that makes Vue throw; deferring done avoids the throw but changes what a consumer observes
- * at a post-flush watcher, after nextTick and on a later macrotask.
+ * at a post-flush watcher, after nextTick and on a later macrotask. Vue 3.6.0-rc.15 queues the out-in
+ * resume when the leave finishes inside the patch (vuejs/core#15727, fixed by #11824), so there it does not throw.
  * Shows: for vapor and vdom, the order of dispatches and the phase, node count and text at the three
  * markers for each variant, plus the vdom out-in throw and that done runs inline versus a microtask later.
- * See: docs/rc-alignment-log.md s35.16, tests/compile-vapor.ts
+ * On rc.15 the vdom out-in row shows the swap settling as the default mode does, in place of the throw.
+ * See: docs/rc-alignment-log.md s35.16, tests/compile-vapor.ts, vuejs/core#15727, vuejs/core#11824
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -127,12 +129,14 @@ describe('transition bridge on a sync bus: when `phase` settles', () => {
     });
   });
 
-  it('vdom, out-in, today: Vue throws on the synchronous done(), the view is empty and `phase` stays leaving', async () => {
-    const measured = await toggle('vdom', OUT_IN, today);
-    expect(measured.order).toBe('BeforeLeave Leave [post] [tick] [later]');
-    const STUCK = 'leaving, 0 node, text ';
-    expect(measured.at).toEqual({ post: STUCK, tick: STUCK, later: STUCK });
-    expect(measured.errors[0]).toContain("Cannot read properties of null (reading 'parentNo");
+  // On rc.14 this row read order 'BeforeLeave Leave [post] [tick] [later]', phase 'leaving, 0 node, text '
+  // at all three markers, and errors[0] containing "Cannot read properties of null (reading 'parentNo".
+  it('vdom, out-in, today: the synchronous done() swaps in the same flush and settles as the default mode does', async () => {
+    expect(await toggle('vdom', OUT_IN, today)).toEqual({
+      order: 'BeforeLeave Leave AfterLeave BeforeEnter [post] Enter AfterEnter [tick] [later]',
+      at: { post: 'entering, 1 node, text B', tick: SETTLED, later: SETTLED },
+      errors: [],
+    });
   });
 
   it('called by hand: `done` runs inside the hook today, a microtask later when deferred', async () => {

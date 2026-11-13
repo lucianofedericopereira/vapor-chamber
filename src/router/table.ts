@@ -61,7 +61,9 @@ export function renderSegments(
       if (value !== undefined && value !== '') path += `/${encodeSplat(String(value))}`;
       continue;
     }
-    const value = params[segment.name];
+    // `Object.hasOwn`: a param name comes from the routes payload, and an
+    // absent `constructor` would read the inherited function. See `../dict`.
+    const value = Object.hasOwn(params, segment.name) ? params[segment.name] : undefined;
     if (value === undefined) {
       if (segment.optional) continue;
       return { missing: segment.name };

@@ -1,6 +1,6 @@
 # vapor-chamber manual
 
-How to do things with vapor-chamber <!-- vc:version -->1.35.1<!-- /vc:version -->, aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned -->. Each
+How to do things with vapor-chamber <!-- vc:version -->1.35.1<!-- /vc:version -->, aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->. Each
 chapter covers one area, with the steps in the order you need them. Read chapters 1 and 2 first.
 The rest stand alone.
 
@@ -35,6 +35,7 @@ The manual says how. These pages say why, or list everything:
 | [performance.md](../performance.md) | guide | see what is optimized, and tune it |
 | [accessibility.md](../accessibility.md) | reference | see what the library guarantees to keyboard and screen reader users |
 | [timestamps.md](../timestamps.md) | reference | see every timestamp the library produces, and its form |
+| [typescript.md](../typescript.md) | reference | see the two TypeScript versions, and why `tsc` runs by path |
 | [integrations/vitest.md](../integrations/vitest.md) | guide | test with Vitest 5: matchers, fixtures, an MCP server |
 | [integrations/laravel.md](../integrations/laravel.md) | guide | build the backend in Laravel |
 | [migrating/from-mitt.md](../migrating/from-mitt.md), [from-event-emitter.md](../migrating/from-event-emitter.md) | how-to | move from an event emitter |
@@ -53,8 +54,8 @@ The manual says how. These pages say why, or list everything:
 - **Laravel:** [docs/integrations/laravel.md](../integrations/laravel.md) covers the backend:
   route, controller, action classes, CSRF flows, Sanctum, Inertia coexistence, Filament panels,
   Reverb realtime and queued commands. Runnable PHP companions are in
-  [examples/laravel-backend/](../../examples/laravel-backend).
-- **Astro:** [examples/exo-astro](../../examples/exo-astro) makes static Astro HTML live through the
+  [examples/laravel/backend/](../../examples/laravel/backend).
+- **Astro:** [examples/apps/exo-astro](../../examples/apps/exo-astro) makes static Astro HTML live through the
   `data-vc-*` attributes (`bindCommands`, `bindDisplay`), with independent page sections on one
   bus. It passes `buffer: createBuffer()`, so a section can dispatch before its handler hydrates.
 - **Performance and tuning:** [docs/performance.md](../performance.md): what is optimized by

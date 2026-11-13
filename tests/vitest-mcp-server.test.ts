@@ -1,7 +1,7 @@
 /**
  * vapor-chamber/vitest/mcp: the runTests, getTestResults and getCoverageGaps tools, on a real Vitest and a project written to the OS temp dir.
  * Why: an agent would get stale results after an edit, a crash instead of a coded error, or a way to pass an option through a filter.
- * Shows: the three tool names; counts and failure messages; filters; edits seen on a re-run and staleness reported; runs serialized; unhandled rejections and load failures as run errors; bad filters refused; coverage gaps from a real coverage run; a coded error when no report is written; serveVitestMcp on stdio.
+ * Shows: the three tool names; counts and failure messages; filters; edits seen on a re-run and staleness reported; runs serialized; unhandled rejections and load failures as run errors; bad filters refused; coverage gaps from a real coverage run; a coded error when no report is written, and when the run cannot start; disposeAsync ending a coverage run in progress; serveVitestMcp on stdio.
  * See: src/vitest-mcp.ts, tests/vitest-consumer.test.ts
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -180,6 +180,43 @@ describe('getCoverageGaps', () => {
       await other.disposeAsync();
     }
   });
+
+  // A failed spawn emits 'error' and, with no listener, Node throws it: the call never answered and the
+  // stdio server died. The root moved away after start is a real ENOENT, as a user hits it.
+  it('a coverage run that cannot start is a coded tool error with the spawn error, and the server still answers', async () => {
+    const moving = project({ 'src/cart.js': CART, 'tests/cart.test.js': CART_TEST });
+    const other = await createVitestMcp({ root: moving });
+    try {
+      const client = mcpClient(createMcpHandler(other.bus, { actionFilter: tools }));
+      const { renameSync } = await import('node:fs');
+      renameSync(moving, `${moving}-moved`);
+      roots.push(`${moving}-moved`);
+      let result: Awaited<ReturnType<typeof client.call>> | 'no answer';
+      try {
+        result = await Promise.race([client.call('getCoverageGaps'), sleep(15_000).then(() => 'no answer' as const)]);
+      } finally {
+        renameSync(`${moving}-moved`, moving);
+      }
+      expect(result).not.toBe('no answer');
+      expect(result).toBeToolError(/test:missing:coverage/);
+      expect((result as { content: { text: string }[] }).content[0].text).toContain('ENOENT');
+      expect(await client.call('getTestResults')).toBeToolError(/test:missing:run/);
+    } finally {
+      await other.disposeAsync();
+    }
+  }, 60_000);
+
+  it('disposeAsync ends a coverage run in progress: the call settles at once, as a coded tool error', async () => {
+    const slow = project({ 'src/cart.js': CART, 'tests/slow.test.js': "import { expect, it } from 'vitest';\nimport { add } from '../src/cart.js';\nit('takes a while', async () => { await new Promise((r) => setTimeout(r, 20000)); expect(add(1)).toBe(2); }, 60000);\n" });
+    const other = await createVitestMcp({ root: slow });
+    const client = mcpClient(createMcpHandler(other.bus, { actionFilter: tools }));
+    const pending = client.call('getCoverageGaps');
+    await sleep(500); // the child is spawned as the task starts
+    await other.disposeAsync();
+    const result = await Promise.race([pending, sleep(5_000).then(() => 'still running' as const)]);
+    expect(result).not.toBe('still running');
+    expect(result).toBeToolError(/test:missing:coverage/);
+  }, 60_000);
 
   it('files with nothing uncovered are left out, and a statement spanning lines lists each line', () => {
     const loc = (start: number, end = start) => ({ start: { line: start }, end: { line: end } });

@@ -42,7 +42,7 @@ whose handlers are the three tools. Serve `bus` with `createMcpHandler` or
 
 ### serveVitestMcp
 
-**Function** - [src/vitest-mcp.ts:296](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L296)
+**Function** - [src/vitest-mcp.ts:307](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L307)
 
 ```ts
 serveVitestMcp(options?: VitestMcpOptions) => Promise<() => Promise<void>>
@@ -125,7 +125,7 @@ export interface VitestMcpServer {
 }
 ```
 
-A running server: the bus to serve, and `disposeAsync()`, which stops the watcher and closes Vitest.
+A running server: the bus to serve, and `disposeAsync()`, which stops the watcher, ends a coverage run in progress and closes Vitest.
 
 ## Variables
 

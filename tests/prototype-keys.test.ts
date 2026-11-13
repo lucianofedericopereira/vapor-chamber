@@ -1,7 +1,7 @@
 /**
  * The prototype-key invariant outside the router: commandKey, plugin maps keyed by action name, and form rules.
  * Why: a string from outside (a parsed response, an MCP tool name) must never be a key on, or a lookup in, an object inheriting from Object.prototype; otherwise distinct commands would collapse into one key and an action named `toString` would throw out of dispatch.
- * Shows: an own `__proto__` key stays in the command key; inherited member names are not run as validator rules or schemas and dispatch normally; a form rule for an absent field named `toString` is skipped while present fields still validate; a form's own __proto__ field keeps its server error across a set.
+ * Shows: an own `__proto__` key stays in the command key; inherited member names are not run as validator rules or schemas and dispatch normally; a form rule for an absent field named `toString` is skipped while present fields still validate; a form's own __proto__ field keeps its server error across a set; `storeStates` keeps a store whose id is `__proto__` as an own key of a plain object.
  * See: src/dict.ts
  */
 
@@ -10,6 +10,8 @@ import { commandKey } from '../src/command-bus';
 import { createFormBus } from '../src/form';
 import { validator } from '../src/plugins-core';
 import { validateSchemas, validateSchemasAsync } from '../src/plugins-schema';
+import { storeStates } from '../src/ssr';
+import { defineChamberStore } from '../src/store/core';
 import { it } from '../src/vitest';
 
 describe('commandKey - an own __proto__ key must not be swallowed', () => {
@@ -133,5 +135,20 @@ describe('createFormBus - an own __proto__ field keeps its server error', () => 
       form.dispose();
     }
     expect(valid).toBe(true);
+  });
+});
+
+describe('storeStates - a store id is a string from outside', () => {
+  it('keeps a store whose id is __proto__ as an own key, on a plain object', ({ bus }) => {
+    const store = defineChamberStore('__proto__', {
+      state: () => ({ n: 0 }),
+      reducers: { inc: (s: { n: number }) => ({ n: s.n + 1 }) },
+    })(bus);
+    store.inc();
+    const states = storeStates(bus);
+    expect(Object.hasOwn(states, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(states, '__proto__')?.value).toEqual({ n: 1 });
+    expect(Object.getPrototypeOf(states)).toBe(Object.prototype);
+    store.$dispose();
   });
 });

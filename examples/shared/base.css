@@ -1,0 +1,20 @@
+/*
+ * The examples' shared layout (docs/decisions.md, 2026-11-13): the page
+ * column, panels, muted text, code. Layout only.
+ *
+ * What a page TEACHES stays in the page: the `vc-loading` / `vc-error` classes
+ * and `aria-disabled` styling an app writes for the library's state (each page
+ * shows its own; docs/accessibility.md points at them), and whatever only that
+ * page needs. A page loads this first, so its own rules come after it; a page
+ * that needs a wider column says so in its own `body` rule.
+ *
+ * Loaded by: the no-build pages and examples/index.html (a <link>), the Vite
+ * apps (an import in main.ts), exo-astro (a frontmatter import), the Laravel
+ * views (/css/base.css, copied there by examples/laravel/app/setup.sh).
+ */
+body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+.panel { border: 1px solid #ddd; border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; }
+.panel h2 { margin-top: 0; font-size: 1rem; }
+.muted { color: #6b6b6b; font-size: .85rem; }
+code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+pre { background: #f5f5f5; padding: .5rem; border-radius: 4px; font-size: 12px; overflow: auto; }

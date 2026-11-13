@@ -1,0 +1,276 @@
+#!/usr/bin/env node
+/**
+ * Static host for the no-build examples (sprinkled-blade, the pattern-*.html
+ * pages). Serves the repo root, so a page's `../../../dist/...` resolves.
+ *
+ * Sends `Cache-Control: no-store` on everything. These pages load `dist/`
+ * straight off disk with no cache headers of their own, and a browser that
+ * heuristically caches the bundle leaves you testing the library build from
+ * ten minutes ago - including a bug you already fixed.
+ *
+ * The catalog reads (`/api/items*`) answer `ETag` and `Cache-Groups` (RFC 9875),
+ * and 304 to a matching `If-None-Match`. The write `productStockAdd` answers
+ * `Cache-Group-Invalidation`, so a client that shares one http client between
+ * its transport and its router refreshes the list on screen
+ * (examples/pages/router-demo).
+ *
+ *   node examples/shared/static-server.mjs [port]      # default 3000
+ *
+ * Imported, it only exports its handler, `serveExamples`: `npm run examples`
+ * (vite.pages.config.mjs here) puts it in front of a Vite server, so the pages
+ * are sent exactly as this server sends them.
+ */
+import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { extname, join, normalize, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repo = resolve(fileURLToPath(new URL('.', import.meta.url)), '../..');
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+
+/**
+ * Minimal in-memory backend, so a static example that dispatches actually
+ * completes instead of 404-ing on `/api/vc`. Same wire contract as
+ * `../pages/sprinkled-blade/mock-server.mjs` and the Laravel controller:
+ * `{ command, target, payload }` in, `{ state }` out, or a problem.
+ */
+const cart = { count: 0, total: 0 };
+const commands = {
+  cartAdd: (target, payload) => {
+    const qty = payload?.qty ?? 1;
+    cart.count += qty;
+    cart.total += 19.99 * qty;
+    return { ...cart, lastAdded: `#${target?.id ?? 1}` };
+  },
+  cartClear: () => {
+    cart.count = 0;
+    cart.total = 0;
+    return { ...cart };
+  },
+  cartState: () => ({ ...cart }),
+};
+
+/** A refusal a command raises: the problem's status, code and detail. */
+class Refusal extends Error {
+  constructor(status, code, detail) {
+    super(detail);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/**
+ * The groups a write made stale, answered as `Cache-Group-Invalidation`
+ * (RFC 9875, a Structured Field List of Strings). The catalog reads name the
+ * same group in `Cache-Groups`.
+ */
+const invalidates = { productStockAdd: '"items"' };
+
+function api(req, res) {
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', () => {
+    const json = (status, payload, type = 'application/json', extra) => {
+      res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...extra });
+      res.end(JSON.stringify(payload));
+    };
+    // A failure is an RFC 9457 problem, as the reference controller answers it.
+    const problem = (status, code, detail) =>
+      json(status, { status, code, detail }, 'application/problem+json');
+    // A body that does not parse carries no command. The reference controller
+    // answers a missing command with 400 `missing_command`: the request is at
+    // fault, not the server.
+    let parsed;
+    try { parsed = JSON.parse(body); } catch {}
+    const { command, target, payload } = parsed ?? {};
+    if (command == null || command === '') {
+      problem(400, 'missing_command', 'Missing "command" field');
+      return;
+    }
+    try {
+      // Own keys only: `commands[command]` would find `toString`, `constructor`.
+      const fn = Object.hasOwn(commands, command) ? commands[command] : undefined;
+      if (!fn) {
+        problem(404, 'unknown_command', `Unknown command: ${command}`);
+        return;
+      }
+      const state = fn(target, payload);
+      const groups = Object.hasOwn(invalidates, command) ? { 'Cache-Group-Invalidation': invalidates[command] } : undefined;
+      json(200, { state }, 'application/json', groups);
+    } catch (e) {
+      if (e instanceof Refusal) {
+        problem(e.status, e.code, e.message);
+        return;
+      }
+      console.error(e);
+      problem(500, 'internal_error', 'Internal error');
+    }
+  });
+}
+
+/** A paginated catalog for the router demo's `load` templates. Names are
+ *  deliberately MIXED CASE and carry no embedded number, so name-sort is a
+ *  clean alphabetical demo (and proves the sort is case-insensitive: "americano"
+ *  must land next to "Affogato", not after every capitalized name). */
+const NAMES = [
+  'Affogato', 'americano', 'Cappuccino', 'chai latte', 'Cold Brew',
+  'Cortado', 'espresso', 'Flat White', 'Iced Latte', 'Macchiato',
+  'MATCHA', 'Mocha', 'oat latte', 'Ristretto', 'Turmeric Tonic',
+];
+const CATALOG = Array.from({ length: 47 }, (_, i) => ({
+  id: i + 1,
+  name: NAMES[i % NAMES.length],
+  price: +(3 + ((i * 7) % 23) + 0.99).toFixed(2),
+  stock: (i * 13) % 40,
+}));
+
+/** A stock change: `qty` is added to the item's stock (a negative one sells). */
+commands.productStockAdd = (target, payload) => {
+  const item = CATALOG.find((row) => row.id === target?.id);
+  if (!item) throw new Refusal(404, 'not_found', 'No such item');
+  const qty = payload?.qty;
+  if (!Number.isInteger(qty)) throw new Refusal(422, 'invalid_qty', 'qty must be a whole number');
+  if (item.stock + qty < 0) throw new Refusal(409, 'out_of_stock', `Only ${item.stock} in stock`);
+  item.stock += qty;
+  return { ...item };
+};
+
+/**
+ * A catalog read: 200 with its `ETag` and `Cache-Groups`, or 304 when the
+ * request's `If-None-Match` names that tag. `no-cache` lets a client keep the
+ * body and ask again before using it, which the 304 answers.
+ */
+function read(req, res, body) {
+  const text = JSON.stringify(body);
+  const etag = `"${createHash('sha1').update(text).digest('hex').slice(0, 16)}"`;
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ETag: etag, 'Cache-Groups': '"items"' };
+  const sent = req.headers['if-none-match'];
+  if (sent !== undefined && (sent === '*' || sent.split(',').some((tag) => tag.trim() === etag))) {
+    res.writeHead(304, headers).end();
+    return;
+  }
+  res.writeHead(200, headers);
+  res.end(text);
+}
+
+/** Every request this host answers: the mock API, the router demo's shell, files under the repo root. */
+export function serveExamples(req, res) {
+  const parsed = new URL(req.url || '/', 'http://localhost');
+  let url;
+  try {
+    url = decodeURIComponent(parsed.pathname);
+  } catch {
+    // A malformed escape (`/%E0`) is the client's error, not a crash.
+    res.writeHead(400, { 'Cache-Control': 'no-store' }).end('Bad request');
+    return;
+  }
+
+  // Paginated list - what a `load: "/api/items?page={page}"` row fetches.
+  if (url === '/api/items') {
+    const perPage = Math.max(1, Math.min(50, Number(parsed.searchParams.get('per_page')) || 10));
+    const page = Math.max(1, Number(parsed.searchParams.get('page')) || 1);
+    // `sort=price` ascending, `sort=-price` descending - the leading-'-'
+    // convention, so one query param carries both column and direction.
+    const rawSort = parsed.searchParams.get('sort') || 'id';
+    const desc = rawSort.startsWith('-');
+    const field = desc ? rawSort.slice(1) : rawSort;
+    const cmp =
+      field === 'price'
+        ? (a, b) => a.price - b.price
+        : field === 'stock'
+          ? (a, b) => a.stock - b.stock // numeric
+          : field === 'name'
+            ? // Case-insensitive: `sensitivity: 'base'` folds case (and accents),
+              // so "americano" sorts by its letters, not after every capital.
+              (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+            : (a, b) => a.id - b.id; // numeric, never string
+    const rows = [...CATALOG].sort((a, b) => (desc ? -cmp(a, b) : cmp(a, b)));
+    const start = (page - 1) * perPage;
+    read(req, res, {
+      items: rows.slice(start, start + perPage),
+      page,
+      per_page: perPage,
+      total: rows.length,
+      last_page: Math.ceil(rows.length / perPage),
+    });
+    return;
+  }
+
+  // One item - `load: "/api/items/{id}"`, a path param this time.
+  if (url.startsWith('/api/items/')) {
+    const item = CATALOG.find((row) => String(row.id) === url.slice('/api/items/'.length));
+    if (item) {
+      read(req, res, item);
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/problem+json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ status: 404, code: 'not_found', detail: 'No such item' }));
+    return;
+  }
+
+  // THE CATCH-ALL. Every URL under the router demo's base returns the same
+  // shell, exactly like Laravel's `Route::get('/admin/{any?}')` - that is what
+  // makes a deep link and a hard refresh work on a client-routed path.
+  if (url.startsWith('/examples/pages/router-demo')) {
+    const file = resolve(repo, 'examples/pages/router-demo/index.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    createReadStream(file).pipe(res);
+    return;
+  }
+
+  if (url === '/api/vc') {
+    // Same-origin here, but allow the cross-origin case too - every header the
+    // transport actually sends must be on the preflight allowlist.
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Accept, X-CSRF-TOKEN, X-XSRF-TOKEN, Idempotency-Key',
+    );
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers', 'Cache-Group-Invalidation');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method === 'POST') { api(req, res); return; }
+  }
+  // A browser asks for /favicon.ico at the root. The project icon lives in assets/favicon/.
+  const target = join(repo, normalize(url === '/favicon.ico' ? '/assets/favicon/favicon.ico' : url));
+  // The repo itself or a path INSIDE it - a sibling directory whose name
+  // merely starts with the repo's is outside.
+  if (target !== repo && !target.startsWith(repo + sep)) {
+    res.writeHead(403, { 'Cache-Control': 'no-store' }).end('Forbidden');
+    return;
+  }
+  const file =
+    existsSync(target) && statSync(target).isDirectory() ? join(target, 'index.html') : target;
+  if (!existsSync(file)) {
+    res.writeHead(404, { 'Cache-Control': 'no-store' }).end('Not found');
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream',
+    'Cache-Control': 'no-store, must-revalidate',
+  });
+  createReadStream(file).pipe(res);
+}
+
+// Run as a script, it listens; imported (the Vite runner), it does not.
+if (import.meta.main) {
+  const port = Number(process.argv[2]) || 3000;
+  createServer(serveExamples).listen(port, '127.0.0.1', () => {
+    console.log(`Static host for examples -> http://localhost:${port}/`);
+    console.log(`  sprinkled-blade  -> http://localhost:${port}/examples/pages/sprinkled-blade/index.html`);
+    console.log(`  pattern-1        -> http://localhost:${port}/examples/pages/pattern-1-blade-cdn.html`);
+    console.log(`  directives       -> http://localhost:${port}/examples/pages/feature-directives.html`);
+    console.log(`  router-demo      -> http://localhost:${port}/examples/pages/router-demo/`);
+  });
+}

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * stampActiveLinks with the per-anchor routableTarget memo, A/B against a baseline derived from the shipped source.
- * Why: the memo must be keyed on the anchor's href, not the element alone; otherwise an href rewritten in place would keep stamping data-active from a stale target.
+ * Why: the memo must be keyed on the anchor's href, not the element alone; otherwise an href rewritten in place would keep stamping data-active from a stale target. It is checked against the base too, since the memo is the module's and two routers can read one anchor (tests/router/dom.test.ts).
  * Shows: the memoized function stamps data-active and data-exact-active exactly as the baseline for three paths, after an href is rewritten in place, and after it moves out of the base (a cached target becomes null); the timing table prints only under the timing run and asserts finite, positive figures, never a ratio threshold.
  * See: tests/clock-source-ab.test.ts, scripts/ab-vue.mjs
  */
@@ -19,11 +19,13 @@ const BASELINE = resolve(REF_DIR, 'router-dom-baseline.ts');
 
 /** The memo block in src/router/dom.ts, and the one line the baseline arm puts in its place. */
 const SHIPPED = `  const memo = routableMemo.get(anchor);
-  // \`base\` is fixed per router instance, so href alone settles validity.
-  if (memo !== undefined && memo.href === href) return memo.target;
+  // \`href\` and \`base\` together settle validity: \`base\` is fixed per router,
+  // but this memo is the module's, read by every router on the page and by
+  // stampActiveLinks' own callers (tests/router/dom.test.ts, two bases).
+  if (memo !== undefined && memo.href === href && memo.base === base) return memo.target;
 
   const target = parseRoutable(href, base);
-  routableMemo.set(anchor, { href, target });
+  routableMemo.set(anchor, { href, base, target });
   return target;`;
 const BASELINE_BODY = '  return parseRoutable(href, base);';
 

@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/outbox';
 
 ### createOutbox
 
-**Function** - [src/outbox.ts:272](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L272)
+**Function** - [src/outbox.ts:273](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L273)
 
 ```ts
 createOutbox(options?: OutboxOptions) => Outbox
@@ -63,7 +63,7 @@ if (result.ok && result.value instanceof Accepted) {
 
 ### Outbox
 
-**Type alias** - [src/outbox.ts:197](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L197)
+**Type alias** - [src/outbox.ts:198](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L198)
 
 ```ts
 export type Outbox = {
@@ -82,7 +82,7 @@ export type Outbox = {
   rejected: Signal<OutboxRejection[]>;
   /** Drop every queued record, in every tab sharing the queue. A waiting `done` settles with `outbox:aborted:clear`. */
   clear(): Promise<void>;
-  /** Remove the window listeners, end a Retry-After wait, release this tab's locks. Idempotent; the bus's `dispose()` runs it. */
+  /** Remove the window listeners, end a Retry-After wait, release this tab's locks; nothing flushes on its own after it. Idempotent; the bus's `dispose()` runs it. */
   dispose(): void;
   /** @internal The bus's half: `createAsyncCommandBus({ outbox })` calls it once. */
   readonly [_OUTBOX]: BusOutbox;
@@ -93,7 +93,7 @@ The object returned by {@link createOutbox}. Pass it to `createAsyncCommandBus({
 
 ### OutboxFlushSummary
 
-**Type alias** - [src/outbox.ts:191](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L191)
+**Type alias** - [src/outbox.ts:192](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L192)
 
 ```ts
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
@@ -138,7 +138,8 @@ export type OutboxOptions = {
    * flushes again then, no sooner than a second later. While the answer
    * repeats, the wait doubles (1 s, 2 s, 4 s, ...) up to 30 s; a longer
    * declared wait wins; a successful replay starts it over at 1 s.
-   * `dispose()` removes the listeners and ends that wait.
+   * `dispose()` removes the listeners and ends that wait: after it, nothing
+   * flushes on its own, a send's answer or a queue that lands later included.
    */
   autoFlush?: boolean;
   /**
@@ -235,7 +236,7 @@ functions, no DOM nodes) for actions routed through the outbox.
 
 ### OutboxRejection
 
-**Type alias** - [src/outbox.ts:194](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L194)
+**Type alias** - [src/outbox.ts:195](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L195)
 
 ```ts
 export type OutboxRejection = { record: OutboxRecord; error: Error };

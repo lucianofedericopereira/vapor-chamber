@@ -98,7 +98,7 @@ pins Vue's virtual-DOM runtime into the bundle. So it lives behind its own subpa
 
 | entry | bindings retained from `vue` | brotli |
 |---|---|--:|
-| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->11.3<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->11.4<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | `defineComponent h inject provide` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | `createDynamicComponent createIf createSlot defineVaporComponent inject provide` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
 
@@ -110,7 +110,7 @@ first time it renders one.
 **A pure-Vapor app can skip the vDOM renderer entirely** (experimental, v1.x).
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name, built from Vapor's own
 helpers, so rendering a route needs no `vaporInteropPlugin`. The startup chunk of a Vite
-production build comes out **<!-- vc:outletSaving -->18.16<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->57.2<!-- /vc:outletSavingRaw --> KB raw** smaller than the
+production build comes out **<!-- vc:outletSaving -->18.43<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->58.2<!-- /vc:outletSavingRaw --> KB raw** smaller than the
 same app through the vDOM outlet plus interop.[^outlet-size]
 
 [^outlet-size]: The same harness derives that baseline (`tests/vapor/vapor-outlet-size.test.ts`).

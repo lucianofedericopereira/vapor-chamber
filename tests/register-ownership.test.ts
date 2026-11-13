@@ -31,7 +31,7 @@ describe('register() cleanup ownership', () => {
     expect(bus.getUndoHandler('save')).toBeUndefined();
   });
 
-  it('the same on the async bus', async ({ asyncBus: bus }) => {
+  it('the same on the async bus: a stale cleanup leaves the newer owner', async ({ asyncBus: bus }) => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const offA = bus.register('save', async () => 'A');
     bus.register('save', async () => 'B');
@@ -74,7 +74,7 @@ describe('register() cleanup ownership', () => {
     expect(bus.hasHandler('save$undo')).toBe(false);
   });
 
-  it('the same on the async bus', async ({ asyncBus: bus }) => {
+  it('the same on the async bus: the newer owner leaves first, the older answers again', async ({ asyncBus: bus }) => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     bus.register('save', async () => 'A');
     const offB = bus.register('save', async () => 'B');

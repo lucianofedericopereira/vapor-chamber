@@ -8,7 +8,8 @@
  * Shows: inherited keys are refused with -32602 and never dispatched, a throwing dispatch becomes an
  * error result, a non-object payload is refused, an object payload is forwarded by reference, envelope
  * replies and silences, `required` and `description` omitted from tool mapping when absent, and
- * serveMcpStdio's guard, framing, backpressure, clamping and teardown behaviour.
+ * serveMcpStdio's guard, framing, backpressure, clamping and teardown behaviour. The cap holds for lines that
+ * arrive in one chunk, and a UTF-8 character split across two chunks arrives whole.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActionFilter } from '../src/action-filter';
@@ -265,6 +266,50 @@ describe('serveMcpStdio limits', () => {
     for (const release of releases.splice(0)) release();
     await new Promise(r => setTimeout(r, 0));
     expect(resume).toHaveBeenCalled();
+  });
+
+  // Pausing stdin stops the NEXT chunk; lines already in one chunk are held by the transport itself.
+  it('never runs more than maxInFlight dispatches, lines from one chunk included', async () => {
+    capture();
+    const releases: Array<() => void> = [];
+    const dispatch = vi.fn(() => new Promise<any>((resolve) => {
+      releases.push(() => resolve({ ok: true, value: 1 }));
+    }));
+    stops.push(serveMcpStdio({ dispatch, getSchema: () => SCHEMA }, { actionFilter: all, maxInFlight: 3 }));
+
+    const chunk = Array.from({ length: 10 }, (_, id) =>
+      JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'cartAdd', arguments: { target: { id } } } }),
+    ).join('\n') + '\n';
+    process.stdin.emit('data', chunk);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dispatch).toHaveBeenCalledTimes(3);
+
+    // Each completion lets the next held line in; every line is served in the end.
+    while (releases.length > 0) {
+      for (const release of releases.splice(0)) release();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(releases.length).toBeLessThanOrEqual(3);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(10);
+  });
+
+  it('a UTF-8 character split across two chunks arrives whole', async () => {
+    capture();
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: 1 }));
+    const schema = { notePost: { description: 'Post a note', target: { text: 'string' } } } as unknown as BusSchema;
+    stops.push(serveMcpStdio({ dispatch, getSchema: () => schema }, { actionFilter: all }));
+
+    const bytes = Buffer.from(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notePost', arguments: { target: { text: 'café \u{1F600}' } } } })}\n`,
+    );
+    // Split inside the two-byte e-acute.
+    const cut = bytes.indexOf(0xc3) + 1;
+    process.stdin.emit('data', bytes.subarray(0, cut));
+    process.stdin.emit('data', bytes.subarray(cut));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect((dispatch.mock.calls[0] as unknown[])[1]).toEqual({ text: 'café \u{1F600}' });
   });
 
   it('maxInFlight: 0 does not strand stdin paused forever', async () => {

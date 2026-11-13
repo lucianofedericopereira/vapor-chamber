@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>vapor-chamber - Laravel widget bridge</title>
+  {{-- Layout (column, panels, pre): the examples' shared sheet, copied to public/css/ by setup.sh. --}}
+  <link rel="stylesheet" href="/css/base.css">
+  <style>
+    .row { display: flex; justify-content: space-between; align-items: center; margin: .4rem 0; }
+    button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; }
+    .note { color: #555; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Widget bridge</h1>
+  <p class="note">
+    The sibling page <a href="/cart">/cart</a> is the no-Vue story: the
+    <code>core</code> IIFE, plain DOM, one <code>&lt;script src&gt;</code>.
+    This page is the other half - a <strong>Vapor custom element</strong> whose
+    events cross the shadow boundary into the surrounding page.
+  </p>
+
+  <div class="panel">
+    <h2>The widget</h2>
+    {{-- A real custom element. Its internals are Vapor; the page only sees a tag. --}}
+    <vc-cart></vc-cart>
+    <p class="note">Rendered inside a shadow root by <code>defineWidget</code>.</p>
+  </div>
+
+  {{-- Alpine listens on WINDOW via `.window`, which is why the bridged event is
+       dispatched with `composed: true` (escapes the shadow root) and
+       `bubbles: true` (reaches window). --}}
+  <div class="panel" x-data="{ count: 0, last: '' }"
+       @cart-added.window="count = $event.detail.count; last = $event.detail.lastAdded">
+    <h2>Alpine listener</h2>
+    <div class="row"><span>Items</span><strong x-text="count"></strong></div>
+    <div class="row"><span>Last added</span><span x-text="last || '-'"></span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Plain-DOM listener</h2>
+    <div class="row"><span>Events seen</span><strong id="seen">0</strong></div>
+    <pre id="log">(add something...)</pre>
+  </div>
+
+  {{-- 1. Alpine, from CDN. Not vendored: it is a host-page framework this demo
+          only needs in order to prove the bridge reaches it. --}}
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+
+  {{-- 2. The vapor-chamber ELEMENTS variant. `defineWidget` / `emitDOMEvent`
+          are its identity and are absent from `core` (which /cart uses). --}}
+  <script src="/js/vapor-chamber-elements.iife.min.js"></script>
+
+  {{-- The Vue version this demo loads, owned by `npm run docs:stamp` and read
+       from the repo's own devDependency, so it cannot drift from what the
+       library is tested against.
+
+       It lives in ELEMENT CONTENT below, not in the import specifier, and that
+       is not cosmetic. HTML comments inside a <script> are raw text rather than
+       comments, so a stamp marker placed in the URL renders literally and
+       yields an invalid specifier - the version arrives wrapped in comment
+       delimiters. Here the delimiters really are comments, textContent skips
+       them, and the URL is assembled at runtime. (Described, not shown: a
+       marker written into prose is still a marker to the stamper.) --}}
+  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --></span>
+
+  {{-- 3. Vue, as a MODULE. Vapor ships only as `esm-browser` - there is no
+          `vue.runtime-with-vapor.global.js` - so a classic <script src> tag
+          cannot obtain Vapor at all, and the library's runtime probe cannot
+          resolve a bare specifier in a browser. `configureVue()` is therefore
+          not optional here; it is the only channel. --}}
+  <script type="module">
+    const version = document.getElementById('vc-vue-version').textContent.trim();
+    const Vue = await import(
+      `https://cdn.jsdelivr.net/npm/vue@${version}/dist/vue.runtime-with-vapor.esm-browser.prod.js`
+    );
+
+    VaporChamber.configureVue(Vue);
+
+    // The build this page was served from: after a deploy a command from this
+    // open tab is answered { redirect } to the page, and onRedirect loads it.
+    const { bus } = VaporChamber.connect({
+      endpoint: '/api/vc',
+      csrf: true,
+      headers: { 'X-App-Version': @json((string) config('vapor-chamber.app_version')) },
+      onRedirect: (url) => location.assign(url),
+    });
+
+    // A Vapor setup() returns a BLOCK - real DOM nodes. There is no compiler on
+    // a no-build page to turn a template into one, and `h` is not on the
+    // VaporChamber global in any variant.
+    const defined = VaporChamber.defineWidget('vc-cart', {
+      setup() {
+        const block = document.createElement('div');
+        const button = document.createElement('button');
+        button.textContent = 'Add coffee';
+        // The widget's busy state is markup: bindCommands on the widget's own root
+        // dispatches the command, sets aria-disabled while it is in flight (never
+        // disabled, which would send a keyboard user's focus to <body>), ignores a
+        // press meanwhile and announces a failure.
+        button.setAttribute('data-vc-command', 'cartAdd');
+        button.setAttribute('data-vc-target', '{"id":1}');
+        button.setAttribute('data-vc-payload', '{"qty":1}');
+        // The widget's own live region: a failure is said, not swallowed.
+        const status = document.createElement('p');
+        status.setAttribute('role', 'status');
+        block.append(button, status);
+        VaporChamber.bindCommands(block, { bus });
+        // The answer decides what the page hears. Bridge out of the shadow root to
+        // whatever the page uses. A redirect is a navigation, not a failure to show.
+        bus.on('cartAdd', (cmd, result) => {
+          if (result.error?.code === 'transport:refused:redirect') return;
+          status.textContent = result.ok ? '' : result.error.message;
+          if (!result.ok) return;
+          VaporChamber.emitDOMEvent(button.getRootNode().host, 'cart-added', {
+            count: result.value.count,
+            lastAdded: result.value.lastAdded,
+          });
+        });
+        return block;
+      },
+    });
+
+    // The documented sharp edge, made visible rather than silent: the wrapper
+    // returns null when Vapor is absent, and `defineWidget` reports that as
+    // `false`.
+    if (!defined) {
+      document.querySelector('.panel').textContent =
+        'Vapor was not detected - defineWidget() returned false.';
+    }
+
+    let seen = 0;
+    const lines = [];
+    document.addEventListener('cart-added', (e) => {
+      seen++;
+      document.getElementById('seen').textContent = String(seen);
+      lines.unshift(`cart-added -> count ${e.detail.count} (${e.detail.lastAdded})`);
+      document.getElementById('log').textContent = lines.slice(0, 8).join('\n');
+    });
+  </script>
+</body>
+</html>

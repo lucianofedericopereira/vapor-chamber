@@ -1,7 +1,7 @@
 /**
  * createStreamParser: values and paths, numbers, strings, chunked input, stream(), errors, reset, lifecycle callbacks.
  * Why: a streamed JSON body (an LLM completion, an export) would be mis-parsed, throw on a long string, or lose a value split across chunks.
- * Shows: onValue reports key, value and path for each scalar; strings decode escapes, UTF-8 and surrogate pairs, including a 1MB value and a pair on a flush seam; one-character writes reassemble; stream() reads a Response and treats a null body as an empty stream; errors are reported not thrown; reset() clears state; number edge states report their messages.
+ * Shows: onValue reports key, value and path for each scalar; strings decode escapes, UTF-8 and surrogate pairs, including a 1MB value and a pair on a flush seam; one-character writes reassemble; stream() reads a Response and treats a null body as an empty stream, and a callback's throw cancels and unlocks the body; errors are reported not thrown; reset() clears state; number edge states report their messages.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -185,6 +185,31 @@ describe('StreamParser - chunked / streamed input', () => {
     await parser.stream(new Response(null, { status: 204 }));
 
     expect(errors.map((e) => e.message)).toContain('Unexpected end: unclosed structure');
+  });
+
+  // A parse error is reported, never thrown; a callback's own throw is the app's, and it ends stream().
+  it('a callback that throws ends stream(): the body is cancelled and unlocked, as `for await` over it does', async () => {
+    const boom = new Error('onValue failed');
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    let cancelled: unknown;
+    // A body that never ends: only a cancel stops it.
+    const response = new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(encoder.encode(pulls++ === 0 ? '[1,' : '2,')); },
+      cancel(reason) { cancelled = reason; },
+    }));
+    const parser = createStreamParser({ onValue: () => { throw boom; } });
+
+    await expect(parser.stream(response)).rejects.toBe(boom);
+    expect(response.body!.locked).toBe(false);
+    expect(cancelled).toBe(boom);
+  });
+
+  it('a read that fails (the connection dropped) rejects with its error, the body unlocked', async () => {
+    const dropped = new TypeError('terminated');
+    const response = new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(dropped); } }));
+    await expect(createStreamParser().stream(response)).rejects.toBe(dropped);
+    expect(response.body!.locked).toBe(false);
   });
 });
 

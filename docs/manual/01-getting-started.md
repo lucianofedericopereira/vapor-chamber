@@ -15,12 +15,13 @@ npm install github:lucianofedericopereira/vapor-chamber
 
 What it needs:
 
-- **Node 24**, 24.5 or later. No other major is tested.
+- **Node <!-- vc:nodeEngines -->>=24.5.0<!-- /vc:nodeEngines -->.** CI runs
+  <!-- vc:nodeVersion -->26.13.0<!-- /vc:nodeVersion --> and a pinned Node 24 (`.github/workflows/ci.yml`).
 - **Vue is an optional peer:** 3.5 or later for the composables,
-  <!-- vc:vueAligned -->3.6.0-rc.14<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
+  <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
 - **Vite 5+ and `@vitejs/plugin-vue` 5+** only for the `vapor-chamber/vite` plugins (HMR,
   `vaporChamberWire()`) and Vapor SFC support.
-- **ESM only**, no CJS build. Node 24 `import`, bundlers and `<script type="module">` all work.
+- **ESM only**, no CJS build. Node `import`, bundlers and `<script type="module">` all work.
   For classic `<script>` tags, use the IIFE variants ([chapter 8](./08-pages-without-a-build.md)).
 
 > **RC tracking.** This library follows Vue 3.6 through its release candidates. The Vapor
@@ -128,10 +129,10 @@ name is a build error.
 It wires `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`, which add
 **+<!-- vc:sizeVaporEntryRaw -->4.4<!-- /vc:sizeVaporEntryRaw --> KB** raw over hand-wiring `createVaporApp`.[^vapor-wiring]
 
-[^vapor-wiring]: Re-measured on every run with Vue bundled. The Vapor wiring table in [docs/BUNDLE-SIZES.md](../BUNDLE-SIZES.md) has it. The whitepaper's rc.6 row has the measurement on the `examples/vapor-sfc` app that decided the split.
+[^vapor-wiring]: Re-measured on every run with Vue bundled. The Vapor wiring table in [docs/BUNDLE-SIZES.md](../BUNDLE-SIZES.md) has it. The whitepaper's rc.6 row has the measurement on the `examples/apps/vapor-sfc` app that decided the split.
 
 `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw)
-and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->73.0<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
+and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
 purpose, because a static import stays in the bundle whether the app calls it or not. If you use
 either, one line adds it, merged with what the entry already wired:
 
@@ -300,8 +301,8 @@ The **core** imports no framework and no dependency, and it is the only part an 
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4875<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->473<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4952<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->482<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
 `npm run test:coverage` for live numbers.
 
 Next: [2. Commands, results and failures](./02-commands.md).

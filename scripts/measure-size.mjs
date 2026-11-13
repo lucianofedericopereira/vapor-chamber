@@ -211,8 +211,8 @@ async function vaporWiringRows() {
 
 
 /**
- * The example snippets, one row each, found by directory listing: every top-level
- * `examples/*.ts` and `*.tsx`, so a batch that adds a snippet adds a row with no
+ * The example snippets, one row each, found by directory listing: every
+ * `examples/snippets/*.ts` and `*.tsx`, so a batch that adds a snippet adds a row with no
  * edit here. Each is bundled as the ESM rows are (production build, DEV folded,
  * minified, Vue external) with the file itself as the entry, so the row is the
  * snippet's own code plus the part of the library it imports. A snippet that
@@ -222,19 +222,18 @@ async function vaporWiringRows() {
  * the note; a file not named here and not bundling is a failure to fix, not a
  * line to add without a reason. The Vite apps (`vapor-sfc`, `vapor-island-cart`,
  * `exo-astro`, `router-demo`) report their own `vite build` sizes, and a no-build
- * page names the dist file it loads; neither is a top-level snippet.
+ * page names the dist file it loads; neither is in examples/snippets/.
  */
 const EXAMPLES_LEFT_OUT = {
   'feature-vite-hmr.ts': 'a Vite config that imports vite, not a browser bundle',
   'feature-vite-wire.ts': 'a Vite config that imports vite and @vitejs/plugin-vue, not a browser bundle',
-  'vite.base.ts': 'the shared Vite config of the Vue apps, not a browser bundle',
   'pattern-2-laravel-vite.ts': 'imports App.vue, a page the repo does not carry',
   'pattern-3-inertia.ts': 'imports @inertiajs/vue3 and page files the repo does not carry',
   'pattern-4-nextjs.tsx': 'a React file, and the repo has no React',
   'pattern-6-vapor-router.ts': 'imports .vue pages the repo does not carry',
 };
 
-const exampleFiles = readdirSync('examples')
+const exampleFiles = readdirSync('examples/snippets')
   .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('.d.ts'))
   .sort();
 const examplesLeftOut = exampleFiles.filter((f) => f in EXAMPLES_LEFT_OUT);
@@ -242,7 +241,7 @@ const examplesLeftOut = exampleFiles.filter((f) => f in EXAMPLES_LEFT_OUT);
 async function exampleRows() {
   const rows = [];
   for (const f of exampleFiles.filter((f) => !(f in EXAMPLES_LEFT_OUT))) {
-    rows.push({ name: `examples/${f}`, ...(await bundle(resolve(process.cwd(), 'examples', f))) });
+    rows.push({ name: `examples/snippets/${f}`, ...(await bundle(resolve(process.cwd(), 'examples/snippets', f))) });
   }
   return rows;
 }
@@ -362,7 +361,7 @@ ${mitt ? mdTable('library', [mitt]) : '(mitt not installed)'}
 
 ## Example snippets
 
-One row per top-level \`examples/*.ts\` (found by glob), each bundled the way the ESM rows are: a
+One row per \`examples/snippets/*.ts\` (found by glob), each bundled the way the ESM rows are: a
 Vite production build of the file itself, \`vue\` external, DEV folded. The row is the snippet's
 own code plus the part of the library it imports. The Vite apps report their own \`vite build\`
 sizes. Left out: ${examplesLeftOut.map((f) => `\`${f}\` (${EXAMPLES_LEFT_OUT[f]})`).join('; ')}.

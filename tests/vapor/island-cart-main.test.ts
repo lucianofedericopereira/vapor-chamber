@@ -1,5 +1,5 @@
 /**
- * The vapor-island-cart entry module (`examples/vapor-island-cart/src/main.ts`) hydrating islands from a page.
+ * The vapor-island-cart entry module (`examples/apps/vapor-island-cart/src/main.ts`) hydrating islands from a page.
  * Why: a tag that is not an island file's own tag, such as an Object.prototype name like `constructor` (the one HTML can spell), would reach `defineVaporCustomElement` as `undefined` and reject unhandled if the entry looked tags up in a plain object. It needs the with-vapor build, because the entry imports `defineVaporCustomElement` from `vue`.
  * Shows: a page with `<constructor client:load>` defines no custom element and raises no unhandled rejection; the page's real `vc-products` and `vc-cart` islands under `client:visible` are each observed. The control cannot hydrate a real island: no test project loads `@vitejs/plugin-vue`.
  * See: audit VIC-8, log s36.11
@@ -12,12 +12,12 @@ function pageWith(html: string): void {
 
 async function loadMain(): Promise<void> {
   vi.resetModules();
-  await import('../../examples/vapor-island-cart/src/main');
+  await import('../../examples/apps/vapor-island-cart/src/main');
   // Hydration awaits the island loader, then defines: give both a turn.
   for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-describe('examples/vapor-island-cart/src/main.ts: island lookup', () => {
+describe('examples/apps/vapor-island-cart/src/main.ts: island lookup', () => {
   afterEach(() => { document.body.innerHTML = ''; });
 
   it('a `<constructor client:load>` element defines nothing and rejects nothing', async () => {

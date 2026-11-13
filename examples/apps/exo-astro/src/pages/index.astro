@@ -1,0 +1,185 @@
+---
+// Static HTML out. Astro renders this at build time, and the only client JS is
+// the bus, two small stores and the page bindings: no framework runtime.
+// The examples' shared layout (font, muted, code); this page's own rules below, its column wider.
+import '../../../../shared/base.css';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>exo on Astro - vapor-chamber</title>
+    <style>
+      /* Wider than the shared column (../../../../shared/base.css): two sectors side by side. */
+      body { max-width: 900px; }
+      /* Two independent sectors, side by side - they share a layout and
+         nothing else: no shared code, no shared state, only the bus. */
+      /* stretch (the grid default) rather than start: both cards take the full
+         row height, so the two sectors stay level as the order grows. */
+      .sectors { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
+      @media (max-width: 700px) { .sectors { grid-template-columns: 1fr; } }
+      .sectors section { margin: 0; }   /* the grid owns the gaps */
+      section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+      button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; }
+      .row { display: flex; justify-content: space-between; align-items: center; margin: .4rem 0; }
+      #hydration-note { font-weight: 600; }
+      .ticket { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; }
+      .ticket th { text-align: left; font-size: .75rem; text-transform: uppercase;
+                   letter-spacing: .04em; color: #666; border-bottom: 1px solid #ddd;
+                   padding: .5rem 0; }
+      .ticket td { padding: .5rem 0; border-bottom: 1px solid #f2f2f2; font-size: .95rem; }
+      .ticket .right { text-align: right; font-variant-numeric: tabular-nums; }
+      .ticket .total td { border-top: 2px solid #333; border-bottom: none; padding-top: .75rem; }
+      /* The price column is a real column: prices line up against each other,
+         and the button sits in its own shrink-to-fit action column. */
+      .ticket .action { width: 1%; white-space: nowrap; text-align: right; padding-left: 1rem; }
+      .ticket .qty { width: 1%; white-space: nowrap; text-align: center; color: #666;
+                     font-variant-numeric: tabular-nums; padding: 0 .75rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>exo on Astro</h1>
+      <p class="muted">
+        Two independent sections, zero shared code between them. Section A only
+        dispatches named commands; Section B only reads the cart store. The bus
+        buffers clicks that land <em>before</em> the stores exist
+        (<code>buffer: createBuffer(&#123; ttl &#125;)</code>) and replays
+        them the moment the stores register their handlers.
+      </p>
+      <p id="hydration-note" role="status">Hydrating in 2s - click "Add" NOW to see buffering.</p>
+    </header>
+
+    <main class="sectors">
+
+    <!-- Sector A: dispatches named commands into the void. Static HTML - the
+         menu is authored, not rendered: no binding reads it, each row only
+         carries the command it dispatches. -->
+    <section>
+      <h2>Menu</h2>
+      <table class="ticket">
+        <thead>
+          <tr><th>Item</th><th class="right">Price</th><th class="action"></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Coffee</td>
+            <td class="right">$4.00</td>
+            <td class="action">
+              <button type="button" data-vc-command="cartAdd" data-vc-target='{"name":"Coffee","price":4}'>Add</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Tea</td>
+            <td class="right">$3.00</td>
+            <td class="action">
+              <button type="button" data-vc-command="cartAdd" data-vc-target='{"name":"Tea","price":3}'>Add</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Espresso</td>
+            <td class="right">$5.00</td>
+            <td class="action">
+              <button type="button" data-vc-command="cartAdd" data-vc-target='{"name":"Espresso","price":5}'>Add</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Sector B: reads the cart store, and writes nothing.
+
+         Whatever starts hidden carries `hidden` in the markup. The script is
+         a module, so it runs after parse: without the attribute the empty
+         cart's table would paint first and disappear a frame later. The HTML
+         owns the first paint, `bindDisplay` owns every state after it. -->
+    <section>
+      <h2>Order</h2>
+      <p data-vc-show="cart.empty">Your cart is empty.</p>
+
+      <div data-vc-show="cart.count" hidden>
+        <table class="ticket">
+          <thead>
+            <tr><th>Item</th><th class="qty">Qty</th><th class="right">Amount</th></tr>
+          </thead>
+          <!-- data-vc-each: the <template> is cloned once per line, and a
+               row's data-vc-text reads its own line. A repeat Add bumps the
+               line's qty and amount, and the list is drawn again. -->
+          <tbody data-vc-each="cart.items">
+            <template>
+              <tr>
+                <td data-vc-text="name"></td>
+                <td class="qty">x<span data-vc-text="qty"></span></td>
+                <td class="right" data-vc-text="amount"></td>
+              </tr>
+            </template>
+          </tbody>
+          <tfoot>
+            <tr class="total">
+              <td colspan="2"><strong>Total</strong> - <span data-vc-text="cart.count"></span> item(s)</td>
+              <td class="right"><strong data-vc-text="cart.total"></strong></td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- Two stores, one subtree: `ui.open` is the page's own state, and
+             the note inside reads `cart.lastAdded` from the cart. Even this
+             toggle is a command, so the click site mutates nothing. -->
+        <div>
+          <button type="button" data-vc-command="uiToggleDetails">Details</button>
+          <button type="button" data-vc-command="cart$reset">Clear</button>
+          <p class="muted" data-vc-show="ui.open" hidden>
+            The details note is open. Last added:
+            <span data-vc-text="cart.lastAdded"></span> (read from the cart store).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    </main>
+
+    <script>
+      import { announce, bindCommands, bindDisplay, createBuffer, createCommandBus, logger } from 'vapor-chamber';
+      import { type CartState, useCart, useUi } from '../store';
+
+      // Buffer commands dispatched before their handlers exist; drop anything
+      // that waits longer than 30s (an island that never hydrates must not pin
+      // stale clicks in memory). onDrop gives drops observability.
+      const bus = createCommandBus({
+        buffer: createBuffer({
+          ttl: 30_000,
+          onDrop: (action, dropped) =>
+            console.warn(`[exo-astro] dropped buffered "${action}"`, dropped),
+        }),
+      });
+      bus.use(logger({ actions: ['cart*'] }));
+
+      // The order changes out of the pressed button's sight; say what changed
+      // (WCAG 4.1.3) through the library's shared live region. A listener
+      // hears the buffered Adds too, once the stores replay them. A failed
+      // press is announced by bindCommands itself.
+      bus.on('cartAdd', (_cmd, result) => {
+        const cart = result.value as CartState;
+        announce(`${cart.lastAdded} added. ${cart.count} item(s), ${cart.total}.`);
+      });
+      bus.on('cart$reset', () => announce('Order cleared.'));
+
+      // Wired at load: a press has a bus to dispatch on before any store exists.
+      bindCommands(document.body, { bus });
+
+      // Simulated late hydration: the stores register 2s after the page is
+      // interactive (override with ?delay=8000 to widen the window). Their
+      // handlers run the clicks made before that, in order - nothing is lost.
+      // The display is bound last, so it draws the state the replay reached.
+      const delay = Number(new URLSearchParams(location.search).get('delay')) || 2000;
+      setTimeout(() => {
+        useCart(bus);
+        useUi(bus);
+        bindDisplay(document.body, { bus });
+        const note = document.getElementById('hydration-note');
+        if (note) note.textContent = 'Hydrated - buffered clicks were replayed.';
+      }, delay);
+    </script>
+  </body>
+</html>

@@ -270,13 +270,17 @@ export function createMcpHandler(
     if (result.ok) {
       // A value JSON cannot hold (a BigInt, a cycle) is this call's failure,
       // answered with its id. Thrown here, it rejected the whole reply, and
-      // over stdio the client's request was never answered.
-      let text: string;
+      // over stdio the client's request was never answered. A function or a
+      // Symbol does not throw: JSON.stringify answers undefined, and the
+      // block had no `text`, which MCP's TextContent requires. Same failure
+      // (tests/mcp-unencodable-value.test.ts).
+      let text: string | undefined;
       try {
         text = JSON.stringify(result.value ?? null);
       } catch (e) {
         return rpcResult(id, toolResult(`Tool "${name}": its value is not JSON (${(e as Error).message})`, true));
       }
+      if (text === undefined) return rpcResult(id, toolResult(`Tool "${name}": its value is not JSON (${typeof result.value})`, true));
       return rpcResult(id, toolResult(text));
     }
     const code = result.error instanceof BusError ? ` (${result.error.code})` : '';
@@ -436,6 +440,8 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
       .then((reply) => {
         if (reply !== null && !stopped) write(reply);
         inFlight--;
+        // A line held at the cap goes now, before stdin is let go again.
+        drain();
         applyBackpressure();
       });
   };
@@ -444,11 +450,18 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
   // True after an over-long line was abandoned: everything up to the next
   // newline belongs to that line and must be discarded with it.
   let resyncing = false;
+  // Streaming, so a character split across two chunks waits for its other
+  // half instead of decoding as U+FFFD (tests/mcp-gaps.test.ts).
+  const decoder = new TextDecoder();
 
-  const onData = (chunk: Buffer | string): void => {
-    buffer += chunk.toString();
+  /**
+   * Serve the complete lines buffered, while under the cap. Pausing stdin
+   * stops the NEXT chunk only, so the lines one chunk already carried wait
+   * here for a completion: `maxInFlight` holds for them too.
+   */
+  const drain = (): void => {
     let newline = buffer.indexOf('\n');
-    while (newline !== -1) {
+    while (newline !== -1 && inFlight < maxInFlight && !stopped) {
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf('\n');
@@ -468,11 +481,17 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
     }
     // No newline in what remains, and it is already over the cap: drop it
     // rather than buffering an unbounded "line" the client may never end.
-    if (buffer.length > maxLineLength) {
+    // Held complete lines are not a line, so only an unterminated tail counts.
+    if (newline === -1 && buffer.length > maxLineLength) {
       buffer = '';
       resyncing = true;
       write(rpcError(null, -32700, `Parse error: line exceeds ${maxLineLength} characters`));
     }
+  };
+
+  const onData = (chunk: Buffer | string): void => {
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+    drain();
   };
 
   process.stdin.on('data', onData);

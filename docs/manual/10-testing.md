@@ -58,8 +58,11 @@ export default defineConfig({
 - **`inline` puts vapor-chamber on the same Vue.** Without it the library in `node_modules` loads
   its own `vue`, past the alias. The app and the library are then two disconnected reactivity
   instances, and `useRouter()` throws `no router provided` under a router that is installed.
-- **Alias to this file, not to `vue.runtime.esm-bundler.js`.** Under Vitest on Vue 3.6.0-rc.14 that
-  entry throws `createInternalObject is not a function` at load.[^vapor-alias]
+- **Alias to this file, not to `vue.runtime.esm-bundler.js`.** Under Vitest on Vue 3.6.0-rc.15 that
+  entry loads, but it is a second module beside a deep import of this file, and a Vapor app cannot
+  mount: its nested `@vue/*` imports reach runtime-core's CJS builds, which lack `initFeatureFlags`
+  (only the ESM build has it). On 3.6.0-rc.14 the entry threw `createInternalObject is not a
+  function` at load.[^vapor-alias]
 
 [^vapor-alias]: The block above runs as written in a packed, installed project, with a control for
     each setting: `tests/vapor-alias-consumer.test.ts`.

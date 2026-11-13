@@ -155,8 +155,16 @@ describe('each part of the rule is needed', () => {
   });
 
   // On a Vue that loads this entry under Vitest this goes red: the manual's warning can then go.
-  it('the bundler entry as the target: the file throws at load', () => {
-    expect(bundlerEntry).toHaveLength(1);
-    expect(bundlerEntry[0]?.failure).toContain('createInternalObject is not a function');
+  // Vue 3.6.0-rc.15 loads it (vuejs/core#16071 resolves `createInternalObject` lazily), and the target is still
+  // wrong: the entry is a second module beside the deep import, and a Vapor app cannot mount, because its
+  // nested `@vue/*` imports reach runtime-core's CJS builds, which lack `initFeatureFlags` (only its ESM build
+  // has it). The manual's warning stays, with that reason.
+  it('the bundler entry as the target: it loads, but is a second module and a Vapor app cannot mount', () => {
+    expect(bundlerEntry.map((o) => [o.title, o.status])).toEqual([
+      ['bare vue carries Vapor', 'passed'],
+      ['a deep import of the file is the same module', 'failed'],
+      ['the router injects inside a mounted Vapor component', 'failed'],
+    ]);
+    expect(failureOf(bundlerEntry, 'the router injects inside a mounted Vapor component')).toMatch(/initFeatureFlags\)? is not a function/);
   });
 });

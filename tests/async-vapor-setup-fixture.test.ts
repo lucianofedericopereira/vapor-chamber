@@ -2,15 +2,17 @@
 /**
  * FIXTURE: `useCommand()` after a top-level `await` in a compiled `<script setup vapor>`, under a real `<Suspense>`.
  * Why: `useVaporAsyncCommand`'s docs show this pattern; after the await a composable works only if Vue restored the instance and its scope.
- * Shows: it compiles to an async setup with a render closure; cleanup arms after the await, nothing is left if unmounted during it, nested-block awaits too.
- * See: vuejs/core 65819bf (#15433), e9515f1, 54097087 (#15465).
+ * Shows: it compiles to an async setup with a render closure; cleanup arms after the await, nothing is left if unmounted during it, nested-block awaits too. A handler and a `useCommandGroup` the setup makes after the await are not left either. Composables made BEFORE the await keep nothing they are asked to register after it once the app unmounted during it; mounted, those registrations work and go on unmount.
+ * See: vuejs/core 65819bf (#15433), e9515f1, 54097087 (#15465), 21dd33c61 (#16108).
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { compileScript, parse } from 'vue/compiler-sfc';
 import * as chamber from '../src/chamber';
 import { configureVue, getCommandBus, setCommandBus, waitForVueDetection } from '../src/chamber';
+import * as chamberVapor from '../src/chamber-vapor';
 import { createCommandBus } from '../src/command-bus';
+import { commandState } from '../src/command-state';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 
@@ -20,10 +22,13 @@ type VueApi = any;
 /** Shared with the compiled component through its `vc:state` import. */
 const state = {
   fired: [] as string[],
+  /** What the late setup's on(), register() and use() returned, for the test to call. */
+  offs: [] as Array<() => void>,
   gate: Promise.resolve(),
   open: () => {},
   reset() {
     this.fired.length = 0;
+    this.offs.length = 0;
     this.gate = new Promise<void>((r) => {
       this.open = r;
     });
@@ -53,6 +58,42 @@ on('ping', () => { state.fired.push('nested'); });
 </script>
 <template><span>nested</span></template>`;
 
+/** Handlers and a group made after the await: what a setup registers once it resumes must go with it too. */
+const SFC_LATE = `<script setup vapor>
+import { useCommand, useCommandGroup } from 'vc:chamber';
+import { useVaporAsyncCommand } from 'vc:chamber-vapor';
+import { state } from 'vc:state';
+await state.gate;
+const { register, pending } = useCommand();
+state.offs.push(register('late', () => 'mine'));
+pending('late');
+const group = useCommandGroup('grp');
+state.offs.push(group.register('add', () => 'added'));
+state.offs.push(group.use({ started: () => { state.fired.push('plugin'); } }));
+state.offs.push(group.on('*', () => { state.fired.push('group'); }));
+useVaporAsyncCommand().pending('late');
+</script>
+<template><span>late</span></template>`;
+
+/** The same registrations, by composables made BEFORE the await: their scope may stop while the setup waits. */
+const SFC_EARLY = `<script setup vapor>
+import { useCommand, useCommandGroup } from 'vc:chamber';
+import { useVaporAsyncCommand } from 'vc:chamber-vapor';
+import { state } from 'vc:state';
+const { on, register, pending } = useCommand();
+const group = useCommandGroup('grp');
+const asyncCommand = useVaporAsyncCommand();
+await state.gate;
+state.offs.push(on('ping', () => { state.fired.push('early'); }));
+state.offs.push(register('late', () => 'mine'));
+pending('late');
+state.offs.push(group.register('add', () => 'added'));
+state.offs.push(group.use({ started: () => { state.fired.push('plugin'); } }));
+state.offs.push(group.on('*', () => { state.fired.push('group'); }));
+asyncCommand.pending('late');
+</script>
+<template><span>early</span></template>`;
+
 /** Compiled by the real compiler at test time, so the fixture follows what the installed compiler emits. */
 function compile(source = SFC, filename = 'Async.vue') {
   const { descriptor } = parse(source, { filename });
@@ -81,14 +122,18 @@ function evaluate(content: string, modules: Record<string, object>): unknown {
 let v: VueApi;
 let Async: unknown;
 let AsyncNested: unknown;
+let AsyncLate: unknown;
+let AsyncEarly: unknown;
 
 beforeAll(async () => {
   await waitForVueDetection();
   v = await import(/* @vite-ignore */ WITH_VAPOR);
   configureVue(v);
-  const modules = { vue: v, 'vc:chamber': chamber, 'vc:state': { state } };
+  const modules = { vue: v, 'vc:chamber': chamber, 'vc:chamber-vapor': chamberVapor, 'vc:state': { state } };
   Async = evaluate(compile().content, modules);
   AsyncNested = evaluate(compile(SFC_NESTED, 'AsyncNested.vue').content, modules);
+  AsyncLate = evaluate(compile(SFC_LATE, 'AsyncLate.vue').content, modules);
+  AsyncEarly = evaluate(compile(SFC_EARLY, 'AsyncEarly.vue').content, modules);
 });
 
 /** Let the gate's continuation, the restore microtasks and Suspense's resolve all run. */
@@ -153,6 +198,76 @@ describe('useCommand() after await in a compiled <script setup vapor> under Susp
     await settle();
 
     getCommandBus().dispatch('ping', null);
+    expect(state.fired).toEqual([]);
+  });
+
+  // Vue rc.15 (#16108) runs a cleanup armed in a stopped scope at once, so the
+  // composable is disposed before the setup's next line registers anything.
+  it('leaves no handler, group or command state behind that the setup made after the await, when unmounted during it', async () => {
+    const bus = getCommandBus();
+    // A probe holder: when it leaves and no other holder is left, the next holder gets a fresh entry.
+    const probe = commandState(bus);
+    const errors = probe.errors;
+    const { app } = mountUnderSuspense(AsyncLate);
+    app.unmount();
+    state.open();
+    await settle();
+    await settle();
+
+    expect(bus.hasHandler('late')).toBe(false);
+    expect(bus.hasHandler('grpAdd')).toBe(false);
+    bus.emit('grpPing', null);
+    bus.dispatch('ping', null);
+    expect(state.fired).toEqual([]);
+    // What they returned can still be called, as any off() can.
+    expect(state.offs).toHaveLength(4);
+    for (const off of state.offs) expect(() => off()).not.toThrow();
+    probe.dispose();
+    const next = commandState(bus);
+    expect(next.errors).not.toBe(errors);
+    next.dispose();
+  });
+
+  // Made before the await, the composables armed their cleanup on a live scope; the unmount ran it over an
+  // empty list, so what the setup registers after the await must not stay (on rc.14 and rc.15 alike).
+  it('leaves nothing behind that composables made BEFORE the await register after it, when unmounted during it', async () => {
+    const bus = getCommandBus();
+    const probe = commandState(bus);
+    const errors = probe.errors;
+    const { app } = mountUnderSuspense(AsyncEarly);
+    app.unmount();
+    state.open();
+    await settle();
+    await settle();
+
+    expect(bus.hasHandler('late')).toBe(false);
+    expect(bus.hasHandler('grpAdd')).toBe(false);
+    bus.emit('grpPing', null);
+    bus.dispatch('ping', null);
+    expect(state.fired).toEqual([]);
+    expect(state.offs).toHaveLength(5);
+    for (const off of state.offs) expect(() => off()).not.toThrow();
+    probe.dispose();
+    const next = commandState(bus);
+    expect(next.errors).not.toBe(errors);
+    next.dispose();
+  });
+
+  it('control: mounted, what composables made before the await register after it works, and goes on unmount', async () => {
+    const bus = getCommandBus();
+    const { app, host } = mountUnderSuspense(AsyncEarly);
+    state.open();
+    await settle();
+    await v.nextTick();
+    expect(host.textContent).toBe('early');
+    expect(bus.hasHandler('late')).toBe(true);
+    bus.dispatch('ping', null);
+    expect(state.fired).toContain('early');
+
+    app.unmount();
+    state.fired.length = 0;
+    expect(bus.hasHandler('late')).toBe(false);
+    bus.dispatch('ping', null);
     expect(state.fired).toEqual([]);
   });
 

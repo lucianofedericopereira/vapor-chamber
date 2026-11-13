@@ -333,7 +333,7 @@ config.
   `vapor-chamber/vitest/mcp` returns `{ bus, disposeAsync }`. Serve `bus` with
   `createMcpHandler` or `serveMcpStdio`, passing an `actionFilter` that
   allows the tools (`VITEST_MCP_ACTIONS`, or fewer). Await `disposeAsync()`
-  to stop the server.
+  to stop the server; it also ends a coverage run in progress.
 
 Tool names are camelCase, as a vapor-chamber schema bus names its actions.
 

@@ -8,7 +8,7 @@
  *   <out>/config/vapor-chamber.php        command -> action-class registry
  *   <out>/app/Actions/<Studly>.php        one invokable action stub per command
  *
- * The stubs match examples/laravel-backend/ exactly: invokable classes with a
+ * The stubs match examples/laravel/backend/ exactly: invokable classes with a
  * `__invoke($target, $payload, $user)` shape, resolved from the container by
  * VaporChamberController via config('vapor-chamber.handlers'). Field maps
  * become Validator::make() rules; the example controller answers the thrown

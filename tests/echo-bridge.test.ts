@@ -1,7 +1,7 @@
 /**
  * createEchoBridge: Laravel Echo / Reverb broadcasts onto the bus, against a mock of the laravel-echo API, so no dependency is needed.
  * Why: a broadcast must reach the app as a bus event on the right channel kind, and a throwing listener must not escape into Echo.
- * Shows: public, private and presence channels emit; onBroadcast can dispatch instead; a listener error is caught; teardown leaves every channel.
+ * Shows: public, private and presence channels emit; onBroadcast can dispatch instead; a listener error is caught; teardown leaves every channel; a second install replaces the first, as the SSE bridge's does, against a mock that caches channels the way laravel-echo does.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
@@ -132,5 +132,47 @@ describe('createEchoBridge', () => {
     bridge.install(bus);
     bridge.dispose();
     expect(echo._left.sort()).toEqual(['lobby', 'orders']);
+  });
+});
+
+/**
+ * laravel-echo's own channel handling (read in laravel-echo 2.3.7's dist): `channel(name)`,
+ * `private(name)` and `join(name)` return ONE cached channel per name until `leave(name)`
+ * deletes it, and `listen()` binds another callback each call, never replacing one.
+ */
+function makeCachingEcho() {
+  const channels: Record<string, { listeners: Record<string, Array<(p: any) => void>> }> = {};
+  function chan(name: string) {
+    channels[name] ??= { listeners: {} };
+    const entry = channels[name];
+    const ch = {
+      listen(event: string, cb: (p: any) => void) { (entry.listeners[event] ??= []).push(cb); return ch; },
+    };
+    return ch;
+  }
+  return {
+    channel: chan,
+    private: chan,
+    join: chan,
+    leave: (n: string) => { delete channels[n]; },
+    fire: (name: string, event: string, payload: any) => { for (const cb of channels[name]?.listeners[event] ?? []) cb(payload); },
+  };
+}
+
+describe('createEchoBridge - a second install', () => {
+  it('replaces the first: each broadcast reaches the new bus once and the old bus no more', () => {
+    const echo = makeCachingEcho();
+    const first = createCommandBus();
+    const second = createCommandBus();
+    const heard: string[] = [];
+    first.on('OrderShipped', () => heard.push('first'));
+    second.on('OrderShipped', () => heard.push('second'));
+
+    const bridge = createEchoBridge({ echo, channels: [{ name: 'orders', events: ['OrderShipped'] }] });
+    bridge.install(first);
+    bridge.install(second);
+    echo.fire('orders', 'OrderShipped', { id: 1 });
+
+    expect(heard).toEqual(['second']);
   });
 });

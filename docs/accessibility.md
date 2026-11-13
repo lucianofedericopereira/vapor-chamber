@@ -78,7 +78,7 @@ On Vapor, a placeholder that waits is `VcTransition` (`vapor-chamber/transitions
 - Give the transition a bus of its own. On the app's bus its commands would count in
   `anyPending` and `errors`.
 
-The CartPanel in `examples/vapor-sfc` shows it.[^placeholder]
+The CartPanel in `examples/apps/vapor-sfc` shows it.[^placeholder]
 
 [^placeholder]: `tests/vapor/busy-placeholder.test.ts` pins that a fast command never shows the placeholder, and a slow one shows it until Leave answers.
 

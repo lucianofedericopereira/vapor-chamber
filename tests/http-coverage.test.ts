@@ -1,7 +1,7 @@
 /**
  * src/http.ts edge cases: CSRF token sources and refresh, Retry-After parsing, abort, response parsing, bodies, safe wrappers, response cache.
  * Why: a missed CSRF token, a retry that ignores the server's wait or an abort, a cache that evicts or leaks across clients, or a case-sensitive header miss would send wrong requests or hide failures from every caller. Also the only file reaching the CSRF cache hit, a document without querySelector, safe.put, patch and delete, and the response cache's full-size eviction, so the 100% floor needs it.
- * Shows: readCsrfToken reads the hidden input, the cookie named by meta xsrf-cookie, and a TTL cache, or returns null; a 419 refreshes once, coalesced waiters share one refresh and one token, and a 419 that survives it throws without onSessionExpired; Retry-After as a future HTTP date is honoured while an unparseable or past one falls back to backoff; a user abort ends the fallback signal and the backoff sleep; non-JSON content-type and missing headers degrade to text; primitive bodies are String()-ed; safe.put, patch and delete return SafeResults; createResponseCache evicts LRU, is per instance, has getAny, invalidate and dev freezing; res.headers keys are lower-cased.
+ * Shows: readCsrfToken reads the hidden input, the cookie named by meta xsrf-cookie, and a TTL cache, or returns null; a 419 refreshes once, coalesced waiters share one refresh and one token, and a 419 that survives it throws without onSessionExpired; Retry-After as a future HTTP date is honoured while an unparseable or past one falls back to backoff; a user abort ends the fallback signal and the backoff sleep; non-JSON content-type and missing headers degrade to text; primitive bodies are String()-ed; safe.put, patch and delete return SafeResults; createResponseCache evicts LRU, is per instance, has getAny, invalidate and dev freezing, and re-setting a key at capacity evicts nothing and makes it the most recently used; res.headers keys are lower-cased.
  * See: docs/whitepaper.md section 6.2.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -505,6 +505,21 @@ describe('cache.set at capacity (50 entries)', () => {
     expect(cache.getAny('json:/k0')).not.toBeNull();
     expect(cache.getAny('json:/k2')).not.toBeNull();
     expect(cache.getAny('json:/k50')).not.toBeNull();
+  });
+
+  // A refresh (SWR, a 304 confirm, no-cache) sets a key the cache already holds: the size does not grow.
+  // Not k0: re-setting the oldest key evicts that same key and appends it, so it passes either way.
+  it('re-setting a key it holds evicts nothing, and makes that key the most recently used', () => {
+    const cache = createResponseCache();
+    for (let i = 0; i < 50; i++) cache.set(`json:/k${i}`, { i });
+    cache.set('json:/k1', { i: 'fresh' });
+    for (let i = 0; i < 50; i++) expect(cache.getAny(`json:/k${i}`), `k${i}`).not.toBeNull();
+
+    cache.set('json:/k50', { i: 50 }); // one new key: one eviction, the oldest, k0
+    expect(cache.getAny('json:/k0')).toBeNull();
+    cache.set('json:/k51', { i: 51 }); // then k2: the refreshed k1 is newer than it
+    expect(cache.getAny('json:/k2')).toBeNull();
+    expect(cache.getAny('json:/k1')?.data).toEqual({ i: 'fresh' });
   });
 });
 

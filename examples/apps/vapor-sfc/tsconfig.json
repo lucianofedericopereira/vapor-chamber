@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  // `../../snippets/vue-vapor-component.vue` is not part of this app: it is the standalone
+  // SFC example, checked here because plain `tsc` (tsconfig.patterns.json)
+  // cannot read a `.vue` file and this example already runs `vue-tsc` with
+  // `vue` and `vapor-chamber` resolvable. Listed as a file rather than a glob,
+  // so no other example is dragged in.
+  "include": ["src/**/*", "vite.config.ts", "../../snippets/vue-vapor-component.vue"]
+}

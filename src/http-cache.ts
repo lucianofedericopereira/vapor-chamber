@@ -104,9 +104,15 @@ export function createResponseCache(): ResponseCache {
 
     // No `url`: a `responseType:url` key, its URL the part after the first ':'.
     set(key, data, ttl = CACHE_DEFAULT_TTL, staleTtl = 0, url = key.slice(key.indexOf(':') + 1)) {
-      // Evict the oldest (first) entry at max size; there is one, since the
-      // size is at least CACHE_MAX_SIZE.
-      if (entries.size >= CACHE_MAX_SIZE) entries.delete(entries.keys().next().value as string);
+      // A key it holds (a refresh) is deleted first, so `set` appends it as
+      // the most recently used, as `get` does, and the size does not grow:
+      // nothing is evicted. Map.set alone would keep its old place, and the
+      // size check below would evict a live entry for it. Vue 3.6 rc.15's
+      // bounded string cache (f1f383635) counts likewise: `++size` on a miss only.
+      // Otherwise evict the oldest (first) entry at max size; there is one,
+      // since the size is at least CACHE_MAX_SIZE.
+      if (entries.has(key)) entries.delete(key);
+      else if (entries.size >= CACHE_MAX_SIZE) entries.delete(entries.keys().next().value as string);
       // Shared by every later hit - see freeze.ts.
       freezeCached(data);
       const now = Date.now();

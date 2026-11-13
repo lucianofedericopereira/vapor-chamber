@@ -8,9 +8,10 @@ Thank you for considering a contribution.
 
 You need:
 
-- Node.js 24, 24.5.0 or later. `engines.node` in [package.json](./package.json) is `^24.5.0`,
-  and CI tests no other major.
-- npm 11, which ships with Node 24.
+- Node.js <!-- vc:nodeVersion -->26.13.0<!-- /vc:nodeVersion -->, the version in `.node-version`, which CI
+  runs. `engines.node` in [package.json](./package.json) is
+  <!-- vc:nodeEngines -->>=24.5.0<!-- /vc:nodeEngines -->.
+- npm 11, which ships with that Node.
 
 ```bash
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
@@ -86,6 +87,7 @@ docs/
   performance.md       Performance & tuning reference
   V8-RULES.md          The settled V8 rules, short, each with its evidence
   TESTING_PROCEDURE.md How to measure a speed or size change, step by step
+  typescript.md        The two TypeScript versions: 7 for tsc, 6 for the API
   rc-alignment.md      What to do when a new Vue RC lands
   rc-alignment-log.md  The record of each RC cycle (dev-only)
   decisions.md         Append-only decision log
@@ -142,7 +144,7 @@ order, plus the drift and clean-tree steps. Deliberately NOT in that chain:
 - `ab:vue`: it needs a second Vue installed.
 - `npm run test:browser`: it needs a Chromium install. CI runs it.
 
-The suite runs the same on macOS and Linux (CI runs both), from a clone or from an unpacked
+The suite runs the same on Node 24 and 26 (CI runs both, on Linux), from a clone or from an unpacked
 archive. `git` itself must be installed.
 
 - Four cases read this repository's commits (`tests/ab-ci.test.ts`,
@@ -183,8 +185,9 @@ does, which a test cannot:
 - `stamp-docs --check`: fails on a stale generated number, or on a pinned range no version
   satisfies or that starts above the current version.
 
-**CI.** Every job runs on Node 24, the only major the package supports
-(`.github/workflows/ci.yml`).
+**CI.** Every job runs on the Node in `.node-version`,
+<!-- vc:nodeVersion -->26.13.0<!-- /vc:nodeVersion --> (`.github/workflows/ci.yml`). CI runs no other
+Node in the `engines` range.
 
 - One Linux job, `check`, runs once: typecheck, the guards (`lint:check`), the generated docs
   diff, the suite under coverage (so the floors gate a pull request), the Vapor project, the size
@@ -195,10 +198,10 @@ does, which a test cannot:
   different install or budget.
 - The suite is the same under coverage: the timing loops run only with `VC_TIMING=1`
   (`tests/under-coverage.ts`).
-- macOS runs the build, both test projects and the size budgets once `check` is green, so a Linux
-  failure costs no macOS minutes.
-- Every job takes Node from `.node-version`, and macOS and Ubuntu are pinned, so a runner or Node
-  update cannot turn CI red by itself. A Node bump is a commit, and it runs the V8-shape tests.
+- Node 24 runs the build, both test projects and the size budgets once `check` is green on
+  Node 26, so a failure there costs no second run.
+- Every job takes Node from `.node-version`, except the Node 24 job, which pins its own 24.x, and
+  the Ubuntu image is pinned, so a runner or Node update cannot turn CI red by itself. A Node bump is a commit, and it runs the V8-shape tests.
 - A push that changes only files no check reads (`paths-ignore` in ci.yml: the funding file, the
   issue and PR templates) runs no CI.
 
@@ -208,7 +211,7 @@ outlet's acceptance guards live there. `npm test` runs both projects back to bac
 `test:vapor` after `build`, since its size guard measures a real production bundle.
 
 The `examples/` workspaces sit outside that gate. They build against the working tree on demand.
-`examples/exo-astro` pins the same Node 24 line as the library. It has no directive scanner of its
+`examples/apps/exo-astro` takes the same `engines` range as the library. It has no directive scanner of its
 own (it uses the library's page bindings, which the suite covers), so `npm test` from the root
 does not exercise that example's code.
 
@@ -313,7 +316,7 @@ Rules that apply across modules, each written down because it was learned the ex
 
 1. Update [CHANGELOG.md](./CHANGELOG.md) with a new section for the release. Then check the
    Laravel side against the wire contract:
-   - Build the demo with `examples/laravel-app/setup.sh`, serve it, and run
+   - Build the demo with `examples/laravel/app/setup.sh`, serve it, and run
      `node scripts/verify-contract.mjs --base http://127.0.0.1:8000`, with
      [`pact-verifier`](https://github.com/pact-foundation/pact-reference/releases) on the
      `PATH`. Every case must pass.

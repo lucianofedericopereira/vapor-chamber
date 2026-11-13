@@ -69,7 +69,8 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       const src = readFileSync(plain, 'utf8');
 
       // A ratchet: a rise goes to the measured size with its pieces recorded in the log; a lower reading locks the win. If this fails, read the import graph first.
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(13_718);
+      // Log 36.F58: rolldown 1.2.15 -> 1.2.19 (vite 8.3.8) orders dist's import declarations differently; same 42,557 raw bytes in another module order, brotli 13,716 -> 13,786.
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(13_788);
 
       // chamber.ts-only names, read off the unminified build, since a minifier renames module-local names.
       const forbidden = [

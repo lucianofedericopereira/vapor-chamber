@@ -233,9 +233,9 @@ command such as `drawerEnter`. Bind them with `<Transition v-bind="hooks">`. On 
 `VcTransition` from `vapor-chamber/transitions/vapor` is a bus-driven transition, and
 [accessibility.md](../accessibility.md) shows it as a placeholder that waits.
 
-On a vDOM app, `<Transition mode="out-in">` with these hooks needs an async bus. On a sync bus
-the hooks call `done()` at once, and Vue's vDOM `out-in` then throws and renders nothing. The
-defect is Vue's (vuejs/core#15727). Vapor's `<Transition>` and the default mode are not affected.
+`<Transition mode="out-in">` works with these hooks on a sync bus or an async one. On a sync bus
+the hooks call `done()` at once, and Vue queues the swap, so it settles as the default mode does
+(vuejs/core#15727, fixed in 3.5.45 and 3.6.0-rc.15, the peer range's floors).
 
 ## Build a form
 

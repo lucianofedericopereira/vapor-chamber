@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/store';
 
 ### fieldRef
 
-**Function** - [src/store.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L98)
+**Function** - [src/store.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L110)
 
 ```ts
 fieldRef<S extends object, K extends keyof S & string>(store: { readonly state: { readonly value: S; }; $onField: (key: K, fn: (value: S[K]) => void) => () => void; }, key: K) => { readonly value: S[K]; }
@@ -305,7 +305,7 @@ The value of a store's `share`, made by `shareTabs`: null where there are no tab
 
 ### defineChamberStore
 
-**Variable** - [src/store.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L86)
+**Variable** - [src/store.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L98)
 
 ```ts
 defineChamberStore<S extends object, R extends Record<string, import("./store-base").StoreReducer<S> | null>>(id: string, options: import("./store-base").ChamberStoreOptions<S, R>) => <B extends import("./command-bus").BaseBus>(bus: B, router?: import("./store-base").StoreRouter) => import("./store-base").ChamberStore<S, R, B>

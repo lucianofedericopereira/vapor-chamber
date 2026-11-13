@@ -109,7 +109,8 @@ export type OutboxOptions = {
    * flushes again then, no sooner than a second later. While the answer
    * repeats, the wait doubles (1 s, 2 s, 4 s, ...) up to 30 s; a longer
    * declared wait wins; a successful replay starts it over at 1 s.
-   * `dispose()` removes the listeners and ends that wait.
+   * `dispose()` removes the listeners and ends that wait: after it, nothing
+   * flushes on its own, a send's answer or a queue that lands later included.
    */
   autoFlush?: boolean;
   /**
@@ -210,7 +211,7 @@ export type Outbox = {
   rejected: Signal<OutboxRejection[]>;
   /** Drop every queued record, in every tab sharing the queue. A waiting `done` settles with `outbox:aborted:clear`. */
   clear(): Promise<void>;
-  /** Remove the window listeners, end a Retry-After wait, release this tab's locks. Idempotent; the bus's `dispose()` runs it. */
+  /** Remove the window listeners, end a Retry-After wait, release this tab's locks; nothing flushes on its own after it. Idempotent; the bus's `dispose()` runs it. */
   dispose(): void;
   /** @internal The bus's half: `createAsyncCommandBus({ outbox })` calls it once. */
   readonly [_OUTBOX]: BusOutbox;
@@ -603,9 +604,12 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       // successful replay resets it. A new wait replaces a pending one, so a
       // flush() or 'online' during the wait cannot start a second timer.
       // (tests/wire-contract.test.ts)
+      // Not once disposed: a send on the wire at dispose() answers after
+      // `waits.wakeAll()` ended the wait, and a new one would flush a released
+      // tab's records (tests/wire-contract.test.ts).
       failed++;
       const retryIn = (error as BusError).context?.retryIn;
-      if (autoFlush && isDelay(retryIn)) {
+      if (autoFlush && isDelay(retryIn) && !ending.signal.aborted) {
         backoff = Math.max(retryIn, Math.min(30_000, Math.max(backoff * 2, 1000)));
         waits.wakeAll();
         void waits.sleep(delayOption(backoff, 1000)).then((due) => { if (due) void flush(); });
@@ -625,9 +629,15 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     return flushPromise;
   }
 
-  /** Flush on its own when it may: on a bus, loaded, online, something of this tab's held. */
+  /**
+   * Flush on its own when it may: on a bus, loaded, online, something of this
+   * tab's held, not disposed. Disposed, this tab's lock is released and the
+   * tab that takes it over sends these records: a stored queue landing after
+   * dispose() (or a transport's `opened`) must not send them too.
+   * tests/outbox.test.ts.
+   */
   function maybeFlush(): void {
-    if (autoFlush && sendNow !== null && !loading && waiting !== 0 && isOnline()) void flush();
+    if (autoFlush && sendNow !== null && !loading && waiting !== 0 && isOnline() && !ending.signal.aborted) void flush();
   }
 
   // The stored queue, read when the half is made: at once from a sync storage

@@ -1,0 +1,151 @@
+<!--
+  vapor-chamber - sprinkled-JS demo for server-rendered pages.
+
+  Drop-in pattern: Blade / Rails / Django / WordPress emits HTML with a
+  CSRF meta tag, then loads the IIFE bundle and wires interactive bits
+  via `VaporChamber.connect()`.
+
+  Runnable with ONE process - the mock backend also serves this page, with the
+  cart already rendered into it (the Blade half of the pattern):
+
+    cd examples/pages/sprinkled-blade
+    node mock-server.mjs        # -> http://localhost:3001
+
+  Serving it as a plain static file still works and is the cross-origin case
+  (CORS preflight, absolute endpoint, no cart rendered into the page, so one
+  startup read fills the count):
+
+    node ../../shared/static-server.mjs   # -> http://localhost:3000/examples/pages/sprinkled-blade/index.html
+    node mock-server.mjs        # backend on :3001
+
+  In a real Laravel deploy, replace the meta tag with `{{ csrf_token() }}`
+  and route `/api/vc` to your VaporChamberController. See
+  ../../laravel/backend/ for runnable PHP companions.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="demo-csrf-token-replace-with-blade-csrf_token" />
+  <title>vapor-chamber - sprinkled-JS / Blade demo</title>
+  <!-- Layout (column, panels, pre) from the shared sheet; the rules below are this page's.
+       Relative, as the bundle below is: mock-server.mjs serves it at /shared/base.css. -->
+  <link rel="stylesheet" href="../../shared/base.css">
+  <style>
+    button { padding: 0.5rem 1rem; cursor: pointer; }
+    button[aria-disabled="true"] { cursor: wait; }
+    button.vc-error { border-color: #c00; color: #c00; }
+    .row { display: flex; gap: 1rem; align-items: center; }
+    /* Nothing below may move when state changes. The status lines always
+       occupy their line even while empty, and the counter reserves room for
+       the digits it will grow into (tabular figures keep them from jittering
+       as values change). Reflow is the flicker people actually notice -
+       fetch latency is only the half you can see coming. */
+    #status, #error-msg { min-height: 1.4em; margin: 0.75rem 0 0; }
+    #count { font-variant-numeric: tabular-nums; min-width: 18ch; }
+    #count:empty::before { content: 'not read yet'; color: #6b6b6b; }
+    #log { min-height: 8.5em; }
+    .ok { color: #060; }
+    .err { color: #c00; }
+    /* A busy display that waits (docs/accessibility.md): bindCommands sets
+       vc-loading from the press to the answer. The dots stay hidden for the
+       first 120 ms, so a fast answer never flashes them. */
+    .vc-loading .busy { visibility: hidden; animation: vc-busy-after 0s 120ms forwards; }
+    @keyframes vc-busy-after { to { visibility: visible; } }
+    .busy { visibility: hidden; }
+  </style>
+</head>
+<body>
+
+  <h1>Sprinkled-JS demo</h1>
+  <p>
+    Server-rendered HTML page (think Blade / Rails / Django).
+    Vue is <em>not</em> involved; just vapor-chamber's IIFE bundle dispatching
+    commands to a backend over HTTP.
+  </p>
+
+  <div class="panel">
+    <h2>Cart</h2>
+    <div class="row">
+      <button type="button" data-vc-command="cartAdd" data-vc-target='{"id":1}' data-vc-payload='{"qty":1}'>Add to cart<span class="busy" aria-hidden="true"> ...</span></button>
+      <button type="button" data-vc-command="cartClear">Clear<span class="busy" aria-hidden="true"> ...</span></button>
+      <button type="button" data-vc-command="cartRemove">Remove (the server has no such command)<span class="busy" aria-hidden="true"> ...</span></button>
+      <!-- Served from the backend (http://localhost:3001), this span arrives
+           already filled in, with the cart as JSON in `data-cart` - the Blade
+           `@json($cart)` moment: first paint is correct, no flicker, no
+           startup request. Served as a static file it arrives empty and the
+           count shows after the first answer. What it must never do is
+           hardcode 0: the cart lives on the server and outlives the page. -->
+      <span id="count" data-vc-text="cart.summary"></span>
+    </div>
+    <p id="status" role="status"></p>
+    <p id="error-msg" class="err"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Telemetry log</h2>
+    <p>Every dispatch is logged here client-side via <code>bus.on('*', ...)</code>.</p>
+    <pre id="log">(waiting...)</pre>
+  </div>
+
+  <!-- In production: load from CDN
+       <script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber-core.iife.min.js"></script> -->
+  <!-- For local dev, point at the locally-built bundle: -->
+  <script src="../../../dist/vapor-chamber-core.iife.min.js"></script>
+
+  <script>
+    // The cart the server rendered into the page, if it did. Same origin when
+    // the backend served this page (no CORS at all - the real Blade shape),
+    // absolute when it was opened from a static host.
+    const rendered = document.getElementById('count').dataset.cart;
+
+    // One-line bus + HTTP transport setup. csrf:true reads the meta tag
+    // automatically and attaches X-CSRF-TOKEN to every request.
+    const { bus } = VaporChamber.connect({
+      endpoint: rendered === undefined ? 'http://localhost:3001/api/vc' : '/api/vc',
+    });
+
+    // The cart is a store behind the transport: its actions have no local
+    // change (`null`), and whatever the server answers is its state (`answer`).
+    // It starts from the cart the server rendered, never from a number of ours.
+    const cart = VaporChamber.defineChamberStore('cart', {
+      state: () => (rendered === undefined ? { summary: '' } : JSON.parse(rendered)),
+      reducers: { add: null, clear: null, State: null },
+      answer: (_state, value) => value,
+    })(bus);
+
+    // A static host rendered no cart, so the page reads it once: the store action
+    // 'State' is the command cartState, sent by the transport, its answer the state.
+    if (rendered === undefined) cart.State();
+
+    // The buttons and the count are markup. bindCommands dispatches each
+    // data-vc-command, marks the button aria-disabled while it is in flight
+    // (never disabled, which would send keyboard focus to <body>), ignores a
+    // press meanwhile and announces a failure. bindDisplay writes the count.
+    VaporChamber.bindCommands(document.body, { bus });
+    VaporChamber.bindDisplay(document.body, { bus });
+
+    // Telemetry: log every successful dispatch + failure to the page.
+    const logEl = document.getElementById('log');
+    const lines = [];
+    bus.on('*', (cmd, result) => {
+      const ts = new Date().toTimeString().slice(0, 8);
+      lines.unshift(`[${ts}] ${cmd.action} -> ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+      logEl.textContent = lines.slice(0, 8).join('\n');
+    });
+
+    // The outcome in words. Text, never HTML: a failure's message is the
+    // backend's sentence. The status line is a live region, so a screen reader
+    // hears a success. A failure is already announced by bindCommands, so it
+    // goes to a line that is not one.
+    const statusEl = document.getElementById('status');
+    const errorEl = document.getElementById('error-msg');
+    bus.on('cart*', (cmd, result) => {
+      statusEl.textContent = result.ok ? ({ cartAdd: 'Added.', cartClear: 'Cleared.' }[cmd.action] ?? '') : '';
+      errorEl.textContent = result.ok ? '' : `Error: ${result.error.message}`;
+    });
+  </script>
+
+</body>
+</html>

@@ -127,13 +127,13 @@ export default defineConfig({
       // docs/COVERAGE.md freshness gate then cannot be satisfied at all.
       reportOnFailure: true,
       // Anchored, and examples explicitly excluded: `src/**/*.ts` also matches
-      // nested source trees like examples/exo-astro/src/**, so example code
+      // nested source trees like examples/apps/exo-astro/src/**, so example code
       // was silently counted toward the library's thresholds. The gate must
       // measure what ships in dist/, nothing else.
       include: ['src/**/*.ts'],
       // Excluded from coverage:
       //  - examples/**, tests/**: `src/**/*.ts` also matches nested source
-      //    trees like examples/exo-astro/src/**, so example code was silently
+      //    trees like examples/apps/exo-astro/src/**, so example code was silently
       //    counted toward the library's thresholds. The gate measures what
       //    ships in dist/, nothing else.
       //  - index.ts / plugins.ts: pure re-export aggregators

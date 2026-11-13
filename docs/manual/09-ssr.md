@@ -59,6 +59,8 @@ createVaporChamberApp(App).mount('#app')
 - Nothing replays: the client ends on the server's state, a reducer that minted an id included.
 - A store created after `seedStores` starts from its seeded state. On a fresh page the server's
   state wins over a saved one.
+- A store a component creates during the render is the request's: it is still there after
+  `renderToString`, and goes with the request's bus.
 - Route data stays the router's.
 
 Next: [10. Testing](./10-testing.md).

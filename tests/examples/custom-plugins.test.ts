@@ -1,5 +1,5 @@
 /**
- * examples/custom-plugins.ts imported for real: its demo runs, then its exported bus is probed.
+ * examples/snippets/custom-plugins.ts imported for real: its demo runs, then its exported bus is probed.
  * Why: the example is what a reader copies, and its plugins are local functions, so only the import shows them in the example's order.
  * Shows: the sender mints the timestamp; a prototype-named action reaches no rule; the rate limiter counts only its action; the demo prints what it claims, kept or rolled back.
  * See: audit CU-6, audit CU-10.
@@ -13,7 +13,7 @@ async function loadExample(): Promise<{ bus: CommandBus; addItem: (item: object,
   vi.useFakeTimers({ toFake: ['Date'] });
   const logs: string[] = [];
   vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')); });
-  const { bus, addItem } = await import('../../examples/custom-plugins');
+  const { bus, addItem } = await import('../../examples/snippets/custom-plugins');
   return { bus: bus as unknown as CommandBus, addItem: addItem as never, logs };
 }
 
