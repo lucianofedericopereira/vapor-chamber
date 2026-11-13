@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v1.36.0 - 2026-11-13
 
 Aligned with Vue 3.6.0-rc.15, and developed and tested on Node 26. rc.15 runs a cleanup armed in a stopped scope at once, which left two composables' registrations behind. Reading each module against its commits found fifteen older defects, and six more were proved by failing tests through the public API.
 
