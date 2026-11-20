@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+Aligned with Vue 3.6.0-rc.16: 73 commits, every diff read. Four behaviours rc.16 changes are pinned by tests that fail on rc.15, and the dependency set moves to the newest releases its ranges admit. The performance pass over the core, router and store is recorded in `docs/rc-alignment-log.md` section 36.F59.
+
+- Changed the peer range to `>=3.5.45 || >=3.6.0-rc.16` for `vue` and `@vue/reactivity`. Migrate: an app on Vue 3.6 below rc.16 updates Vue; the 3.5 floor is unchanged.
+- Changed, through Vue: every app root is created without a parent instance. A second Vapor app mounted from a hook in a first app no longer reads the first app's provides, and a setup that threw leaves no current instance for the next app to inherit (vuejs/core#16325). Migrate: a second app that relied on the first app's provides calls `provide()` on itself, or is created outside a hook.
+- Improved, through Vue: `@vue:xxx` lifecycle events fire on components. The per-element form is still unsupported and is dropped at compile time (vuejs/core#16254).
+- Improved, through Vue: returning to the third branch of a `v-if` / `v-else-if` / `v-else` chain inside `<Transition mode="out-in"><KeepAlive>` reuses the cached component instead of mounting it again (vuejs/core#16352).
+- Improved, through Vue: an error in a nested Vapor component's setup is reported once, not twice (vuejs/core#16315), and a loader rejection alone is a loader error (vuejs/core#16322).
+- Improved, through Vue: a Vapor Transition around a slot keeps fallthrough attrs, root scope ids, custom directives and `v-show` state for its content, hydrated content included (vuejs/core#16280, #16290, #16291, #16293, #16341, #16346).
+- Changed the development dependencies to the newest releases their ranges admit: Vitest and its browser and coverage companions 5.1.1, Playwright 1.65.1, undici 8.13.0, Biome 2.6.8, Astro 7.4.13 in `examples/apps/exo-astro`, and the Vue 3.5 test copy 3.5.46. TypeScript stays 6 for the compiler API and `vue-tsc`, with 7.0.2 as the `tsc` binary ([docs/typescript.md](docs/typescript.md)).
+- Changed the Composer package's requirement to `laravel/framework ^13.43`, the newest release, from `^13.42`. PHP stays `^8.3`, what Laravel 13.43 asks. Migrate: an app on Laravel 13 below 13.43 updates Laravel.
+
 ## v1.36.0 - 2026-11-13
 
 Aligned with Vue 3.6.0-rc.15, and developed and tested on Node 26. rc.15 runs a cleanup armed in a stopped scope at once, which left two composables' registrations behind. Reading each module against its commits found fifteen older defects, and six more were proved by failing tests through the public API.

@@ -292,12 +292,12 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.7",
+    "@biomejs/biome": "^2.6.8",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@vitejs/plugin-vue": "^6.0.11",
-    "@vitest/browser-playwright": "^5.1.0",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/browser-playwright": "^5.1.1",
+    "@vitest/coverage-v8": "^5.1.1",
     "@vue/devtools-api": "^8.1.5",
     "@vue/reactivity": "^3.6.0-rc.16",
     "@vue/runtime-vapor": "^3.6.0-rc.16",
@@ -306,17 +306,17 @@
     "eventemitter3": "^5.0.4",
     "happy-dom": "^21.0.4",
     "mitt": "^3.0.1",
-    "playwright": "^1.65.0",
+    "playwright": "^1.65.1",
     "rxjs": "^7.8.2",
     "semver": "^7.8.6",
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",
     "typescript7": "npm:typescript@^7.0.2",
-    "undici": "^8.12.4",
+    "undici": "^8.13.0",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0",
+    "vitest": "^5.1.1",
     "vue": "^3.6.0-rc.16",
-    "vue35": "npm:vue@^3.5.45"
+    "vue35": "npm:vue@^3.5.46"
   },
   "engines": {
     "node": ">=24.5.0"

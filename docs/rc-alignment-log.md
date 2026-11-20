@@ -20550,6 +20550,100 @@ This section is written as the cycle goes. What follows is what is verified so f
   - 9. Bytes per piece, measure-size over each arm inside the package root: `./router` 37f1ce8 34,390 / 11,674, 248eee2 (#13) 34,423 / 11,681 (+33 / +7), a5cb430 (#12) 34,498 / 11,724 (+75 / +43), minified / brotli; every other row (core, the consumer, the other entries, the Vapor wiring) unchanged.
   - Decision: both fixes stand.
 
+### 36.F59 Vue 3.6.0-rc.16 alignment cycle (2026-11-20, branch `rc16`)
+
+Read first, in full: docs/rc-alignment.md, docs/TESTING_PROCEDURE.md,
+docs/V8-RULES.md, CONTRIBUTING.md, 36.F58, the top of CHANGELOG.md,
+ROADMAP.md and the whitepaper's appendix B. The tree was the v1.36.0
+download with no history, so the copy was committed on `main` and `rc16` cut
+from it.
+
+- **What rc.16 is.** Published 2026-11-20. `v3.6.0-rc.15..v3.6.0-rc.16`
+  holds 73 commits, no merge in the range. The weight is runtime-vapor:
+  Transition and slot hand-offs through interop (#16280, #16290, #16291,
+  #16293, #16341, #16346), KeepAlive after an out-in leave (#16352),
+  Teleport order and hydration (#16311, #16323, #16330, #16333, #16364,
+  #16366), refs and slot props (#16289, #16298, #16303, #16310), directive
+  roots (#16261) and fallthrough attrs (#16265, #16296). compiler-vapor
+  keeps static camelCase DOM props out of the template (#16259);
+  compiler-sfc fixes tsconfig include and generic scopes (#16152, #16253,
+  #16225); SSR maps static DOM prop aliases and renders cloneVNode attrs on
+  a vapor slot root (#16334, #16340). Two performance commits keep slot
+  caches on the slots object and stop rescanning vdom slot content
+  (#16297, #16331, #16335). `packages/reactivity/src` is byte-identical to
+  rc.15, so `ab:vue` had nothing to measure.
+- **The reading.** Every diff of `packages/*/src/*` in the range was saved
+  and read in full: 73 commits, V 73 / TV 0. The release notes name 60; the
+  rest are the merge, dependency and release commits and two internal
+  refactors (`c5c18556a`, `019a2bf1f`). A contact is a file whose behaviour
+  this library reaches, a symbol it uses, or an API `src/vapor.ts`
+  re-exports. Contacts: app creation (#16325), component vnode hooks
+  (#16254), async loader and setup errors (#16315, #16322, #16338),
+  KeepAlive out-in cache (#16352), Transition-through-slot (#16280,
+  #16290, #16291, #16293, #16341, #16346), teleport refs/hydration
+  (#16311, #16323, #16330, #16333, #16364, #16366), fallthrough attrs
+  (#16265, #16296) and the slot caches (#16297, #16331, #16335).
+- **The suite on rc.16 before the pins.** `test:run` 1 red:
+  tests/vapor-second-app-fixture.test.ts, "from a mounted hook the second
+  app sees the first app's provides, over its own", `expected 'MISSING' to
+  be 'one'`. That is #16325 changing the rc.13 L1 record. `test:vapor` 17
+  files, 55 tests, green. No other test moved.
+- **Tests pinned, red on rc.15 in the main tree, green on rc.16** (7 tests,
+  4 behaviours; rc.15 and rc.16 swapped by npm, no source change):
+  - tests/vapor-second-app-fixture.test.ts (updated): a second app from a
+    hook has its own provides (`MISSING` / `two`, not `one`), and a setup
+    that threw leaves no current instance for the next root.
+  - tests/vapor-lifecycle-events-fixture.test.ts: `@vue:mounted`,
+    `beforeUpdate`, `updated`, `beforeUnmount` and `unmounted` fire on a
+    component; the element form is still ignored.
+  - tests/vapor-setup-error-once-fixture.test.ts: a child whose setup
+    throws reports once; the same component at the root is the control.
+    On rc.15 the child reported twice.
+  - tests/vapor-keepalive-out-in-fixture.test.ts: a three-branch chain
+    inside `<Transition mode="out-in"><KeepAlive>` runs the third branch's
+    setup once over `1 -> 2 -> 3 -> 2 -> 3`. On rc.15 it ran twice
+    (`{ a: 1, b: 1, c: 2 }`).
+- **The bump.** `vue`, `@vue/reactivity` and `@vue/runtime-vapor`
+  devDependencies, the two peer ranges (`>=3.5.45 || >=3.6.0-rc.16`) and
+  both example pins, package-lock.json by `npm install`. All `@vue/*`
+  packages that follow `vue` read rc.16. `vue35` moves to 3.5.46.
+- **Dependencies, all to the newest their ranges admit.** Vitest,
+  `@vitest/coverage-v8` and `@vitest/browser-playwright` 5.1.1 (the three
+  pin each other, so uninstalled and installed together with lifecycle
+  scripts off; the `vitest: >=5.0.0` peer range was restored after npm
+  dropped it), Playwright 1.65.1, undici 8.13.0, Biome 2.6.8, Astro 7.4.13
+  in `examples/apps/exo-astro`, `vue35` 3.5.46. TypeScript stays 6 for the
+  compiler API and `vue-tsc`, 7.0.2 for `tsc` (docs/typescript.md).
+  Composer: `laravel/framework ^13.42` -> `^13.43`, the newest release;
+  PHP stays `^8.3`, which 13.43 asks. `composer validate --strict` clean,
+  `php -l` clean on 21 PHP files, `bash -n` clean on setup.sh.
+- **On rc.16 with the bumps:** `npm run build`, `test:run` 485 files
+  passed and 3 skipped, `test:vapor` 17 files 55 passed, `check:example`
+  built vapor-sfc (and clicked its button), vapor-island-cart and
+  exo-astro, and `php -l` on 21 files.
+- **V8 alignment.** The host is Node 24.22.3, V8 13.6.233.17-node.63 (the
+  CI Node 24 arm; development's `.node-version` is Node 26.13.0). Re-read
+  on this host: `--json-stringify-fast-path` defaults off,
+  `--minor-ms` off, `--max-inlined-bytecode-size` 460,
+  `--max-inlined-bytecode-size-small` 27; `%HasFastProperties` is false
+  for `Object.create(null)` and `{ __proto__: null }` and true for `{}`;
+  `gc({ type: 'minor' })` prints `Scavenge`. These match V8-RULES' V8 13.6
+  evidence. rc.16 changes no V8, so no rule moves; tests/v8-shapes and
+  tests/v8-helper pass (25).
+- **Contacts read and not changed.** `VcTransition` imports nothing of
+  Vue's transition and drives `createIf` directly, so the Transition
+  commits reach Vue's own component, not our wrapper.
+  `src/router/vapor.ts` calls `createSlot('default')` with no props and
+  `createSlot('view', { Component })`, so #16289's slot-props lifetime
+  does not reach it. `src` compiles no template, writes no CSS `v-bind()`
+  and calls no `cloneVNode`, so the compiler, CSS-vars and SSR cloneVNode
+  commits change no line. `defineVaporAsyncComponent` passes its options to
+  Vue's, so #16322 and #16338 are inherited; the setup-error pin covers
+  the error count a consumer sees.
+- **Open.** The Vapor outlet guard is re-stamped after the bump (Vue's
+  interop baseline moved). The performance pass and the draft analysis are
+  recorded below when measured.
+
 ## 37. Release notes as first written, v0.1.0 to v1.26.0 (moved from CHANGELOG.md, 2026-10-28)
 
 Each release note below is the text CHANGELOG.md carried until 2026-10-28, moved here verbatim, with its headings one level down. CHANGELOG.md now keeps one line per change for these releases, in the shape of v1.27.0 and later, and points here for the rest: the mechanism, the measurements, the tests and the story of each fix. A stamp marker in this text is pinned to its own release (`vc:name@1.18`), so it keeps the number that was true then.

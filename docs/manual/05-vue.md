@@ -83,6 +83,10 @@ instances, and the failure is silent.
 The same API works in `<script setup vapor>` and vDOM components alike, with automatic cleanup
 on scope disposal.
 
+`@vue:xxx` lifecycle events (`@vue:mounted`, `@vue:beforeUpdate`, and the rest) fire on a
+component. On a plain element Vapor does not support them, and the compiler drops the listener:
+use `onMounted()` and its siblings in a component instead.
+
 ## Show a busy button and its failure
 
 A button reads its own key's busy state, and the dispatch's own result carries its failure:

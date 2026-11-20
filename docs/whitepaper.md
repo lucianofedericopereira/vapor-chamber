@@ -1995,7 +1995,7 @@ the bus, normalized entity storage. The wall held every time.
 That wall still holds with `vapor-chamber/store` shipped: the store owns state,
 the bus does not, and a store's actions reach it only as dispatches.
 
-### B. The Vue 3.6 alignment log, beta.8 to rc.15 (was section 9.2)
+### B. The Vue 3.6 alignment log, beta.8 to rc.16 (was section 9.2)
 
 
 Every Vue 3.6 release gets an alignment cycle. Read each commit at source and
@@ -2043,7 +2043,8 @@ assumptions is what surfaced them.
 | rc.12 (Oct 16) | 62 commits, 62 in full | no code change, one test rc.12 makes pass | 4164 + 40 | 16.0 / 11.4 / 11.8 |
 | rc.13 (Oct 23) | 43 commits, 43 in full | no code change, four tests rc.13 makes pass | 4827 + 43 | 29.5 / 21.5 / 22.2 |
 | rc.14 (Oct 30) | 30 commits, 30 in full | no code change needed, eight tests rc.14 makes pass, a module-by-module reading found two defects of ours | 4850 + 45 | 29.8 / 21.7 / 22.4 |
-| rc.15 (Nov 12) | 104 commits, 104 in full | two regressions of ours from #16108 fixed, four tests rc.15 moves, a module-by-module reading found fifteen defects of ours, and five more proved by failing tests | <!-- vc:testsAll -->4952 + 55<!-- /vc:testsAll --> | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> / <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> / <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> |
+| rc.15 (Nov 12) | 104 commits, 104 in full | two regressions of ours from #16108 fixed, four tests rc.15 moves, a module-by-module reading found fifteen defects of ours, and five more proved by failing tests | 4952 + 55 | 30.0 / 21.8 / 22.6 |
+| rc.16 (Nov 20) | 73 commits, 73 in full | no code change; every app root loses its parent instance, component `@vue:xxx` hooks arrive, four behaviours pinned by tests red on rc.15 | <!-- vc:testsAll -->4959 + 55<!-- /vc:testsAll --> | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> / <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> / <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> |
 
 Coverage has been 100% on all four axes since rc.6. The two test numbers are the
 two vitest projects. "Pass-through" means Vue's change lands below this
@@ -4338,6 +4339,65 @@ are in the log. The Blade consumer's brotli moved with no code change: rolldown
   (#13687, the VaporSuspense box).
 
 The cycle record is docs/rc-alignment-log.md, section 36.F58.
+
+#### rc.16 (Nov 20): app roots lose a parent, component lifecycle events, and four pins
+
+**Landed.** 73 commits in `v3.6.0-rc.15..v3.6.0-rc.16`, every diff read.
+The weight is runtime-vapor: Transition and slot hand-offs through interop
+(`#16280`, `#16290`, `#16291`, `#16293`, `#16341`, `#16346`), KeepAlive after
+an out-in leave (`#16352`), Teleport order and hydration (`#16311`, `#16323`,
+`#16330`, `#16333`, `#16364`, `#16366`), refs and slot props (`#16289`,
+`#16298`, `#16303`, `#16310`), directive roots (`#16261`) and fallthrough
+attrs (`#16265`, `#16296`). compiler-vapor keeps static camelCase DOM props
+out of the template (`#16259`); compiler-sfc fixes tsconfig include and
+generic scopes; SSR maps static DOM prop aliases and renders cloneVNode attrs
+on a vapor slot root (`#16225`, `#16334`, `#16340`). Two performance commits
+keep slot caches on the slots object and stop rescanning vdom slot content
+(`#16297`, `#16331`, `#16335`). `packages/reactivity/src` is byte-identical,
+so `ab:vue` had nothing to measure. The peer range narrows to
+`>=3.5.45 || >=3.6.0-rc.16`; the 3.5 floor stays.
+
+**Decided: no code change; four behaviours pinned.** Each pin fails on rc.15
+and passes on rc.16:
+
+- **An app root has no parent instance** (`#16325`). A second Vapor app
+  mounted from a hook in a first app no longer reads the first app's provides,
+  and a setup that threw leaves no current instance for the next root. This
+  reverses the rc.13 L1 record; `tests/vapor-second-app-fixture.test.ts` is
+  updated, and its header now says why.
+- **`@vue:xxx` fires on components** (`#16254`). The element form is still
+  unsupported, and the compiler drops it; the fixture pins both.
+- **A KeepAlive chain branch is cached after an out-in leave** (`#16352`).
+  `1 -> 2 -> 3 -> 2 -> 3` over a `v-if / v-else-if / v-else` chain inside
+  `<Transition mode="out-in"><KeepAlive>` runs the third branch's setup once;
+  on rc.15 it runs twice.
+- **One report for a nested setup error** (`#16315`, with `#16322` and
+  `#16338`). A child whose setup throws reaches Vue's error path once.
+
+**Contacts that are pass-through.** This library's `VcTransition` imports
+nothing of Vue's transition (`tests/vapor/vc-transition-helpers.test.ts`), so
+the Transition fixes reach apps that use Vue's own component, not its wrapper.
+The Vapor outlet's `createSlot`/`createDynamicComponent` calls take no props,
+so `#16289` does not change them. `src` compiles no template and writes no
+CSS `v-bind()`, so the compiler and CSS-vars commits change no line here. The
+fallthrough and slot-cache performance commits shrink Vue's interop baseline,
+not this library's arm; the outlet guard is re-stamped rather than re-derived.
+
+**Measured.** `ab:vue` not run: reactivity sources and dist are identical.
+The IIFE variants did not move. The dependency set moved to the newest
+releases its ranges admit: Vitest 5.1.1, Playwright 1.65.1, undici 8.13.0,
+Biome 2.6.8, Astro 7.4.13, the Vue 3.5 test copy 3.5.46, and
+`laravel/framework ^13.43`. The performance pass over the core, router and
+store is recorded in the log; only measured wins land.
+
+**Still watching.**
+
+- The `@vue:xxx` element form is still unsupported upstream.
+- Native `<Suspense>` inside a Vapor component is still unimplemented
+  (#13687, the VaporSuspense box).
+- The `vue35` test copy is at 3.5.46.
+
+The cycle record is docs/rc-alignment-log.md, section 36.F59.
 
 ---
 

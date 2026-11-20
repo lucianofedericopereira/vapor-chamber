@@ -7,7 +7,7 @@ source of truth for that distinction.
 - **RC dates:** rc.1 2026-07-18, rc.2 2026-07-22, rc.3 2026-08-11, rc.4 2026-08-14, rc.5
   2026-08-21, rc.6 2026-08-28, rc.7 2026-09-04, rc.8 2026-09-11, rc.9 2026-09-18, rc.10
   2026-09-30, rc.11 2026-10-10, rc.12 2026-10-16, rc.13 2026-10-23, rc.14 2026-10-30, rc.15
-  2026-11-12.
+  2026-11-12, rc.16 2026-11-20.
 - **Aligned to Vue <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->:** the `vue` devDependency pin, stamped rather than
   typed, so it cannot fall behind the package.
 - **Where each cycle is recorded:** the alignment table in the whitepaper's appendix B says what
