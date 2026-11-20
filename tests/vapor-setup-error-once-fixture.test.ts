@@ -34,7 +34,7 @@ async function mountThrowingChild(where: 'root' | 'child'): Promise<string[]> {
     });
     const tpl = where === 'child' ? await compileVapor(v, '<Boom />') : null;
     const Root =
-      where === 'child' ? v.defineVaporComponent({ setup: () => tpl.render({ Boom }) }) : Boom;
+      tpl !== null ? v.defineVaporComponent({ setup: () => tpl.render({ Boom }) }) : Boom;
     const host = document.createElement('div');
     document.body.append(host);
     const app = v.createVaporApp(Root);
