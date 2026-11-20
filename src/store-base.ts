@@ -327,9 +327,10 @@ function carry(fresh: unknown, old: unknown, declared: unknown): unknown {
   return Object.fromEntries(next);
 }
 
-/** A store's field events: each field a write changed, by identity, to its subscribers. */
-function notifyFields(lane: FastLane, next: object, prev: object): void {
-  for (const k in next) {
+/** A store's field events: each subscribed field a write changed, by identity, to its subscribers. */
+function notifyFields(lane: FastLane, next: object, prev: object, keys: readonly string[]): void {
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!;
     const v = (next as Record<string, unknown>)[k];
     if (v !== (prev as Record<string, unknown>)[k]) lane.emit(k, v);
   }
@@ -461,6 +462,12 @@ export function _stateHalf<S>(
   let save: (() => void) | null = null;
   let send: ((next: S) => void) | null = null;
   let fields: FastLane | null = null;
+  // The subscribed keys, copy-on-write, and how many subscribers each has.
+  // A write walks these, not every state key: a store read through one
+  // `fieldRef` pays one keyed pair per write, not one per field
+  // (tests/store-field-order.test.ts).
+  let fieldKeys: string[] | null = null;
+  let fieldCounts: Map<string, number> | null = null;
   let stopWatch: (() => void) | null = null;
   // Its handler is built with it: a half nothing watches builds neither.
   const watch = (): void => {
@@ -468,7 +475,7 @@ export function _stateHalf<S>(
       stopWatch = rt.watch(cell, (next: S, prev: S): void => {
         if (save !== null) save();
         if (send !== null) send(next);
-        if (fields !== null) notifyFields(fields, next as object, prev as object);
+        if (fields !== null && fieldKeys !== null) notifyFields(fields, next as object, prev as object, fieldKeys);
       });
     }
   };
@@ -511,7 +518,25 @@ export function _stateHalf<S>(
         });
         watch();
       }
-      return fields.on(key, fn);
+      if (fieldCounts === null) fieldCounts = new Map();
+      const count = fieldCounts.get(key) ?? 0;
+      fieldCounts.set(key, count + 1);
+      if (count === 0) fieldKeys = fieldKeys === null ? [key] : [...fieldKeys, key];
+      const off = fields.on(key, fn);
+      let done = false;
+      return () => {
+        if (done) return;
+        done = true;
+        off();
+        if (!live || fieldCounts === null) return;
+        const left = (fieldCounts.get(key) ?? 1) - 1;
+        if (left > 0) {
+          fieldCounts.set(key, left);
+          return;
+        }
+        fieldCounts.delete(key);
+        if (fieldKeys !== null) fieldKeys = fieldKeys.filter((k) => k !== key);
+      };
     },
     dispose() {
       live = false;
@@ -519,6 +544,8 @@ export function _stateHalf<S>(
       stopWatch?.();
       stopWatch = null;
       send = null;
+      fieldKeys = null;
+      fieldCounts = null;
       // Every subscriber marked off, so an unsubscribe kept after this does nothing.
       fields?.clear();
       fields = null;

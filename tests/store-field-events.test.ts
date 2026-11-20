@@ -21,6 +21,37 @@ const useS = defineChamberStore('fields', {
 });
 
 describe('$onField', () => {
+  it('fires fields in subscription order, not the state object key order', () => {
+    const bus = createCommandBus();
+    const useBA = defineChamberStore('fieldsBa', {
+      state: () => ({ b: 0, a: 0 }),
+      reducers: { both: (s: { a: number; b: number }, x: number) => ({ ...s, a: x, b: x }) },
+    });
+    const store = useBA(bus);
+    const order: string[] = [];
+    store.$onField('a', () => order.push('a'));
+    store.$onField('b', () => order.push('b'));
+    store.both(1);
+    expect(order).toEqual(['a', 'b']);
+    store.$dispose();
+  });
+
+  it('keeps a field subscribed until its last subscriber leaves', () => {
+    const bus = createCommandBus();
+    const store = useS(bus);
+    const first: number[] = [];
+    const second: number[] = [];
+    const offFirst = store.$onField('a', (v) => first.push(v as number));
+    const offSecond = store.$onField('a', (v) => second.push(v as number));
+    offFirst();
+    store.setA(1);
+    expect({ first, second }).toEqual({ first: [], second: [1] });
+    offSecond();
+    store.setA(2);
+    expect({ first, second }).toEqual({ first: [], second: [1] });
+    store.$dispose();
+  });
+
   it('fires for the field that changed, with its new value, and not for the others', () => {
     const bus = createCommandBus();
     const store = useS(bus);
