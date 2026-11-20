@@ -8,7 +8,7 @@ source of truth for that distinction.
   2026-08-21, rc.6 2026-08-28, rc.7 2026-09-04, rc.8 2026-09-11, rc.9 2026-09-18, rc.10
   2026-09-30, rc.11 2026-10-10, rc.12 2026-10-16, rc.13 2026-10-23, rc.14 2026-10-30, rc.15
   2026-11-12.
-- **Aligned to Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->:** the `vue` devDependency pin, stamped rather than
+- **Aligned to Vue <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->:** the `vue` devDependency pin, stamped rather than
   typed, so it cannot fall behind the package.
 - **Where each cycle is recorded:** the alignment table in the whitepaper's appendix B says what
   each cycle reviewed, with commit counts and what it found. `docs/rc-alignment.md` says how a
@@ -60,7 +60,7 @@ Changes that touched the freeze without breaking it are recorded in appendix A: 
 
 ## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.45 || >=<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->"`. The library supports Vue 3.5
+- **Peer dependency:** `vue: ">=3.5.45 || >=<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->"`. The library supports Vue 3.5
   from 3.5.45 (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent` and
   `defineVaporAsyncComponent` are stable in shape, but their behaviour keeps shifting.[^vapor-apis]
@@ -256,7 +256,7 @@ no-build page, Vapor ships only in a separate dist file, and there the clear thr
 `createVaporChamberApp` names which of "Vue absent", "Vue without Vapor" and "Vue unreachable"
 happened, and `createVaporApp` names none of them.
 
-**Status: not due.** Vue is at <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->, so the stable trigger has not fired.
+**Status: not due.** Vue is at <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->, so the stable trigger has not fired.
 At v2.0 it is either kept or removed cleanly, with every consumer moved to
 `import { createVaporApp } from 'vue'`. It gets no `@deprecated` tag on the way (owner,
 2026-10-05: no deprecations). Nothing changes before v2.0.
@@ -421,7 +421,7 @@ are in appendix C. The one still ahead:
 **Version policy before 3.6 stable.** Breaking changes ship as **minors**, not majors.
 
 - The policy rests on two things. The pre-stable peer dependency is still a moving target
-  (<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> today). And the surfaces that have taken breaking changes are the ones
+  (<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned --> today). And the surfaces that have taken breaking changes are the ones
   documented experimental.[^policy-basis]
 - A breaking change to a surface documented as stable needs a major, in the RC phase or not.
 - **2.0.0 remains reserved for the post-stable identity decision** (Vapor-first or bus-first),
@@ -445,14 +445,14 @@ from Vue, so nothing blocked it. See [docs/integrations/laravel.md](./docs/integ
 ## Vue version-support matrix
 
 Which Vue versions each released line supports. The peer dependency is permissive
-(`>=3.5.45 || >=<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->`, matching `package.json`). This table is the *tested* support
+(`>=3.5.45 || >=<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->`, matching `package.json`). This table is the *tested* support
 statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
 |---------------|----------------------------|---------|-------|
 | v1.2.x - v1.5.x | yes | beta.11 -> beta.14 | the beta-aligned lines, v1.5.x feature-locked |
 | v1.6.x - v1.7.0 | yes | beta.15 -> beta.17 | tracking-only bumps + the first post-lock delivery |
-| **v1.8.0 ->** | yes | **rc.1 -> current** | tested against <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> |
+| **v1.8.0 ->** | yes | **rc.1 -> current** | tested against <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned --> |
 | v2.0.0 | yes (composables) | **3.6 stable** | peer range gains stable, wiring unchanged: probe by default, `configureVue()` for determinism |
 
 On Vue 3.5 you get the framework-agnostic surface: bus, plugins, transports, and composables with
@@ -575,7 +575,7 @@ If you are a consumer choosing between APIs in this library:
 
 If you are contributing: no large change is pending. The build-flag wrapper elimination is
 **withdrawn**, not deferred, and `configureVue()` replaced it (see "Thin Vapor wrappers will become
-opt-in through a build flag" above). The library aligns on <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->.
+opt-in through a build flag" above). The library aligns on <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->.
 
 For performance characteristics, optimization philosophy and tuning options, see
 [docs/performance.md](./docs/performance.md).

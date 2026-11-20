@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a>: a <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli dispatch core, and opt-in modules that cost 0 KB until imported. Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a>: a <!-- vc:sizeCore -->6.1<!-- /vc:sizeCore --> KB brotli dispatch core, and opt-in modules that cost 0 KB until imported. Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->. LGPL-2.1.
 </p>
 
 ---
@@ -40,7 +40,7 @@ rules and steps, so each action has one place to read and one place to test.
 | **Transports** | Opt-in | `httpTransport` (with batch), WebSocket, SSE, Laravel Echo/Reverb. |
 | **Extras** | Opt-in | SSR by stores' states, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox. |
 
-- **Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->:** signals, `onScopeDispose`,
+- **Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->:** signals, `onScopeDispose`,
   `getCurrentScope`, alien-signals internals. The [CHANGELOG](CHANGELOG.md) tracks each release.
 - **No runtime dependency.** `alien-signals` is an optional peer, installed only by apps that use
   the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero.
@@ -55,7 +55,7 @@ npm install vapor-chamber
 ```
 
 It needs Node <!-- vc:nodeEngines -->>=24.5.0<!-- /vc:nodeEngines -->. Vue is an optional peer: 3.5 or later for the composables,
-<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
+<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
 
 In a Vue app, import the composables from `vapor-chamber/vue` (or `vapor-chamber/vapor`), never
 from the root: the root cannot wire Vue in a production bundle.

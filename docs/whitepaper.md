@@ -3,7 +3,7 @@
 *Luciano Federico Pereira - ORCID 0009-0002-4591-6568 - luciano-pereira.pages.dev*
 
 This paper describes the library as it stands, aligned with Vue
-<!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
+<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->. The body states what the library does. Footnotes
 carry the reasons, the evidence and the history. The appendix, Notes and
 history, keeps the original header and abstract, the per-release Vue alignment
 log, this paper's corrections to itself and the performance findings.
@@ -101,7 +101,7 @@ plugin.
   TypeScript project can still use the core.
 
 Vue is an optional peer. The composables need `>=3.5.45`. The full Vapor
-surface needs <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
+surface needs <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned --> or later on the 3.6 line (`peerDependencies`
 in `package.json`). The core bus runs with no Vue at all.
 
 ### 2.2 Against Vue's own router and store

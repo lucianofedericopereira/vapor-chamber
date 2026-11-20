@@ -18,7 +18,7 @@ What it needs:
 - **Node <!-- vc:nodeEngines -->>=24.5.0<!-- /vc:nodeEngines -->.** CI runs
   <!-- vc:nodeVersion -->26.13.0<!-- /vc:nodeVersion --> and a pinned Node 24 (`.github/workflows/ci.yml`).
 - **Vue is an optional peer:** 3.5 or later for the composables,
-  <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
+  <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned --> or later for the full Vapor surface. The core bus runs with no Vue.
 - **Vite 5+ and `@vitejs/plugin-vue` 5+** only for the `vapor-chamber/vite` plugins (HMR,
   `vaporChamberWire()`) and Vapor SFC support.
 - **ESM only**, no CJS build. Node `import`, bundlers and `<script type="module">` all work.

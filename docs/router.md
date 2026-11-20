@@ -435,7 +435,7 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 
 ## Vapor interop
 
-Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.15<!-- /vc:vueAligned -->, the installed version the fixtures run on, not
+Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->, the installed version the fixtures run on, not
 inferred from the [Vapor roadmap](https://github.com/vuejs/core/issues/13687). Two fixtures, and
 the split matters:
 
