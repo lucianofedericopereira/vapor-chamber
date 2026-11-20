@@ -12,6 +12,10 @@
  * In-box preset: `vapor-chamber/router-fetch` (plain JSON backends). Any other
  * backend convention is a preset returning LoaderHandlers. A load with no
  * matching handler is a coded `router:missing:loader`.
+ *
+ * `interpolateLoad` scans `{placeholder}`s instead of handing a replacer
+ * closure to `String.prototype.replace`: a function passed to a builtin is
+ * never inlined away (V8-RULES rule 4; log 36.F59).
  */
 
 import type { HttpClient } from '../http';
@@ -125,18 +129,20 @@ export function interpolateLoad(
   // this runs once per loader read.
   let out = '';
   let from = 0;
+  let search = 0;
   for (;;) {
-    const open = template.indexOf('{', from);
+    const open = template.indexOf('{', search);
     if (open === -1) break;
     const close = template.indexOf('}', open + 1);
     if (close === -1) break;
     const key = template.slice(open + 1, close);
     if (!PLACEHOLDER.test(key)) {
-      from = open + 1;
+      // Not a placeholder: keep the brace in the output and look past it.
+      search = open + 1;
       continue;
     }
     out += template.slice(from, open) + placeholderValue(key, location, queryDefs);
-    from = close + 1;
+    from = search = close + 1;
   }
   return from === 0 ? template : out + template.slice(from);
 }
