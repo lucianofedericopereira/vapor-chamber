@@ -55,6 +55,10 @@ describe('interpolateLoad', () => {
     const url = interpolateLoad('/api/{a b}/{id}', locationWith({}, { id: 7 }), {});
     expect(url).toBe('/api/{a b}/7');
   });
+
+  it('leaves an unclosed brace alone', () => {
+    expect(interpolateLoad('/api/{id', locationWith({}, { id: 7 }), {})).toBe('/api/{id');
+  });
 });
 
 describe('runLoaders - the SPI', () => {

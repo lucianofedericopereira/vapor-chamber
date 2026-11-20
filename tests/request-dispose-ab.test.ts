@@ -1,5 +1,5 @@
 /**
- * request() / dispose() against a baseline derived from src/command-bus.ts with the change reverted, a byte-identical self-control copy, and the shipped source.
+ * request() / dispose() against a baseline derived from src/command-bus.ts with the earlier request implementation (the race) and without the dispose/waiting hooks, a byte-identical self-control copy, and the shipped source.
  * Why: request() and dispose() would regress every user's bus if they changed a settled result or slowed request() throughput; dispatch must stay untouched.
  * Shows: the arms agree on every settled result and the sync command's shape; they differ only where intended (dispose() settles a waiting request, a sync request honours its caller's signal, shipped only). Timing rows are printed under `npm run test:timing`, with no threshold asserted: read each row against its self-control row (time ratios, above 1.00 is slower).
  * See: src/command-bus.ts, tests/under-coverage.ts
@@ -126,7 +126,7 @@ function derive(revert: boolean): string {
   let src = readFileSync(resolve(HERE, '../src/command-bus.ts'), 'utf8');
   if (revert) {
     src = replaceSpan(src, 'function syncRequest(', 'function respond(', OLD_SYNC_REQUEST);
-    src = replaceSpan(src, 'async function asyncRequest(', 'function asyncClear(', OLD_ASYNC_REQUEST);
+    src = replaceSpan(src, 'function asyncRequest(', 'function asyncClear(', OLD_ASYNC_REQUEST);
     for (const [line, n] of REVERTS) {
       const parts = src.split(line);
       if (parts.length - 1 !== n) {
