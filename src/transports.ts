@@ -966,12 +966,12 @@ export function wsTransport(options: WsTransportOptions): Transport & {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
 
-  const sendCommand = async (cmd: Command): Promise<CommandResult> => {
+  const sendCommand = (cmd: Command): Promise<CommandResult> => {
     // Pre-flight abort - don't enqueue if signal is already tripped.
-    if (cmd.signal?.aborted) return abortedResult(cmd.action, cmd.signal);
+    if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
     if (holds.size !== 0) {
       const held = whileHeld(holds, cmd.action);
-      if (held) return held;
+      if (held) return Promise.resolve(held);
     }
 
     return new Promise<CommandResult>((resolve) => {

@@ -1352,8 +1352,10 @@ function fanOutListeners(
   action: string,
   cmd: Command,
   result: CommandResult,
+  // `emit` already looked the bucket up for its fast path; a dispatch passes
+  // none and pays the one get it always did.
+  ex: ListenerEntry[] | undefined = exact.get(action),
 ): void {
-  const ex = exact.get(action);
   if (ex !== undefined) {
     for (let i = 0, n = ex.length; i < n; i++) {
       const entry = ex[i];
@@ -2446,14 +2448,15 @@ function syncEmit(s: SyncState, event: string, data?: any): void {
   // Fast path: no listeners -> return without allocating anything. Real apps
   // emit many events with no subscribers (lifecycle, debug, conditional
   // listeners) - this branch turns those into a hash lookup + length check.
-  if (!s.exactListeners.has(event) && s.wildcardListeners.length === 0) return;
+  const ex = s.exactListeners.get(event);
+  if (ex === undefined && s.wildcardListeners.length === 0) return;
 
   // emit is fire-and-forget - meta (id/correlationId/causationId) is unused
   // by the typical listener, so skip stampMeta to avoid the uid() call and
   // 4-field object allocation. Listeners that DO need meta on an emit can
   // call dispatch instead. The Command type already has `meta?` as optional.
   const cmd: Command = { action: event, target: data };
-  fanOutListeners(s.exactListeners, s.wildcardListeners, event, cmd, EMIT_RESULT);
+  fanOutListeners(s.exactListeners, s.wildcardListeners, event, cmd, EMIT_RESULT, ex);
 }
 
 /**
@@ -3518,9 +3521,10 @@ async function asyncQuery(s: AsyncState, action: string, target: any, payload?: 
 function asyncEmit(s: AsyncState, event: string, data?: any): void {
   // Same fast path + minimal-allocation strategy as syncEmit. See that
   // function's comment block for the full reasoning.
-  if (!s.exactListeners.has(event) && s.wildcardListeners.length === 0) return;
+  const ex = s.exactListeners.get(event);
+  if (ex === undefined && s.wildcardListeners.length === 0) return;
   const cmd: Command = { action: event, target: data };
-  fanOutListeners(s.exactListeners, s.wildcardListeners, event, cmd, EMIT_RESULT);
+  fanOutListeners(s.exactListeners, s.wildcardListeners, event, cmd, EMIT_RESULT, ex);
 }
 
 async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts: BatchOptions = {}): Promise<BatchResult> {
@@ -3590,11 +3594,11 @@ async function asyncRollback(s: AsyncState, ran: Command[], failedAt: number): P
  */
 type SharedRequest = { done: Promise<CommandResult>; ctrl: AbortController | undefined; live: number };
 
-async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
+function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
   const signal = reqOpts.signal;
 
   // Pre-flight abort - return immediately, don't dedup or dispatch.
-  if (signal?.aborted) return abortedResult(action, signal);
+  if (signal?.aborted) return Promise.resolve(abortedResult(action, signal));
 
   // Dedup key - the canonical commandKey: order-independent and nested-faithful,
   // so the same logical request collapses regardless of key order while distinct

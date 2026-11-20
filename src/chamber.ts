@@ -1253,17 +1253,50 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
   }
 
   function dispatch(action: string, target: any, payload?: any): ResultOn<B> {
-    return untracked(() => bus.dispatch(prefixed(action), target, payload)) as ResultOn<B>;
+    const name = prefixed(action);
+    // No thunk: `untracked(...)` here allocated a closure per call. This is
+    // the bracket `runCommand` uses, and the IIFE build folds the probe.
+    if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
+      return bus.dispatch(name, target, payload) as ResultOn<B>;
+    }
+    warnProbePath();
+    _pause();
+    try {
+      return bus.dispatch(name, target, payload) as ResultOn<B>;
+    } finally {
+      _reset();
+    }
   }
 
   /** Read-only dispatch - runs the rules, the steps and the handler, fires afterHooks. */
   function query(action: string, target: any, payload?: any): ResultOn<B> {
-    return untracked(() => bus.query(prefixed(action), target, payload)) as ResultOn<B>;
+    const name = prefixed(action);
+    if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
+      return bus.query(name, target, payload) as ResultOn<B>;
+    }
+    warnProbePath();
+    _pause();
+    try {
+      return bus.query(name, target, payload) as ResultOn<B>;
+    } finally {
+      _reset();
+    }
   }
 
   /** Fire a namespaced domain event - notifies on() listeners, no handler required. */
   function emit(event: string, data?: any): void {
-    untracked(() => bus.emit(prefixed(event), data));
+    const name = prefixed(event);
+    if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
+      bus.emit(name, data);
+      return;
+    }
+    warnProbePath();
+    _pause();
+    try {
+      bus.emit(name, data);
+    } finally {
+      _reset();
+    }
   }
 
   function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
