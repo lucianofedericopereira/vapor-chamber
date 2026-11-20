@@ -20,6 +20,11 @@
  * Like table validation, the menu contract is enforced loudly in dev (and, by
  * convention, by the route generator at export); production trusts the
  * generator.
+ *
+ * The public `buildMenu` recomputes the table-derived half on every call: a
+ * caller's array may be its own. `useMenu` goes through `_buildMenuCached`,
+ * keyed by the router's routes array, which the router replaces on
+ * setRoutes/reload; only the per-path active stamps are rebuilt (36.F59).
  */
 
 import { DEV } from '../dev';

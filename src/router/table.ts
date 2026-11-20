@@ -4,6 +4,8 @@
  * Rows (generator-emitted, server-sorted by priority) -> compiled table.
  * Everything static is precomputed here once: parent chain, renderable
  * chain, load chain, merged query defs, name map. Hot paths never derive.
+ * `staticKey` folds the trailing slash with a charCode test, not a regex: it
+ * runs on every resolve (log 36.F59).
  *
  * The generator is trusted - duplicate-name / unknown-parent validation runs
  * in dev only; production assumes well-formed rows the same way it assumes a

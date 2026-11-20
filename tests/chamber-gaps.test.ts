@@ -70,6 +70,20 @@ describe('untracked IIFE guard', () => {
     seen.push((runCommand(bus, true, 'x', undefined, undefined) as { value: unknown }).value);
     expect(seen).toEqual(['d', 'q', 'd']);
   });
+
+  it('useCommandGroup dispatch, query and emit call the bus directly when __VC_IIFE__ is set', () => {
+    vi.stubGlobal('__VC_IIFE__', true);
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    bus.register('gAdd', () => 'ok');
+    const group = useCommandGroup('g', { bus });
+    const seen: unknown[] = [];
+    group.on('evt', (cmd) => seen.push((cmd as { target: unknown }).target));
+
+    expect((group.dispatch('add', {}) as { value: unknown }).value).toBe('ok');
+    expect((group.query('add', {}) as { value: unknown }).value).toBe('ok');
+    group.emit('evt', 5);
+    expect(seen).toEqual([5]);
+  });
 });
 
 describe('useSharedCommandState', () => {

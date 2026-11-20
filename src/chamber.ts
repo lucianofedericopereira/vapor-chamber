@@ -10,6 +10,9 @@
  * setup resumed after its component unmounted) Vue runs the cleanup at once,
  * so a composable made there keeps nothing it is asked to register
  * (`tryAutoCleanup`, tests/async-vapor-setup-fixture.test.ts).
+ * `useCommandGroup` writes the dispatching bracket inline, as `runCommand`
+ * does: a thunk per call was an allocation with no work behind it
+ * (V8-RULES rules 4 and 5; log 36.F59).
  * `warnUnwired()` is the one production warning, for a Vue app whose
  * composables came from the root with nothing wired. The history is in
  * CHANGELOG.md.

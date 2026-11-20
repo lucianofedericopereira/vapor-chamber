@@ -14,6 +14,9 @@
  *                   depends on a changed key refetch in the background and
  *                   patch `snapshot.data` when done (isLoading tracks it).
  *
+ * A guard's verdict is awaited only when it is a thenable: a synchronous
+ * guard costs no microtask turn (V8-RULES rule 20; log 36.F59).
+ *
  * `navigate()` resolves to `RouterError | null` - null means committed.
  * Guard refusals (`refused:guard`) and superseded navigations
  * (`aborted:navigation`) are returned but NOT dispatched to onError.

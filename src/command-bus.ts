@@ -5,6 +5,10 @@
  * by no generator and checked by no gate. `docs/BUNDLE-SIZES.md` is
  * regenerated every run and is the only place a size should be read from.
  * DevTools is loaded dynamically.
+ *
+ * `emit` reads its exact-listener bucket once, and `request()` on the async
+ * bus returns its promise without an async frame of its own (V8-RULES rule
+ * 20; log 36.F59).
  */
 
 // ---------------------------------------------------------------------------

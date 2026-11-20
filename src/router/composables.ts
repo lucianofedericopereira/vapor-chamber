@@ -1,6 +1,10 @@
 /**
  * vapor-chamber-router - composables. Vue 3.6-native: cleanup via
  * onScopeDispose directly, reads through the router's shallowRefs.
+ *
+ * `onBeforeLeave` hands its guard to the engine as it is (the engine awaits a
+ * thenable and treats `true` as continue), and `useMenu` reuses the
+ * table-derived projection between path commits (log 36.F59).
  */
 
 import { type Ref, computed, customRef, getCurrentScope, inject, onScopeDispose } from 'vue';

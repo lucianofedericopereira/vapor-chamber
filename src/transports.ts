@@ -5,6 +5,9 @@
  * async bus (`createAsyncCommandBus({ transport })`), it sends a command to a
  * backend where a local handler would run it. Every plugin wraps it, the
  * bus's retry re-sends through it, and its answer is written there.
+ *
+ * A WebSocket command's `sendCommand` returns its per-command promise
+ * directly; it awaits nothing of its own (V8-RULES rule 20; log 36.F59).
  */
 
 import type { Command, CommandResult, BaseBus, BusError, FailCode, MetaResponse, SendAt, Transport } from './command-bus';
