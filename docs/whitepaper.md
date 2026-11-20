@@ -1054,7 +1054,7 @@ module. **The bus owns writes (commands), and the router owns reads
 
 A pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, with no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->18.43<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->19.82<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop.[^outlet] There, a non-Vapor route component throws
 `router:invalid:component`, and blade rows still need the vDOM outlet. The full
 guide is [docs/router.md](./router.md).
@@ -2967,10 +2967,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->18.43<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->19.82<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.07<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.26<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a

@@ -110,7 +110,7 @@ first time it renders one.
 **A pure-Vapor app can skip the vDOM renderer entirely** (experimental, v1.x).
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name, built from Vapor's own
 helpers, so rendering a route needs no `vaporInteropPlugin`. The startup chunk of a Vite
-production build comes out **<!-- vc:outletSaving -->18.43<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->58.2<!-- /vc:outletSavingRaw --> KB raw** smaller than the
+production build comes out **<!-- vc:outletSaving -->19.82<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->62.6<!-- /vc:outletSavingRaw --> KB raw** smaller than the
 same app through the vDOM outlet plus interop.[^outlet-size]
 
 [^outlet-size]: The same harness derives that baseline (`tests/vapor/vapor-outlet-size.test.ts`).

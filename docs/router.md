@@ -466,12 +466,12 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it needs:
 
-- **Measured saving: <!-- vc:outletSaving -->18.43<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->58.2<!-- /vc:outletSavingRaw --> KB raw** against the same
+- **Measured saving: <!-- vc:outletSaving -->19.82<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->62.6<!-- /vc:outletSavingRaw --> KB raw** against the same
   app rendering through the vDOM outlet plus interop. The subpath's own cost is
   <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli. The guard holds two limits:
   - the saving stays at least <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB.
   - the Vapor outlet's own machinery, over a router-without-outlet floor, stays at most
-    <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (measured <!-- vc:outletOwnArm -->4.07<!-- /vc:outletOwnArm --> KB).[^outlet-guard]
+    <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (measured <!-- vc:outletOwnArm -->4.26<!-- /vc:outletOwnArm --> KB).[^outlet-guard]
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled SFCs are). This is a
   real constraint, not a convention. The outlet checks the `__vapor` marker itself and throws a
   coded `router:invalid:component`: a loud failure in place of wrong-mode
