@@ -20617,8 +20617,8 @@ from it.
   Composer: `laravel/framework ^13.42` -> `^13.43`, the newest release;
   PHP stays `^8.3`, which 13.43 asks. `composer validate --strict` clean,
   `php -l` clean on 21 PHP files, `bash -n` clean on setup.sh.
-- **On rc.16 with the bumps:** `npm run build`, `test:run` 485 files
-  passed and 3 skipped, `test:vapor` 17 files 55 passed, `check:example`
+- **On rc.16 with the bumps:** `npm run build`, `test:run` 487 files
+  passed and 3 skipped (4,969 tests), `test:vapor` 17 files 55 passed, `check:example`
   built vapor-sfc (and clicked its button), vapor-island-cart and
   exo-astro, and `php -l` on 21 files.
 - **V8 alignment.** The host is Node 24.22.3, V8 13.6.233.17-node.63 (the
@@ -20629,7 +20629,13 @@ from it.
   for `Object.create(null)` and `{ __proto__: null }` and true for `{}`;
   `gc({ type: 'minor' })` prints `Scavenge`. These match V8-RULES' V8 13.6
   evidence. rc.16 changes no V8, so no rule moves; tests/v8-shapes and
-  tests/v8-helper pass (25).
+  tests/v8-helper pass (25). Every performance change was read against the
+  rules: rule 4 (loader replacer, group thunk), rule 5 (the group calls the
+  bus directly), rule 6 (the IIFE guard stays inside the condition the build
+  folds), rule 20 (guards, `request()`, WS send, each with a turn count),
+  and rules 10/12/16 for the A/B. The store's `readers_9` regression is rule
+  12 doing its job: a change is stopped when a path that runs it reads
+  slower.
 - **Contacts read and not changed.** `VcTransition` imports nothing of
   Vue's transition and drives `createIf` directly, so the Transition
   commits reach Vue's own component, not our wrapper.
@@ -20640,9 +20646,206 @@ from it.
   commits change no line. `defineVaporAsyncComponent` passes its options to
   Vue's, so #16322 and #16338 are inherited; the setup-error pin covers
   the error count a consumer sees.
-- **Open.** The Vapor outlet guard is re-stamped after the bump (Vue's
-  interop baseline moved). The performance pass and the draft analysis are
-  recorded below when measured.
+- **The consumer draft in Downloads** (`vapor_chamber_library.md.tt`,
+  v1.36.0). Checked every trap and By-need row against source and tests. All
+  are true at v1.36.0 except one over-strong library claim: "never import
+  composables from the root" is right as a rule, but a Vite build that
+  installs `vaporChamberWire()` resolves the root correctly, so it is stricter
+  than the library requires. `failureOf`, the default `{}` target, `useLive`
+  and the 4-23 ms route timings are panel code, not library claims.
+  `fieldRef`, `commandState`, `Accepted`, `createEchoBridge`, `exclusive`,
+  `retry`, `buildMenu`, `routerFacts`, `describeSchema`, `form.aria` and
+  `vitest/pure` all exist. The file's `version`/`tag` must move after the
+  release, and its Laravel floor follows `^13.43`. rc.16 flips no reopen
+  condition in its Declined list.
+- **Open.** The performance pass's results are recorded below. The Vapor
+  outlet guard is re-stamped after the bump (Vue's interop baseline moved).
+
+#### 36.F59.1 Performance pass - the method
+
+Question, per the owner's order ("every nut and bolt for performance on core,
+router, store"): which repeated work on a normal path can be removed without
+changing a public contract, and does an interleaved A/B see it? Every candidate
+was read at source against V8-RULES. A candidate on a setup-only, error or
+teardown path was left out by rule 12. Each change is its own commit, and the
+arms are built by `npm run ab:dists` from `de52f38` (base), `01fcc81` (router)
+and `2c218e5` (core); the dist diff names only `router.js` for the first and
+only the core files for the second, so a row can be attributed. The store's
+audit found no normal-path change above the step-8 floor: the `state` getter's
+one branch per read (choosing the view getter at creation would split the
+state object into two maps, against rule 1), the core cell's `prev` read when
+no watcher exists (one property read), and the register-time `'locals' in s`
+repeat (setup only) were each left out, with no code change. The router's
+`resolveRender` warm path (one async frame per cached entry) is a real lead,
+but no red test method exists that isolates it from the engine's own await:
+it is recorded open, not changed.
+
+#### 36.F59.2 Performance pass - the readings
+
+The jobs ran plain, K 10, two lengths, one row each, 2026-11-20 on the CI
+Node 24 arm (24.22.3, V8 13.6), Apple M3, load 1.4-3.6. Each row states the
+arm pair; `B/A` is the per-length ratio and the ns is the paired difference
+per call.
+
+| row | arms | B/A n | B/A 4n | reading |
+| --- | --- | --- | --- | --- |
+| menu_read | de52f38 -> 01fcc81 | 0.579, 83,929 -> 49,104 ns | 0.563, 85,275 -> 48,260 ns | no result: control 4.3% / 5.8% (gate 3%). Both lengths read ~42% lower, CI 0.56-0.59. Kept as an O(table) removal, no speed claim |
+| nav_string | de52f38 -> 01fcc81 | 0.995, -28.7 ns | 0.981, -100.3 ns | no result: lengths disagree (n has CI including 1). The static-key fold is a simplification with no counted verdict |
+| loader_read | de52f38 -> HEAD | 0.944, 16,098 -> 15,171 ns (-892.1) | 0.939, -940.1 ns, control 3.7% | no result: lengths disagree (n faster, 4n no result). Both directions lower and the CI 0.92-0.95 agrees; kept as a rule-4 removal, no speed claim |
+| request_local | 01fcc81 -> 2c218e5 | 0.963, -97.1 ns | 0.960, -103.1 ns | no result: control 6.4% / 4.0%. The turn test is the evidence (5 -> 4 turns) |
+| nav_guards2_hooks2 | de52f38 -> 01fcc81 | 0.952, 7,289 -> 6,846 ns (-348.4) | 0.943, -331.5 ns, control 4.9% | no result: lengths disagree (n faster, 4n no result). Both directions read faster; the turn test (0, 1 and 3 sync guards equal) is the evidence |
+| bus_emit3 | 01fcc81 -> 2c218e5 | 0.987, 238.5 -> 234.8 ns (-3.2) | 0.976, 237.0 -> 229.7 ns (-5.5) | **faster**, both lengths, controls 2.6% / 2.1%; paired fit -6.3 ns/iter |
+| ws_reply | 01fcc81 -> 2c218e5 | 0.980, -80.9 ns, control 4.8% | 0.969, -123.9 ns | no result: lengths disagree (n no result, 4n faster). The turn test (5 -> 4 turns) is the evidence |
+| readers_1 | 2c218e5 -> 2341239 | 0.780, 283.5 -> 222.9 ns (-62.4) | 0.783, -59.0 ns | no result: controls 8.1% / 5.9%. The selective field walk read 22% faster on the one-reader shape |
+| readers_9 | 2c218e5 -> 2341239 | 1.683, 263.5 -> 437.1 ns (+176.6) | 1.624, +164.1 ns | **slower in both lengths**: the same change costs the nine-reader shape 62%. Design stopped, commit 2341239 reverted by 1de1fdf |
+| many_fields | 2c218e5 -> 2341239 | 0.990, -51.5 ns, control 3.8% | 1.005, +23.9 ns | no result: unchanged, as intended when every field is subscribed |
+
+A no result stays one (TESTING_PROCEDURE step 8). Only `bus_emit3` counted:
+faster at both lengths, -3.2 and -5.5 ns per emit. Every other row is a no
+result and is not quoted as a measured speedup. What each change has instead
+is a reason that belongs to the codebase: removed repeated work (menu,
+loader, static key), a removed async frame with a turn-count test (request,
+WS send, guards) or a removed per-call allocation with a prior measurement of
+the same shape (the group thunk: 2.7-3.9 ns, log s35.53).
+
+**The store candidate, measured and stopped.** The audit's one normal-path
+store candidate walked only the subscribed fields on a write instead of every
+state key (`_stateHalf`'s field lane). On `readers_1` (10 fields, one reader)
+it read 0.780 / 0.783, about 60 ns faster per write. On `readers_9` (ten
+fields, nine readers) it read 1.683 / 1.624, about 165 ns **slower** per
+write, in both lengths. That is a counted regression on a normal shape, so
+the design is stopped and commit 2341239 is reverted by 1de1fdf, even though
+the `readers_1` control gate had failed as well. The earlier store
+candidates (the `state` getter branch, the core cell's `prev` read, the
+register-time `'locals' in s`) remain below the floor; `many_fields` read
+unchanged, as intended.
+
+**Bytes.** `npm run size:check` and the IIFE variants are re-measured after
+these commits; the router and core entries are reported in the log's final
+state. A change that moved a budget is named with its measured bytes.
+
+#### 36.F59.3 Vue's release notes, rc.15 and rc.16 (verbatim)
+
+Pasted from https://github.com/vuejs/core/blob/minor/CHANGELOG.md on 2026-11-20, so every change this cycle read keeps its issue and commit link. The rc.15 section is included because the peer floor and the rc.15 cycle are cited from it.
+
+# [3.6.0-rc.16](https://github.com/vuejs/core/compare/v3.6.0-rc.15...v3.6.0-rc.16) (2026-11-20)
+
+### Bug Fixes
+
+* **compiler-vapor:** keep static camelCase dom props out of the template ([#16259](https://github.com/vuejs/core/issues/16259)) ([822ee29](https://github.com/vuejs/core/commit/822ee299c711c758d547343d1e64ac0b9b82da0e))
+* **runtime-core:** fall through attrs to vapor slot content rendered as a component root- [#16265](https://github.com/vuejs/core/issues/16265) ([3f19e42](https://github.com/vuejs/core/commit/3f19e4287b0df4aac1563eec0e9b89f36a355032))
+* **runtime-core:** notify vapor of a vdom root replaced by a nested update ([#16283](https://github.com/vuejs/core/issues/16283)) ([19f31d0](https://github.com/vuejs/core/commit/19f31d03bd43a3157039a581a39bf8449b4f7185))
+* **runtime-vapor:** apply custom directives through a Transition wrapping a slot ([#16280](https://github.com/vuejs/core/issues/16280)) ([93980fe](https://github.com/vuejs/core/commit/93980fe0b353d311c2b3a80c35993fa50b582379))
+* **runtime-vapor:** apply vdom directives through a Transition wrapping a vdom-fed slot ([#16293](https://github.com/vuejs/core/issues/16293)) ([fdd87bf](https://github.com/vuejs/core/commit/fdd87bf8b19a68423deb81d8637bf7f8d86fa4eb))
+* **runtime-vapor:** cache KeepAlive branches rendered after an out-in leave ([#16352](https://github.com/vuejs/core/issues/16352)) ([3b3ced0](https://github.com/vuejs/core/commit/3b3ced0b1130ab68d45a08a0619644995b2458c8))
+* **runtime-vapor:** create the app root without a parent instance ([#16325](https://github.com/vuejs/core/issues/16325)) ([69790e8](https://github.com/vuejs/core/commit/69790e8fcea90373f4fc4913811466a344fa45ce)), closes [#16318](https://github.com/vuejs/core/issues/16318)
+* **runtime-vapor:** enter the next out-in branch before afterLeave for vdom slot content ([296ac5f](https://github.com/vuejs/core/commit/296ac5f2af22d50323eec5dc6e0a20156ec6596f))
+* **runtime-vapor:** expect css vars on teleport roots when hydrating ([#16366](https://github.com/vuejs/core/issues/16366)) ([4928996](https://github.com/vuejs/core/commit/49289966d3826bc260a625a367de08aff3a8743f))
+* **runtime-vapor:** expect one setup error from a loaded component ([#16338](https://github.com/vuejs/core/issues/16338)) ([e9310d6](https://github.com/vuejs/core/commit/e9310d60199b6410cf69cfea87958c69ad1bbcf1))
+* **runtime-vapor:** expose $props, $attrs and $slots to css v-bind ([#16257](https://github.com/vuejs/core/issues/16257)) ([507f3bd](https://github.com/vuejs/core/commit/507f3bdfd04522c0dcf2c4165efcc53a10779336))
+* **runtime-vapor:** handle a vdom fragment without children when looking for a vapor slot ([#16255](https://github.com/vuejs/core/issues/16255)) ([5ccfb5c](https://github.com/vuejs/core/commit/5ccfb5cd6798ddecd37e742a4ab1c1f4dd0b9088))
+* **runtime-vapor:** handle errors from nested calls once ([#16315](https://github.com/vuejs/core/issues/16315)) ([828ec02](https://github.com/vuejs/core/commit/828ec020808d2af9310df9b511675d0f99d85f01)), closes [#16309](https://github.com/vuejs/core/issues/16309)
+* **runtime-vapor:** handle only loader rejections as loader errors ([#16322](https://github.com/vuejs/core/issues/16322)) ([f4b250f](https://github.com/vuejs/core/commit/f4b250fe301027a55e0014813511653a46e3b77f)), closes [#16316](https://github.com/vuejs/core/issues/16316)
+* **runtime-vapor:** hide a hydrated Transition child only while its appear hook runs ([980b035](https://github.com/vuejs/core/commit/980b0356ed0657f37518eb5573e612627e8f6ed8))
+* **runtime-vapor:** inherit root scope ids through a Transition wrapping a slot ([#16290](https://github.com/vuejs/core/issues/16290)) ([5711bb6](https://github.com/vuejs/core/commit/5711bb60826b0a3015a6b94bd64ae4e8c683a6b0))
+* **runtime-vapor:** keep a v-show element shown until its leave finishes ([#16274](https://github.com/vuejs/core/issues/16274)) ([6a6c8df](https://github.com/vuejs/core/commit/6a6c8df8b96432c35b0cc4410b26c97f854a0ec7)), closes [#16273](https://github.com/vuejs/core/issues/16273)
+* **runtime-vapor:** keep creation order of teleports to the same target ([7cfdfed](https://github.com/vuejs/core/commit/7cfdfedc8727b299dd30e6641ef304da1dd7eb04))
+* **runtime-vapor:** keep dynamic listeners when their effect is stopped ([#16336](https://github.com/vuejs/core/issues/16336)) ([6e35f76](https://github.com/vuejs/core/commit/6e35f76252f7058d009ccf654964721d1889acd2)), closes [#16286](https://github.com/vuejs/core/issues/16286)
+* **runtime-vapor:** keep hydration anchors in their parent ([#16323](https://github.com/vuejs/core/issues/16323)) ([01a7b02](https://github.com/vuejs/core/commit/01a7b02c1cdfab96c13377f74f63638fca7d69ab)), closes [#16317](https://github.com/vuejs/core/issues/16317)
+* **runtime-vapor:** keep order of teleports to a target rendered by the same template ([#16364](https://github.com/vuejs/core/issues/16364)) ([cec72f2](https://github.com/vuejs/core/commit/cec72f29b354def51d7698bd32866efe74e3440a))
+* **runtime-vapor:** keep slot props readable after the consumer scope stops ([#16289](https://github.com/vuejs/core/issues/16289)) ([f5e9a1d](https://github.com/vuejs/core/commit/f5e9a1d25ea89dc477e4607775381b5bd15675a6))
+* **runtime-vapor:** keep Transition fallthrough attrs off components nested below its child ([43fb1c6](https://github.com/vuejs/core/commit/43fb1c697ba6f73fb1cdf6882f9b20f29a9cf69a))
+* **runtime-vapor:** make hydrated vdom slot content the child of a Transition wrapping the slot ([#16346](https://github.com/vuejs/core/issues/16346)) ([18e30d9](https://github.com/vuejs/core/commit/18e30d9d802f7494d6d8d9e2d66a5b17bed2b155))
+* **runtime-vapor:** make vdom wrappers follow the vapor root element ([#16319](https://github.com/vuejs/core/issues/16319)) ([b3c37b3](https://github.com/vuejs/core/commit/b3c37b379fa602208c047b3cdfc96a73dc16c3af)), closes [#16313](https://github.com/vuejs/core/issues/16313)
+* **runtime-vapor:** mount teleport content before its children's mounted hooks ([846d006](https://github.com/vuejs/core/commit/846d00661810cae2a1b11d835ce8a18802b42cae))
+* **runtime-vapor:** pass Transition fallthrough attrs through slot outlets ([b48f42f](https://github.com/vuejs/core/commit/b48f42f4c9bf5ed6f8fb65fc11354543e1f6a3d3))
+* **runtime-vapor:** pass Transition fallthrough attrs to vdom slot content ([#16291](https://github.com/vuejs/core/issues/16291)) ([8ba8fc4](https://github.com/vuejs/core/commit/8ba8fc4a2afc9424612c25a10453036db45d6d3d))
+* **runtime-vapor:** point a template ref on Teleport at its start node ([#16311](https://github.com/vuejs/core/issues/16311)) ([dbdbdd8](https://github.com/vuejs/core/commit/dbdbdd8f4135046e698a2600e3304659b0911539)), closes [#16306](https://github.com/vuejs/core/issues/16306)
+* **runtime-vapor:** recover hydration that misses a server range ([#16330](https://github.com/vuejs/core/issues/16330)) ([ac7464c](https://github.com/vuejs/core/commit/ac7464cbfebc0e025b035b1c44f051f6deadab44)), closes [#16326](https://github.com/vuejs/core/issues/16326) [#16327](https://github.com/vuejs/core/issues/16327)
+* **runtime-vapor:** render slot content the server folded as on the client ([#16341](https://github.com/vuejs/core/issues/16341)) ([b6d699b](https://github.com/vuejs/core/commit/b6d699b9b7dd66c3b45b05324382b659a2491add))
+* **runtime-vapor:** resume a synchronous out-in leave in a job for vdom slot content ([e63e11e](https://github.com/vuejs/core/commit/e63e11ecafb3434555ff3da1f8a86a484621ee2f))
+* **runtime-vapor:** run vdom directives of a vapor slot vnode on its content root ([#16261](https://github.com/vuejs/core/issues/16261)) ([05e337a](https://github.com/vuejs/core/commit/05e337a2ac80424df9f7f938080b7b4854a484b8))
+* **runtime-vapor:** set the rendering instance for vdom slots without ctx ([#16303](https://github.com/vuejs/core/issues/16303)) ([a62c7c5](https://github.com/vuejs/core/commit/a62c7c594f372c17e407e09ccd96de0eb4ca7d8c)), closes [#16301](https://github.com/vuejs/core/issues/16301)
+* **runtime-vapor:** set up attrs fallthrough only for keys that can be attrs ([#16296](https://github.com/vuejs/core/issues/16296)) ([dca7787](https://github.com/vuejs/core/commit/dca778785b04cf7fe28d889361cf72f67f935f4d))
+* **runtime-vapor:** skip ref cleanup for unchanged dynamic component ([#16310](https://github.com/vuejs/core/issues/16310)) ([d77c9d3](https://github.com/vuejs/core/commit/d77c9d3c3b55990a04434ccfbba223a4f1910ccb)), closes [#16308](https://github.com/vuejs/core/issues/16308)
+* **runtime-vapor:** start a multi-root component vnode on its own node ([#16314](https://github.com/vuejs/core/issues/16314)) ([9b39bd6](https://github.com/vuejs/core/commit/9b39bd6aad990f69e370617dadb54af8d76c4d28)), closes [#16307](https://github.com/vuejs/core/issues/16307)
+* **runtime-vapor:** sync vdom refs with vapor slot content roots- [#16298](https://github.com/vuejs/core/issues/16298) ([7f19e9e](https://github.com/vuejs/core/commit/7f19e9e942594f4a1a231e08eaabc80ab82fb77c))
+* **runtime-vapor:** unmount root vdom components with their vapor parent ([#16279](https://github.com/vuejs/core/issues/16279)) ([17bfec2](https://github.com/vuejs/core/commit/17bfec22dfc81b9b21ea1be0c3fcd355c604bf38))
+* **server-renderer:** render cloneVNode attrs on the root of vapor slot content ([#16340](https://github.com/vuejs/core/issues/16340)) ([363583d](https://github.com/vuejs/core/commit/363583d485d8e68ae0f55c8c5b495de7d8dc003a)), closes [#16269](https://github.com/vuejs/core/issues/16269)
+* **vapor:** hydrate `<slot v-if>` in `<template v-for>` ([#16320](https://github.com/vuejs/core/issues/16320)) ([d6a5797](https://github.com/vuejs/core/commit/d6a5797729bd229199c6de71bb4492a25e2e0bd6)), closes [#16312](https://github.com/vuejs/core/issues/16312)
+* **vapor:** keep cloneVNode extras off a forwarded vapor slot cloned unflattened ([#16256](https://github.com/vuejs/core/issues/16256)) ([320503d](https://github.com/vuejs/core/commit/320503dceb6a027c41efd3ffb655c4493ceb98d0))
+
+### Features
+
+* **runtime-vapor:** support `@vue:xxx` lifecycle events on components ([#16254](https://github.com/vuejs/core/issues/16254)) ([6fe1607](https://github.com/vuejs/core/commit/6fe1607d4b7347b1a34d8a162bbf1d017c698776))
+
+### Performance Improvements
+
+* **runtime-vapor:** keep slot owner and wrapper cache on the slots object instead of WeakMaps ([#16331](https://github.com/vuejs/core/issues/16331)) ([21094b7](https://github.com/vuejs/core/commit/21094b779052963a61e1fb80505580540f6f89f6))
+* **runtime-vapor:** keep the instance out of the props and attrs proxy targets ([8e02bdf](https://github.com/vuejs/core/commit/8e02bdfa9c3767073c633dbef65bf73397098bcf))
+* **runtime-vapor:** keep the slot wrapper cache on the slots object instead of a WeakMap- [#16335](https://github.com/vuejs/core/issues/16335) ([5c26104](https://github.com/vuejs/core/commit/5c2610463ba3baf5b5c8bee9db522e7eba67e4d5))
+* **runtime-vapor:** read fallthrough attrs without enumerating the attrs proxy ([e2dbf6d](https://github.com/vuejs/core/commit/e2dbf6dba5da5bbe0ecb6780ab41f02f8092396e))
+* **runtime-vapor:** stop rescanning vdom slot content for each patched element ([#16297](https://github.com/vuejs/core/issues/16297)) ([293eaea](https://github.com/vuejs/core/commit/293eaeacb9b33a018677f03aa2aa66e0eb37e59e))
+
+# [3.6.0-rc.15](https://github.com/vuejs/core/compare/v3.6.0-rc.14...v3.6.0-rc.15) (2026-11-12)
+
+### Bug Fixes
+
+* **compiler-vapor:** keep a dynamic argument named key like vdom ([#16077](https://github.com/vuejs/core/issues/16077)) ([6b7e9ab](https://github.com/vuejs/core/commit/6b7e9abb3798f1be01b7bc8282ebcbfa2512d433))
+* **compiler-vapor:** keep locals in the right side of a setup let assignment ([#16230](https://github.com/vuejs/core/issues/16230)) ([5a5b15a](https://github.com/vuejs/core/commit/5a5b15ab6512de5f846228267ad2f74931fa5076))
+* **compiler-vapor:** only treat html whitespace as empty slot content ([#16161](https://github.com/vuejs/core/issues/16161)) ([65f7e3a](https://github.com/vuejs/core/commit/65f7e3ab69feb2b66abfa2321cb93bcaae4a953e))
+* **compiler-vapor:** report invalid KeepAlive children ([#16215](https://github.com/vuejs/core/issues/16215)) ([eefe284](https://github.com/vuejs/core/commit/eefe28407c05d6b816334070744992471abfbf7d))
+* **compiler-vapor:** treat an omitted slotted option as true like vdom ([#16097](https://github.com/vuejs/core/issues/16097)) ([b30a008](https://github.com/vuejs/core/commit/b30a0089e65baa4734a97c7a9a25543946aa07ef))
+* **hmr:** reload the root component of a mounted vapor custom element ([#16233](https://github.com/vuejs/core/issues/16233)) ([57b17b9](https://github.com/vuejs/core/commit/57b17b903946f809b9be5e0f770c9fc1cf7c832e))
+* **hmr:** update the reloaded definitions of vapor components before rerendering their parents ([#16232](https://github.com/vuejs/core/issues/16232)) ([062074f](https://github.com/vuejs/core/commit/062074fd137b18ce235bb7c0b0c84d4af9e6d805))
+* **reactivity:** do not mutate the options object passed to effect() ([#16105](https://github.com/vuejs/core/issues/16105)) ([747e8d6](https://github.com/vuejs/core/commit/747e8d668c4a64ae6bd9dcc74c173364f1c1490b))
+* **reactivity:** do not notify readers of a computed invalidated by its own run ([#16220](https://github.com/vuejs/core/issues/16220)) ([63d00a1](https://github.com/vuejs/core/commit/63d00a1efe3c53b74bdfc30abc678c9d0ae9b2d0))
+* **reactivity:** don't call the scheduler of an effect stopped before the flush ([#16214](https://github.com/vuejs/core/issues/16214)) ([a7f245e](https://github.com/vuejs/core/commit/a7f245ee9d8603f7a02db4a9970905f546e451a1))
+* **reactivity:** don't keep a computed read in a stopped effect scope subscribed ([#16114](https://github.com/vuejs/core/issues/16114)) ([1260159](https://github.com/vuejs/core/commit/12601598e66e67ce4307d17050c67860067ad2f2)), closes [#16112](https://github.com/vuejs/core/issues/16112)
+* **reactivity:** end the dirty check on computeds that read themselves or each other ([#16218](https://github.com/vuejs/core/issues/16218)) ([8f946dc](https://github.com/vuejs/core/commit/8f946dc4a2f0bb515a1a8070388b9b865a2a2b9d))
+* **reactivity:** keep an effect stopped by a computed getter during its dirty check ([#16212](https://github.com/vuejs/core/issues/16212)) ([5c0b9bb](https://github.com/vuejs/core/commit/5c0b9bb972045deef6eb5f3c64e659adfbfc0771))
+* **reactivity:** keep notifying a subscriber invalidated by its own run ([#16210](https://github.com/vuejs/core/issues/16210)) ([f13db7e](https://github.com/vuejs/core/commit/f13db7e2b6ed22c1f8195973ba147df38974f248)), closes [#16174](https://github.com/vuejs/core/issues/16174)
+* **reactivity:** keep notifying subscribers after a computed throws ([ce28d57](https://github.com/vuejs/core/commit/ce28d57acb6ca5c00819b378197c2e6ff9061b9f))
+* **reactivity:** re-evaluate readers of a computed that threw once it recovers ([dc92688](https://github.com/vuejs/core/commit/dc9268883e531d09b04ff2b08fc8c7935a6c2bbc))
+* **reactivity:** release computeds created during SSR setup ([#16013](https://github.com/vuejs/core/issues/16013)) ([0727aa0](https://github.com/vuejs/core/commit/0727aa02abe544ae0ca538adf9df23ea5a03c25d))
+* **reactivity:** run onTrigger hooks after the trigger has propagated ([#16213](https://github.com/vuejs/core/issues/16213)) ([cc26aab](https://github.com/vuejs/core/commit/cc26aab9946cc2d77ae7bb0c643926e3a98721cd))
+* **reactivity:** stop removed links from keeping younger effects alive across scavenges ([#16211](https://github.com/vuejs/core/issues/16211)) ([0722e67](https://github.com/vuejs/core/commit/0722e673d2bbcaad174463c414177999733e29f2)), closes [#16176](https://github.com/vuejs/core/issues/16176)
+* **runtime-core:** hydrate a lazy async component deactivated by KeepAlive before it resolved ([#16199](https://github.com/vuejs/core/issues/16199)) ([9f4cccf](https://github.com/vuejs/core/commit/9f4cccf81edf064513798eda23303fde70354a41))
+* **runtime-vapor:** avoid writing `_ctx` into forwarded slots of vdom components ([#16096](https://github.com/vuejs/core/issues/16096)) ([97cbe2e](https://github.com/vuejs/core/commit/97cbe2ed8c7482fa60a2b6cccf533b1f17c0dc91))
+* **runtime-vapor:** do not activate an active kept-alive interop child again when it moves ([#16228](https://github.com/vuejs/core/issues/16228)) ([6555ea6](https://github.com/vuejs/core/commit/6555ea6c172c264529feae0a693d4e3c9c986adb))
+* **runtime-vapor:** do not register a slots owner for the shared empty object ([#16234](https://github.com/vuejs/core/issues/16234)) ([819b15b](https://github.com/vuejs/core/commit/819b15b98c01d24ec9549d81f75ade50076aa110))
+* **runtime-vapor:** don't leak the dev-rendering parent into child setup ([#16095](https://github.com/vuejs/core/issues/16095)) ([21fec4e](https://github.com/vuejs/core/commit/21fec4e1a48c2f37721d72639249ad76f89079b1))
+* **runtime-vapor:** enter transitions nested in the pending branch on suspense reveal ([#16158](https://github.com/vuejs/core/issues/16158)) ([1a5397a](https://github.com/vuejs/core/commit/1a5397ae173335b3cb9b03e7fff6ace145b6f041)), closes [#16121](https://github.com/vuejs/core/issues/16121)
+* **runtime-vapor:** fall through cloneVNode extras to the fallback of a forwarded vapor slot ([#16222](https://github.com/vuejs/core/issues/16222)) ([d6caca2](https://github.com/vuejs/core/commit/d6caca292ba47324783bc77740f3ce2c53bb8043))
+* **runtime-vapor:** handle a block without nodes when locating its boundary ([#16229](https://github.com/vuejs/core/issues/16229)) ([7d33bab](https://github.com/vuejs/core/commit/7d33bab7036dd4df69c923b4aa0507fac63de7db))
+* **runtime-vapor:** ignore a ref in a v-bind object on a vdom component ([#16217](https://github.com/vuejs/core/issues/16217)) ([6390f6c](https://github.com/vuejs/core/commit/6390f6c060a8890b2c861331c92bb7ac272c5fe8))
+* **runtime-vapor:** keep pending directive mounted hooks on their own interop root ([#16156](https://github.com/vuejs/core/issues/16156)) ([d74d8b2](https://github.com/vuejs/core/commit/d74d8b293a4b581db1d4e3505441fb997a6253c5)), closes [#16120](https://github.com/vuejs/core/issues/16120)
+* **runtime-vapor:** keep the attribute cache out of internal element slots ([#16216](https://github.com/vuejs/core/issues/16216)) ([0c952f2](https://github.com/vuejs/core/commit/0c952f2d190299d1b2483075fecdb5015fb5691f))
+* **runtime-vapor:** keep the instance out of template refs to components without expose ([#16227](https://github.com/vuejs/core/issues/16227)) ([051b5ad](https://github.com/vuejs/core/commit/051b5ad9dd18d42a31d246525a6d69ccbf60a45d))
+* **runtime-vapor:** limit VaporKeepAlive marking and cache hits to its root position ([#16192](https://github.com/vuejs/core/issues/16192)) ([8d28271](https://github.com/vuejs/core/commit/8d28271a007766f6fc778cc46cb9d2517522a2be))
+* **runtime-vapor:** locate an empty slot range's close before its content hydrates ([#16073](https://github.com/vuejs/core/issues/16073)) ([d57a77f](https://github.com/vuejs/core/commit/d57a77f0ca74d79a34c3aa1450a679f9913c77e4))
+* **runtime-vapor:** patch the props of a Vue custom element together ([#16223](https://github.com/vuejs/core/issues/16223)) ([8ea589d](https://github.com/vuejs/core/commit/8ea589d5e51b6015952cc79737e4b02ff910f499))
+* **runtime-vapor:** re-resolve transition hooks of a vnode fragment whose content changes type ([513a802](https://github.com/vuejs/core/commit/513a80243bf1a1de765916f9642ad45eb5bd7c4e))
+* **runtime-vapor:** release hydration state held by the effects of if, for and Transition ([#16140](https://github.com/vuejs/core/issues/16140)) ([cf300f8](https://github.com/vuejs/core/commit/cf300f8e8177d76f49e7535bfcf6021f2fd71331))
+* **runtime-vapor:** release removed TransitionGroup rows rendered as fragments ([c7c7043](https://github.com/vuejs/core/commit/c7c7043f99b05b7f34deb46dce44614df3a8c53e))
+* **runtime-vapor:** resolve a vdom component's root fragment live when it holds a vapor slot ([#16137](https://github.com/vuejs/core/issues/16137)) ([ea1ca22](https://github.com/vuejs/core/commit/ea1ca2263ea47fadb32b57824e65ec949c5324ea))
+* **runtime-vapor:** resolve slot props prototype lazily ([#16071](https://github.com/vuejs/core/issues/16071)) ([2829da7](https://github.com/vuejs/core/commit/2829da73b5bfef5af6c84eaa56849fbcb4194e2e))
+* **runtime-vapor:** resolve transition hooks without holding the block they are for ([2c7e22e](https://github.com/vuejs/core/commit/2c7e22ed4eddc306507b1397f01e18d1edb00714))
+* **runtime-vapor:** retire a disposed binding's v-show and directive hooks on a kept-alive root chain ([832da99](https://github.com/vuejs/core/commit/832da995dc6b46fec3f5337c4ed0915121ee1cb1))
+* **runtime-vapor:** run no update hooks when a native v-model mounts ([#16226](https://github.com/vuejs/core/issues/16226)) ([46cecf9](https://github.com/vuejs/core/commit/46cecf990fa4744d87a2a067f7e2b176da4bc306))
+* **runtime-vapor:** stop the stale branch scope on KeepAlive re-entry ([#16200](https://github.com/vuejs/core/issues/16200)) ([2204ecf](https://github.com/vuejs/core/commit/2204ecf2d12bfc160078c5b37da4a16d955e44c2))
+* **runtime-vapor:** sync radio v-model on mount when the model is undefined ([#16094](https://github.com/vuejs/core/issues/16094)) ([63c6379](https://github.com/vuejs/core/commit/63c6379319d228a06810b330b62b67a58fd685cf))
+* **vapor:** fall through cloneVNode extras to the content of a forwarded vapor slot ([#16219](https://github.com/vuejs/core/issues/16219)) ([1e9fc5f](https://github.com/vuejs/core/commit/1e9fc5f71ba0a40796283d965c68b0eefab9d785))
+
+### Features
+
+* **runtime-vapor:** track rendered teleports on instances for devtools ([7194823](https://github.com/vuejs/core/commit/719482350c8f2d63bd873942c23f9c7cf790881a))
+
+### Performance Improvements
+
+* **compiler-sfc:** skip tsconfig include enumeration ([#16136](https://github.com/vuejs/core/issues/16136)) ([24a9d7f](https://github.com/vuejs/core/commit/24a9d7f23a402949602956d90b1f0f7f0c529851))
+* **compiler-vapor:** keep the handler of a component v-model stable across updates ([#16231](https://github.com/vuejs/core/issues/16231)) ([e435252](https://github.com/vuejs/core/commit/e435252d6b05ea63da18168ba7854fedd531eb66))
+* **runtime-core,server-renderer:** render compiled slots of element vnodes in push mode ([#16153](https://github.com/vuejs/core/issues/16153)) ([ff48aa5](https://github.com/vuejs/core/commit/ff48aa567b7bae56872c2e5e8ef21ab9e5e22460))
 
 ## 37. Release notes as first written, v0.1.0 to v1.26.0 (moved from CHANGELOG.md, 2026-10-28)
 

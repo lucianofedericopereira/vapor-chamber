@@ -132,7 +132,7 @@ It wires `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent
 [^vapor-wiring]: Re-measured on every run with Vue bundled. The Vapor wiring table in [docs/BUNDLE-SIZES.md](../BUNDLE-SIZES.md) has it. The whitepaper's rc.6 row has the measurement on the `examples/apps/vapor-sfc` app that decided the split.
 
 `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw)
-and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
+and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->79.4<!-- /vc:sizeVaporInteropRaw --> KB raw, the whole VDOM interop renderer) are left out on
 purpose, because a static import stays in the bundle whether the app calls it or not. If you use
 either, one line adds it, merged with what the entry already wired:
 
@@ -301,8 +301,8 @@ The **core** imports no framework and no dependency, and it is the only part an 
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4952<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->482<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->4966<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->487<!-- /vc:testFiles --> files). The per-file table is [docs/COVERAGE.md](../COVERAGE.md). Run
 `npm run test:coverage` for live numbers.
 
 Next: [2. Commands, results and failures](./02-commands.md).

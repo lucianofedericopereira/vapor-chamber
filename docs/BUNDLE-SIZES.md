@@ -17,7 +17,7 @@ external. **Read this carefully:** the shared command-bus core (6.1 KB brotli on
 included in *every* row, so the rows are **not additive** - importing two exports does not cost
 their sum (the core is shared once). `.` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just `createCommandBus`
-from it is 6.1 KB brotli, not 49.0 KB).
+from it is 6.1 KB brotli, not 48.9 KB).
 
 **brotli vs first load.** `brotli` joins every chunk of the build into one measurement, the
 historical figure and the one to compare against older releases. `first load` and `on demand`
@@ -28,17 +28,17 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|
-| `.` | 170.3 | 49.0 | 49.0 | - |
-| `./vue` | 170.7 | 49.0 | 49.0 | - |
-| `./vapor` | 171.1 | 49.1 | 49.1 | - |
+| `.` | 170.4 | 48.9 | 48.9 | - |
+| `./vue` | 170.9 | 49.1 | 49.1 | - |
+| `./vapor` | 171.2 | 49.1 | 49.1 | - |
 | `./transports` | 35.0 | 12.1 | 12.1 | - |
 | `./directives` | 28.7 | 9.0 | 9.0 | - |
 | `./vite` | 6.1 | 2.5 | 2.5 | - |
-| `./vitest` | 181.7 | 52.3 | 3.9 | 49.0 |
+| `./vitest` | 181.8 | 52.3 | 3.9 | 48.9 |
 | `./vitest/pure` | 9.0 | 3.1 | 3.1 | - |
-| `./vitest/mcp` | 42.6 | 13.8 | 13.8 | - |
+| `./vitest/mcp` | 42.7 | 13.8 | 13.8 | - |
 | `./transitions` | 23.0 | 7.3 | 7.3 | - |
-| `./transitions/vapor` | 20.7 | 6.6 | 6.6 | - |
+| `./transitions/vapor` | 20.8 | 6.6 | 6.6 | - |
 | `./ssr` | 2.5 | 1.0 | 1.0 | - |
 | `./fast-lane` | 1.4 | 0.6 | 0.6 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | - |
@@ -51,14 +51,14 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./stream-parser` | 6.7 | 1.9 | 1.9 | - |
 | `./store` | 16.2 | 6.0 | 6.0 | - |
 | `./store/core` | 15.9 | 5.9 | 5.9 | - |
-| `./router` | 33.7 | 11.4 | 11.3 | 0.3 |
+| `./router` | 34.1 | 11.6 | 11.4 | 0.3 |
 | `./router/vdom` | 1.5 | 0.7 | 0.7 | - |
 | `./router/vapor` | 1.5 | 0.7 | 0.7 | - |
 | `./router/remote` | 17.6 | 6.6 | 6.6 | - |
-| `./router-fetch` | 18.6 | 6.9 | 6.9 | - |
-| `./iife` | 97.0 | 30.1 | 30.1 | - |
+| `./router-fetch` | 18.8 | 7.0 | 7.0 | - |
+| `./iife` | 97.1 | 30.1 | 30.1 | - |
 | `./iife-core` | 69.9 | 21.8 | 21.8 | - |
-| `./iife-elements` | 72.5 | 22.6 | 22.6 | - |
+| `./iife-elements` | 72.6 | 22.6 | 22.6 | - |
 | `core: createCommandBus alone` | 19.5 | 6.1 | 6.1 | - |
 | `consumer: createAsyncCommandBus + logger + httpTransport` | 41.6 | 13.4 | 13.4 | - |
 
@@ -74,10 +74,10 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 
 | step (rows after the first are deltas) | min KB | brotli KB |
 |---|--:|--:|
-| `Vapor wiring: hand-wired createVaporApp` | 49.0 | 16.7 |
-| `vapor-chamber/vapor over that` | 4.4 | 1.4 |
-| `+ defineVaporCustomElement` | 6.9 | 1.9 |
-| `+ vaporInteropPlugin` | 74.4 | 23.5 |
+| `Vapor wiring: hand-wired createVaporApp` | 50.6 | 17.2 |
+| `vapor-chamber/vapor over that` | 4.4 | 1.5 |
+| `+ defineVaporCustomElement` | 6.9 | 1.8 |
+| `+ vaporInteropPlugin` | 79.4 | 25.2 |
 
 ## For comparison
 
@@ -94,19 +94,19 @@ sizes. Left out: `feature-vite-hmr.ts` (a Vite config that imports vite, not a b
 
 | example | min KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|
-| `examples/snippets/async-api.ts` | 29.7 | 9.5 | 9.5 | - |
+| `examples/snippets/async-api.ts` | 29.8 | 9.5 | 9.5 | - |
 | `examples/snippets/custom-plugins.ts` | 22.2 | 7.0 | 7.0 | - |
-| `examples/snippets/feature-command-group.ts` | 23.7 | 7.5 | 7.5 | - |
+| `examples/snippets/feature-command-group.ts` | 23.8 | 7.5 | 7.5 | - |
 | `examples/snippets/feature-cross-tab-sync.ts` | 35.8 | 11.5 | 11.5 | - |
-| `examples/snippets/feature-error-boundary.ts` | 44.5 | 13.4 | 13.4 | - |
-| `examples/snippets/feature-outbox.ts` | 54.0 | 17.4 | 17.4 | - |
+| `examples/snippets/feature-error-boundary.ts` | 44.6 | 13.4 | 13.4 | - |
+| `examples/snippets/feature-outbox.ts` | 54.1 | 17.4 | 17.4 | - |
 | `examples/snippets/feature-persistence.ts` | 32.4 | 10.4 | 10.4 | - |
 | `examples/snippets/feature-retry.ts` | 45.9 | 14.8 | 14.8 | - |
-| `examples/snippets/feature-store.ts` | 61.5 | 19.9 | 19.9 | - |
+| `examples/snippets/feature-store.ts` | 61.5 | 19.8 | 19.8 | - |
 | `examples/snippets/feature-transitions.ts` | 38.9 | 11.7 | 11.7 | - |
 | `examples/snippets/feature-transports.ts` | 64.0 | 20.7 | 20.7 | - |
 | `examples/snippets/form-validation.ts` | 21.5 | 6.8 | 6.8 | - |
-| `examples/snippets/pattern-5-filament.ts` | 65.4 | 21.2 | 21.2 | - |
+| `examples/snippets/pattern-5-filament.ts` | 65.5 | 21.2 | 21.2 | - |
 | `examples/snippets/realtime-search.ts` | 23.8 | 7.5 | 7.5 | - |
 | `examples/snippets/shopping-cart.ts` | 35.4 | 11.4 | 11.4 | - |
 
@@ -115,5 +115,5 @@ sizes. Left out: `feature-vite-hmr.ts` (a Vite config that imports vite, not a b
 | variant | min KB | brotli KB |
 |---|--:|--:|
 | `vapor-chamber (full)` | 96.6 | 30.0 |
-| `vapor-chamber-core` | 69.8 | 21.8 |
-| `vapor-chamber-elements` | 72.2 | 22.6 |
+| `vapor-chamber-core` | 69.9 | 21.9 |
+| `vapor-chamber-elements` | 72.3 | 22.5 |

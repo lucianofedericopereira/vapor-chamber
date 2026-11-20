@@ -46,7 +46,7 @@ rules and steps, so each action has one place to read and one place to test.
   the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero.
 - **ESM only**, plus three IIFE `<script>` drop-ins for pages with no bundler.
 - **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes:** statements, branches, functions and
-  lines, across **<!-- vc:tests -->4952<!-- /vc:tests --> tests** in <!-- vc:testFiles -->482<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)).
+  lines, across **<!-- vc:tests -->4966<!-- /vc:tests --> tests** in <!-- vc:testFiles -->487<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)).
 
 ## Install
 

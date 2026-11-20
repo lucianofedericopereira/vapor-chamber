@@ -362,7 +362,6 @@ describe('useCommandHistory', () => {
 
 describe('useCommandGroup', () => {
   beforeEach(() => resetCommandBus());
-
   it('prefixes dispatch with namespace', ({ bus }) => {
     setCommandBus(bus);
 

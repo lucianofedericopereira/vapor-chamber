@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:1223](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1223)
+**Function** - [src/transports.ts:1226](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1226)
 
 ```ts
 createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; }
@@ -52,7 +52,7 @@ realtime.dispose();
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:1107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1107)
+**Function** - [src/transports.ts:1110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1110)
 
 ```ts
 createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; isConnected(): boolean; }
@@ -77,7 +77,7 @@ sse.dispose()
 
 ### defineTransport
 
-**Function** - [src/transports.ts:131](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L131)
+**Function** - [src/transports.ts:134](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L134)
 
 ```ts
 defineTransport(send: Transport["send"], options?: { localFallback?: boolean; }) => Transport
@@ -97,7 +97,7 @@ const bus = createAsyncCommandBus({ transport: offlineFirst })
 
 ### httpTransport
 
-**Function** - [src/transports.ts:530](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L530)
+**Function** - [src/transports.ts:533](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L533)
 
 ```ts
 httpTransport(options: HttpTransportOptions) => Transport
@@ -144,7 +144,7 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### wsTransport
 
-**Function** - [src/transports.ts:795](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L795)
+**Function** - [src/transports.ts:798](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L798)
 
 ```ts
 wsTransport(options: WsTransportOptions) => Transport & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; outbox: Outbox; }
@@ -183,7 +183,7 @@ Accepted: typeof Accepted
 
 ### BackendResponse
 
-**Type alias** - [src/transports.ts:106](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L106)
+**Type alias** - [src/transports.ts:109](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L109)
 
 ```ts
 export type BackendResponse = {
@@ -207,7 +207,7 @@ it; a single command's failure is its non-2xx response's body.
 
 ### CommandEnvelope
 
-**Type alias** - [src/transports.ts:40](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L40)
+**Type alias** - [src/transports.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L43)
 
 ```ts
 export type CommandEnvelope = {
@@ -229,7 +229,7 @@ Log s35.138, 36.47.
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:1174](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1174)
+**Type alias** - [src/transports.ts:1177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1177)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -259,7 +259,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:1163](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1163)
+**Type alias** - [src/transports.ts:1166](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1166)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -267,7 +267,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:1165](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1165)
+**Type alias** - [src/transports.ts:1168](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1168)
 
 ```ts
 export type EchoSubscription = {
@@ -282,7 +282,7 @@ export type EchoSubscription = {
 
 ### EnvelopeMeta
 
-**Type alias** - [src/transports.ts:50](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L50)
+**Type alias** - [src/transports.ts:53](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L53)
 
 ```ts
 export type EnvelopeMeta = { correlationId?: string; causationId?: string };
@@ -292,7 +292,7 @@ The part of a command's meta that crosses the wire as the command's own data.
 
 ### HttpBatchOptions
 
-**Type alias** - [src/transports.ts:477](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L477)
+**Type alias** - [src/transports.ts:480](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L480)
 
 ```ts
 export type HttpBatchOptions = {
@@ -312,7 +312,7 @@ export type HttpBatchOptions = {
 
 ### HttpTransportOptions
 
-**Type alias** - [src/transports.ts:386](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L386)
+**Type alias** - [src/transports.ts:389](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L389)
 
 ```ts
 export type HttpTransportOptions = {
@@ -409,7 +409,7 @@ export type HttpTransportOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:1060](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1060)
+**Type alias** - [src/transports.ts:1063](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1063)
 
 ```ts
 export type SseBridgeOptions = {
@@ -445,7 +445,7 @@ export type SseBridgeOptions = {
 
 ### WsTransportOptions
 
-**Type alias** - [src/transports.ts:740](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L740)
+**Type alias** - [src/transports.ts:743](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L743)
 
 ```ts
 export type WsTransportOptions = {

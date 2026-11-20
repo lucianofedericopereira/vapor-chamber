@@ -771,7 +771,7 @@ static entry that hands Vue to the library at build time.
 
 [^root-only]: The root can only look for Vue at runtime, through a bare `import('vue')`. That resolves under a dev server and fails in a production bundle. Composables imported from the root then get plain `{ value }` state with no reactivity, arm no automatic cleanup and skip the KeepAlive guard (`tests/root-only-prod-fixture.test.ts`). The library warns once, in production too, when it sees Vue running with nothing wired.
 
-[^vapor-entry]: Sizes from BUNDLE-SIZES' Vapor wiring table. The entry leaves out `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw) and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import stays in the bundle whether the app calls it or not. `configureVue({ ... })` adds either, and merges with what the entry wired.
+[^vapor-entry]: Sizes from BUNDLE-SIZES' Vapor wiring table. The entry leaves out `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.9<!-- /vc:sizeVaporCustomElementRaw --> KB raw) and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->79.4<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import stays in the bundle whether the app calls it or not. `configureVue({ ... })` adds either, and merges with what the entry wired.
 
 [^wire]: `tests/vite-wire-plugin.test.ts`. On esbuild or webpack an app imports from the subpath and adds `define: { __VC_WIRED_BUILD__: 'true' }` (`tests/root-probe-builds.test.ts`).
 
@@ -826,7 +826,7 @@ app.use(vaporInteropPlugin)
 ```
 
 A pure Vapor app does not carry the vDOM interop renderer that a mixed tree
-installs: +<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build (BUNDLE-SIZES' Vapor
+installs: +<!-- vc:sizeVaporInteropRaw -->79.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build (BUNDLE-SIZES' Vapor
 wiring table).
 
 ### 7.5 Lifecycle cleanup
@@ -1054,7 +1054,7 @@ module. **The bus owns writes (commands), and the router owns reads
 
 A pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, with no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->19.82<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->19.91<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop.[^outlet] There, a non-Vapor route component throws
 `router:invalid:component`, and blade rows still need the vDOM outlet. The full
 guide is [docs/router.md](./router.md).
@@ -1222,8 +1222,8 @@ shape**:
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> KB |
-| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->21.9<!-- /vc:sizeIifeCore --> KB |
+| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->22.5<!-- /vc:sizeIifeElements --> KB |
 | full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
@@ -1493,7 +1493,7 @@ createVaporChamberApp(App).mount('#app')
 ```
 
 Dropping `vaporInteropPlugin` drops the vDOM interop renderer,
-+<!-- vc:sizeVaporInteropRaw -->74.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build. Routes then render
++<!-- vc:sizeVaporInteropRaw -->79.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build. Routes then render
 through the Vapor outlet (8.1).
 
 ---
@@ -1885,7 +1885,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->482<!-- /vc:testFiles --> files, <!-- vc:tests -->4952<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->487<!-- /vc:testFiles --> files, <!-- vc:tests -->4966<!-- /vc:tests --> tests)
 ```
 
 | current numbers | where |
@@ -2044,7 +2044,7 @@ assumptions is what surfaced them.
 | rc.13 (Oct 23) | 43 commits, 43 in full | no code change, four tests rc.13 makes pass | 4827 + 43 | 29.5 / 21.5 / 22.2 |
 | rc.14 (Oct 30) | 30 commits, 30 in full | no code change needed, eight tests rc.14 makes pass, a module-by-module reading found two defects of ours | 4850 + 45 | 29.8 / 21.7 / 22.4 |
 | rc.15 (Nov 12) | 104 commits, 104 in full | two regressions of ours from #16108 fixed, four tests rc.15 moves, a module-by-module reading found fifteen defects of ours, and five more proved by failing tests | 4952 + 55 | 30.0 / 21.8 / 22.6 |
-| rc.16 (Nov 20) | 73 commits, 73 in full | no code change; every app root loses its parent instance, component `@vue:xxx` hooks arrive, four behaviours pinned by tests red on rc.15 | <!-- vc:testsAll -->4959 + 55<!-- /vc:testsAll --> | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> / <!-- vc:sizeIifeCore -->21.8<!-- /vc:sizeIifeCore --> / <!-- vc:sizeIifeElements -->22.6<!-- /vc:sizeIifeElements --> |
+| rc.16 (Nov 20) | 73 commits, 73 in full | no code change; every app root loses its parent instance, component `@vue:xxx` hooks arrive, four behaviours pinned by tests red on rc.15 | <!-- vc:testsAll -->4966 + 55<!-- /vc:testsAll --> | <!-- vc:sizeIifeFull -->30.0<!-- /vc:sizeIifeFull --> / <!-- vc:sizeIifeCore -->21.9<!-- /vc:sizeIifeCore --> / <!-- vc:sizeIifeElements -->22.5<!-- /vc:sizeIifeElements --> |
 
 Coverage has been 100% on all four axes since rc.6. The two test numbers are the
 two vitest projects. "Pass-through" means Vue's change lands below this
@@ -2967,10 +2967,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->19.82<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->19.91<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.26<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.25<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -4388,7 +4388,13 @@ The IIFE variants did not move. The dependency set moved to the newest
 releases its ranges admit: Vitest 5.1.1, Playwright 1.65.1, undici 8.13.0,
 Biome 2.6.8, Astro 7.4.13, the Vue 3.5 test copy 3.5.46, and
 `laravel/framework ^13.43`. The performance pass over the core, router and
-store is recorded in the log; only measured wins land.
+store is recorded in the log (36.F59.1-2): the menu projection and the loader
+template read 0.56-0.58 and 0.94 in both lengths, but every row's control
+missed the 3% gate, so all rows are recorded as no result and no speed is
+claimed. What lands is the repeated work removed and the async frames pinned
+by turn-count tests. The store's one normal-path candidate (walking only the
+subscribed fields on a write) read faster with one reader and 1.6x slower with
+nine, so it was reverted; the smaller store candidates stayed below the floor.
 
 **Still watching.**
 
