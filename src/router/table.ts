@@ -298,7 +298,9 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
 /** Map key for a static path: case-folded, at most one trailing slash, '/' kept. */
 function staticKey(path: string): string {
   const lower = path.toLowerCase();
-  return lower.length > 1 ? lower.replace(/\/$/, '') : lower;
+  const end = lower.length - 1;
+  // No regex: this runs on every resolve, and the base key is the common case.
+  return end > 0 && lower.charCodeAt(end) === 47 ? lower.slice(0, end) : lower;
 }
 
 /**

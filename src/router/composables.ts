@@ -6,7 +6,7 @@
 import { type Ref, computed, customRef, getCurrentScope, inject, onScopeDispose } from 'vue';
 import { routerError } from './errors';
 import { ROUTER_KEY } from './keys';
-import { type Breadcrumb, type MenuItem, buildBreadcrumbs, buildMenu } from './menu';
+import { type Breadcrumb, type MenuItem, _buildMenuCached, buildBreadcrumbs } from './menu';
 import type { Router } from './router-type';
 import type { QueryParamDef, RouteLocation } from './types';
 import { decodeQueryParam, encodeQueryParam, resolveQueryHistory } from './url';
@@ -132,7 +132,7 @@ export function useMenu(): { readonly value: readonly MenuItem[] } {
   const router = useRouter();
   // The path alone: a query commit (`setQuery` per keystroke) leaves the menu's array as it is.
   const path = computed(() => router.currentRoute.value.location.path);
-  return computed(() => buildMenu(router.routes.value, path.value, router.base));
+  return computed(() => _buildMenuCached(router.routes.value, path.value, router.base));
 }
 
 /**
@@ -155,10 +155,10 @@ export function onBeforeLeave(
   guard: (to: RouteLocation, from: RouteLocation) => boolean | void | Promise<boolean | void>,
 ): () => void {
   const router = useRouter();
-  const off = router.beforeEach(async (to, from) => {
-    const verdict = await guard(to, from);
-    return verdict === false ? false : undefined;
-  });
+  // The engine awaits a thenable and treats `true` as continue, so the guard
+  // is handed over as it is: wrapping it in an async function added a frame
+  // and a promise to every navigation while this guard is mounted.
+  const off = router.beforeEach(guard);
   if (getCurrentScope()) onScopeDispose(off);
   return off;
 }

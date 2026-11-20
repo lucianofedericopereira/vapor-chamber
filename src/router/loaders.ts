@@ -96,6 +96,23 @@ export type LoaderHandlers = {
   affects?: (record: TableRecord, changedKeys: readonly string[]) => boolean;
 };
 
+/** A `{placeholder}`: one or more word characters, as the old global regex matched. */
+const PLACEHOLDER = /^\w+$/;
+
+/** One placeholder's value: path params first, then typed query params. */
+function placeholderValue(key: string, location: RouteLocation, queryDefs: Record<string, QueryParamDef>): string {
+  // `Object.hasOwn`: a placeholder comes from the routes payload, and params
+  // and queryDefs are plain objects, so `{toString}` would read the
+  // inherited function. See `../dict`.
+  const param = Object.hasOwn(location.params, key) ? location.params[key] : undefined;
+  if (param !== undefined) return key === 'pathMatch' ? encodeSplat(String(param)) : encodeURIComponent(String(param));
+  const typed = decodeQueryParam(location.query[key], (Object.hasOwn(queryDefs, key) ? queryDefs[key] : undefined) ?? {});
+  if (typed === undefined || typed === null) return '';
+  return Array.isArray(typed)
+    ? typed.map((v) => encodeURIComponent(String(v))).join(',')
+    : encodeURIComponent(String(typed));
+}
+
 /** Fill `{placeholders}` from path params first, then typed query params
  *  (declared defaults apply - `{page}` is `1` when absent), else ''. */
 export function interpolateLoad(
@@ -103,18 +120,25 @@ export function interpolateLoad(
   location: RouteLocation,
   queryDefs: Record<string, QueryParamDef>,
 ): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => {
-    // `Object.hasOwn`: a placeholder comes from the routes payload, and params
-    // and queryDefs are plain objects, so `{toString}` would read the
-    // inherited function. See `../dict`.
-    const param = Object.hasOwn(location.params, key) ? location.params[key] : undefined;
-    if (param !== undefined) return key === 'pathMatch' ? encodeSplat(String(param)) : encodeURIComponent(String(param));
-    const typed = decodeQueryParam(location.query[key], (Object.hasOwn(queryDefs, key) ? queryDefs[key] : undefined) ?? {});
-    if (typed === undefined || typed === null) return '';
-    return Array.isArray(typed)
-      ? typed.map((v) => encodeURIComponent(String(v))).join(',')
-      : encodeURIComponent(String(typed));
-  });
+  // Scan rather than hand a capturing closure to String.prototype.replace: a
+  // function passed to a builtin is not inlined away (V8-RULES rule 4), and
+  // this runs once per loader read.
+  let out = '';
+  let from = 0;
+  for (;;) {
+    const open = template.indexOf('{', from);
+    if (open === -1) break;
+    const close = template.indexOf('}', open + 1);
+    if (close === -1) break;
+    const key = template.slice(open + 1, close);
+    if (!PLACEHOLDER.test(key)) {
+      from = open + 1;
+      continue;
+    }
+    out += template.slice(from, open) + placeholderValue(key, location, queryDefs);
+    from = close + 1;
+  }
+  return from === 0 ? template : out + template.slice(from);
 }
 
 /**

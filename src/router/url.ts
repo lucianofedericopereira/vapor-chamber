@@ -58,7 +58,7 @@ export function stringifyQuery(query: QueryValues | Record<string, unknown>): st
 
 function decodeQueryPart(part: string): string {
   try {
-    return decodeURIComponent(part.replace(/\+/g, ' '));
+    return decodeURIComponent(part.indexOf('+') === -1 ? part : part.replace(/\+/g, ' '));
   } catch {
     return part;
   }

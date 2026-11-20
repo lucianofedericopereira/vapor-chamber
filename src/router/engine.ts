@@ -373,7 +373,13 @@ export function createEngine(ctx: EngineContext) {
         if (entry.off) continue;
         let verdict;
         try {
-          verdict = await entry.fn(to, from);
+          const result = entry.fn(to, from);
+          // Await only a thenable: a synchronous guard's verdict costs no
+          // microtask job (V8-RULES rule 20). A redirect object is not one.
+          verdict =
+            result && typeof (result as { then?: unknown }).then === 'function'
+              ? await (result as Promise<unknown>)
+              : result;
         } catch (cause) {
           // A guard's throw is a bug in app code: its own code, not a hard
           // navigation (the server cannot fix it), the throw as its cause.

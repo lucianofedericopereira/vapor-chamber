@@ -62,6 +62,25 @@ export type Breadcrumb = {
 /** Rows flagged `meta.menu`, position-sorted, nested by nearest menued
  *  ancestor, active-stamped against `currentPath`. */
 export function buildMenu(records: readonly TableRecord[], currentPath: string, base = ''): MenuItem[] {
+  return renderMenu(menuProjection(records, false), currentPath, base);
+}
+
+/** @internal The same projection, reusing the table-derived half between
+ *  path commits. `useMenu` owns the array (router.routes), which the router
+ *  replaces on setRoutes/reload; a public caller keeps the pure builder. */
+export function _buildMenuCached(records: readonly TableRecord[], currentPath: string, base = ''): MenuItem[] {
+  return renderMenu(menuProjection(records, true), currentPath, base);
+}
+
+type MenuProjection = { childrenOf: Map<TableRecord | null, TableRecord[]> };
+
+const menuProjections = new WeakMap<readonly TableRecord[], MenuProjection>();
+
+function menuProjection(records: readonly TableRecord[], memo: boolean): MenuProjection {
+  if (memo) {
+    const hit = menuProjections.get(records);
+    if (hit !== undefined) return hit;
+  }
   const menued = records.filter((record) => record.meta.menu !== undefined);
   if (DEV) {
     for (const record of menued) {
@@ -83,7 +102,12 @@ export function buildMenu(records: readonly TableRecord[], currentPath: string, 
     if (siblings) siblings.push(record);
     else childrenOf.set(parent, [record]);
   }
+  const projection = { childrenOf };
+  if (memo) menuProjections.set(records, projection);
+  return projection;
+}
 
+function renderMenu({ childrenOf }: MenuProjection, currentPath: string, base: string): MenuItem[] {
   const build = (record: TableRecord): MenuItem => {
     const children = (childrenOf.get(record) ?? []).map(build);
     const path = record.group ? null : menuPath(record);
