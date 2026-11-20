@@ -22,7 +22,7 @@ Aligned with Vue 3.6.0-rc.16: 73 commits, every diff read. One inherited feature
 - Improved `emit` with a listener: the exact-listener bucket is read once, 0.987x / 0.976x, -3.2 / -5.5 ns per emit (Apple M3, Node 24.22.3, log 36.F59). Changed `request()` on an async bus and a WebSocket send to return their per-call promise without an async frame of their own, one microtask turn fewer each (tests/async-frame-turns.test.ts).
 - Added to manual chapter 5: `@vue:xxx` fires on components, not elements.
 - Changed the size budgets of the IIFE variants to 98,939 / 30,701, 71,563 / 22,390 and 74,012 / 23,068 raw / brotli. The performance changes grew the core by 43 raw / 23 brotli; the full and elements brotli moved down.
-- Updated the development dependencies to the newest releases their ranges admit: Vitest and its browser and coverage companions 5.1.1, Playwright 1.65.1, undici 8.13.0, Biome 2.6.8, Astro 7.4.13 in `examples/apps/exo-astro`, and the Vue 3.5 test copy 3.5.46. TypeScript stays 6 for the compiler API and `vue-tsc`, with 7.0.2 as the `tsc` binary ([docs/typescript.md](docs/typescript.md)).
+- Updated the development dependencies to the newest releases their ranges admit: Vitest and its browser and coverage companions 5.1.1, Playwright 1.65.1, undici 8.13.1, Biome 2.6.8, Astro 7.4.13 in `examples/apps/exo-astro`, and the Vue 3.5 test copy 3.5.46. TypeScript stays 6 for the compiler API and `vue-tsc`, with 7.0.2 as the `tsc` binary ([docs/typescript.md](docs/typescript.md)).
 - Changed the Composer package's requirement to `laravel/framework ^13.43`, the newest release, from `^13.42`. PHP stays `^8.3`, what Laravel 13.43 asks. Migrate: an app on Laravel 13 below 13.43 updates Laravel.
 
 ## v1.36.0 - 2026-11-13
