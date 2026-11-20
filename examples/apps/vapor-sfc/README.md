@@ -78,7 +78,7 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber through
   `"file:../../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.36.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.37.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
   aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.16<!-- /vc:vueAligned -->`, and
   the root `devDependencies.vue` owns that pin. `npm run docs:stamp`

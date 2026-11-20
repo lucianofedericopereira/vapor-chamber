@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v1.37.0 - 2026-11-20
 
 Aligned with Vue 3.6.0-rc.16: 73 commits, every diff read. One inherited feature and four behaviours pinned by tests that fail on rc.15. The performance pass over core, router and store is in log 36.F59; only `emit` counted faster, and one store change was measured and reverted.
 
