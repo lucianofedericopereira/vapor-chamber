@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 /**
  * A Vapor app mounted by code from inside another Vapor app, from a mounted hook or from a timer: the bus, the injection context and the provides it sees.
- * Why: `useCommand()` resolves the shared bus, not an injection, so a modal-style second app would reach the same bus; a second app created inside a hook takes the first app's component as its parent, so `inject` would read the first app's provides ahead of its own `app.provide`. A library that mounts a second app should create it outside a hook, or pass what it needs with `app.provide`.
- * Shows: from either place the second app has an injection context and dispatches on the shared bus, and its unmount releases the handler; from a timer `inject` returns the missing default or the app's own provide; from a hook it returns the first app's value even when the second app provides its own.
- * See: vuejs/core#13687, log s36.F43
+ * Why: `useCommand()` resolves the shared bus, not an injection, so a modal-style second app would reach the same bus. Before rc.16 a second app created inside a hook took the first app's component as its parent, so `inject` read the first app's provides ahead of its own `app.provide`. rc.16 creates every app root without a parent instance (vuejs/core#16325), as it already did from a timer.
+ * Shows: from either place the second app has an injection context and dispatches on the shared bus, and its unmount releases the handler; from a hook, as from a timer, `inject` returns the missing default or the app's own provide, never the first app's. A setup that threw leaves no current instance behind for the next app.
+ * See: vuejs/core#13687, vuejs/core#16325, log s36.F43, log 36.F59
  */
 
 import { afterEach, beforeAll, expect, it } from 'vitest';
@@ -93,7 +93,46 @@ it('from a timer the second app has its own provides: none, or the ones it was g
   expect((await secondApp('later', true)).seen.inject).toBe('two');
 });
 
-it('from a mounted hook the second app sees the first app\'s provides, over its own', async () => {
-  expect((await secondApp('in-hook', false)).seen.inject).toBe('one');
-  expect((await secondApp('in-hook', true)).seen.inject).toBe('one');
+it('from a mounted hook the second app has its own provides, as it does from a timer', async () => {
+  expect((await secondApp('in-hook', false)).seen.inject).toBe('MISSING');
+  expect((await secondApp('in-hook', true)).seen.inject).toBe('two');
+});
+
+it('a setup that threw leaves no current instance for the next app root to inherit', async () => {
+  setCommandBus(createCommandBus());
+  const made = {} as { seen?: unknown };
+
+  const Boom = v.defineVaporComponent({
+    setup() {
+      throw new Error('boom');
+    },
+  });
+  const firstHost = document.createElement('div');
+  document.body.append(firstHost);
+  const first = v.createVaporApp(Boom);
+  first.provide('k', 'one');
+  // No errorHandler: dev rethrows out of the mount, which is where the leak was.
+  expect(() => first.mount(firstHost)).toThrow('boom');
+  try {
+    first.unmount();
+  } catch {
+    // a root that never mounted has nothing to unmount
+  }
+
+  const Second = v.defineVaporComponent({
+    setup() {
+      made.seen = v.inject('k', 'MISSING');
+      return v.template('<i>second</i>', true)();
+    },
+  });
+  const secondHost = document.createElement('div');
+  document.body.append(secondHost);
+  const second = v.createVaporApp(Second);
+  second.provide('k', 'two');
+  second.mount(secondHost);
+  expect(made.seen).toBe('two');
+
+  second.unmount();
+  firstHost.remove();
+  secondHost.remove();
 });
