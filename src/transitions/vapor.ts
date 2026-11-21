@@ -168,7 +168,7 @@ export const VcTransition = defineVaporComponent({
 
     // After the flush that inserts the content, so the handlers get the element.
     const enter = (mine: number) =>
-      nextTick(() => {
+      nextTick().then(() => {
         if (mine !== token) return;
         const el = elementOf(content);
         send(aBeforeEnter, el);
@@ -192,7 +192,9 @@ export const VcTransition = defineVaporComponent({
           step(aLeave, 'LeaveCancelled', el, () => {
             present.value = false;
             // After the flush that removes it.
-            nextTick(() => mine === token && send(aAfterLeave, el));
+            nextTick().then(() => {
+              if (mine === token) send(aAfterLeave, el);
+            });
           });
         }
       },
