@@ -137,6 +137,17 @@ export default defineConfig({
       //    counted toward the library's thresholds. The gate measures what
       //    ships in dist/, nothing else.
       //  - index.ts / plugins.ts: pure re-export aggregators
+      //  - router/types.ts / router/router-type.ts: type-only modules. Their
+      //    whole body is erased by the compiler, so V8 has no statement,
+      //    branch, function or line to count. Leaving them in produced a
+      //    0/0 row that the HTML report rendered as 0% on all four axes while
+      //    the summary called it 100% - the exact phantom the gate exists to
+      //    avoid. They ship only in the `.d.ts` files.
+      //  - router/vdom.ts: a pure re-export barrel for outlet.ts + blade.ts
+      //    (the same category as index.ts / plugins.ts). Importing it adds no
+      //    executable statement of its own, so the module instrumented as 0/0
+      //    even when a test imported it; the two modules it re-exports are
+      //    measured directly.
       //  - iife*.ts: thin namespace builders for `<script>` tag use; the
       //    underlying surface is covered via the regular test files
       //  (vite-hmr.ts is measured, not excluded. "Vite plugin code that
@@ -177,6 +188,9 @@ export default defineConfig({
         'src/iife-core.ts',
         'src/iife-elements.ts',
         'src/testing.ts',
+        'src/router/types.ts',
+        'src/router/router-type.ts',
+        'src/router/vdom.ts',
         'src/router/vapor.ts',
         'src/transitions/vapor.ts',
       ],
