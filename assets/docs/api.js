@@ -451,7 +451,11 @@
 
   function fetchPage(name) {
     if (cache[name]) return cache[name];
-    cache[name] = fetch(SOURCE + '/' + name + '.md').then(function (res) {
+    // Revalidate the Markdown with the server instead of trusting a fresh
+    // browser copy: GitHub Pages sends `cache-control: max-age=600`, so a
+    // release deployed inside that window showed the previous version until
+    // the entry expired. An unchanged page answers 304.
+    cache[name] = fetch(SOURCE + '/' + name + '.md', { cache: 'no-cache' }).then(function (res) {
       if (!res.ok) throw new Error(res.status + ' ' + name);
       return res.text();
     });
